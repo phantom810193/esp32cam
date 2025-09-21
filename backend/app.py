@@ -4,9 +4,12 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Tuple
+
 from flask import Flask, jsonify, render_template, request, url_for
 
 from .advertising import build_ad_context
+from .ai import GeminiService, GeminiUnavailableError
 from .database import Database
 from .recognizer import FaceRecognizer
 
@@ -19,7 +22,8 @@ DB_PATH = DATA_DIR / "mvp.sqlite3"
 app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
 app.config["JSON_AS_ASCII"] = False
 
-recognizer = FaceRecognizer()
+gemini = GeminiService()
+recognizer = FaceRecognizer(gemini)
 database = Database(DB_PATH)
 database.ensure_demo_data()
 
@@ -34,19 +38,19 @@ def upload_face():
     """Receive an image from the ESP32-CAM and return the member identifier."""
 
     try:
-        image_bytes = _extract_image_bytes(request)
+        image_bytes, mime_type = _extract_image_payload(request)
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
 
     try:
-        encoding = recognizer.encode(image_bytes)
+        encoding = recognizer.encode(image_bytes, mime_type=mime_type)
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 422
 
     member_id, distance = database.find_member_by_encoding(encoding, recognizer)
     new_member = False
     if member_id is None:
-        member_id = database.create_member(encoding)
+        member_id = database.create_member(encoding, recognizer.derive_member_id(encoding))
         _create_welcome_purchase(member_id)
         new_member = True
 
@@ -64,7 +68,24 @@ def upload_face():
 @app.get("/ad/<member_id>")
 def render_ad(member_id: str):
     purchases = database.get_purchase_history(member_id)
-    context = build_ad_context(member_id, purchases)
+    creative = None
+    if gemini.can_generate_ads:
+        try:
+            creative = gemini.generate_ad_copy(
+                member_id,
+                [
+                    {
+                        "item": purchase.item,
+                        "last_purchase": purchase.last_purchase,
+                        "discount": purchase.discount,
+                        "recommendation": purchase.recommendation,
+                    }
+                    for purchase in purchases
+                ],
+            )
+        except GeminiUnavailableError as exc:
+            logging.warning("Gemini ad generation unavailable: %s", exc)
+    context = build_ad_context(member_id, purchases, creative=creative)
     return render_template("ad.html", context=context)
 
 
@@ -76,17 +97,18 @@ def health_check():
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-def _extract_image_bytes(req) -> bytes:
+def _extract_image_payload(req) -> Tuple[bytes, str]:
     if req.files:
         for key in ("image", "file", "photo"):
             if key in req.files:
-                data = req.files[key].read()
+                uploaded = req.files[key]
+                data = uploaded.read()
                 if data:
-                    return data
+                    return data, uploaded.mimetype or req.mimetype or "image/jpeg"
     data = req.get_data()
     if not data:
         raise ValueError("No image data found in request")
-    return data
+    return data, req.mimetype or "image/jpeg"
 
 
 def _create_welcome_purchase(member_id: str) -> None:
@@ -96,7 +118,7 @@ def _create_welcome_purchase(member_id: str) -> None:
         "歡迎禮盒",
         now,
         0.2,
-        "新朋友限定：即刻購買咖啡豆 + 牛奶組合享 8 折！",
+        "AI 精選：咖啡豆 x 手工甜點組，今天下單享 8 折！",
     )
 
 

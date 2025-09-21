@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+from .ai import AdCreative
 from .database import Purchase
 
 
@@ -16,9 +17,15 @@ class AdContext:
     purchases: list[Purchase]
 
 
-def build_ad_context(member_id: str, purchases: Iterable[Purchase]) -> AdContext:
+def build_ad_context(
+    member_id: str, purchases: Iterable[Purchase], creative: AdCreative | None = None
+) -> AdContext:
     purchases = list(purchases)
-    if purchases:
+    if creative:
+        headline = creative.headline or f"會員 {member_id}，歡迎回來！"
+        subheading = creative.subheading or "專屬優惠馬上開啟"
+        highlight = creative.highlight or "今日限定：全店指定品項 85 折"
+    elif purchases:
         latest = purchases[0]
         headline = f"會員 {member_id}，歡迎回來！"
         discount = int(latest.discount * 100)

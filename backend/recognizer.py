@@ -1,95 +1,98 @@
-"""Face recognition utilities for the ESP32-CAM MVP backend."""
+"""Face recognition utilities that leverage Gemini Vision for cloud IDs."""
 from __future__ import annotations
 
 import hashlib
-import io
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
-try:  # pragma: no cover - optional dependency
-    import face_recognition  # type: ignore
-except Exception:  # pragma: no cover - gracefully degrade when dlib is missing
-    face_recognition = None  # type: ignore
+from .ai import GeminiService, GeminiUnavailableError
 
 _LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
 class FaceEncoding:
-    """Simple wrapper for an encoding vector.
-
-    Storing the data in a dataclass makes it easy to (de-)serialise to and from the
-    SQLite database while keeping the recognition specific logic inside this module.
-    """
+    """Container for the anonymised face signature."""
 
     vector: np.ndarray
+    signature: str
+    source: str = "hash"
 
-    def to_jsonable(self) -> list[float]:
-        return self.vector.astype(float).tolist()
+    def to_jsonable(self) -> dict[str, object]:
+        return {
+            "vector": self.vector.astype(float).tolist(),
+            "signature": self.signature,
+            "source": self.source,
+        }
 
     @classmethod
-    def from_jsonable(cls, data: list[float]) -> "FaceEncoding":
-        return cls(np.asarray(data, dtype=np.float32))
+    def from_jsonable(cls, data: Any) -> "FaceEncoding":
+        if isinstance(data, list):  # legacy format (vector only)
+            vector = np.asarray(data, dtype=np.float32)
+            return cls(vector=vector, signature="", source="legacy")
+        if isinstance(data, dict):
+            vector = np.asarray(data.get("vector", []), dtype=np.float32)
+            signature = str(data.get("signature", ""))
+            source = str(data.get("source", "")) or "hash"
+            return cls(vector=vector, signature=signature, source=source)
+        raise TypeError(f"Unsupported encoding payload: {type(data)!r}")
 
 
 class FaceRecognizer:
-    """Encapsulates face encoding logic with a graceful fallback.
+    """Encapsulates the logic used to anonymise and match members."""
 
-    When the optional :mod:`face_recognition` dependency (which bundles dlib) is
-    available we use it to generate true facial embeddings.  Otherwise, we fall back
-    to a deterministic hash of the input image.  While the hash based approach does
-    not provide real biometric guarantees it keeps the end-to-end flow working on
-    devices where dlib is not installed, which is convenient for development and
-    automated tests.
-    """
-
-    def __init__(self, tolerance: float = 0.45) -> None:
+    def __init__(self, gemini: GeminiService | None = None, tolerance: float = 0.32) -> None:
+        self._gemini = gemini
         self.tolerance = tolerance
-        self._has_face_recognition = face_recognition is not None
-        if self._has_face_recognition:
-            _LOGGER.info("Using dlib/face_recognition backend for embeddings")
-        else:
-            _LOGGER.warning(
-                "face_recognition (dlib) is not available. Falling back to a hash-based"
-                " pseudo encoder. Install face_recognition for production deployments."
-            )
 
-    def encode(self, image_bytes: bytes) -> FaceEncoding:
-        if self._has_face_recognition:
-            return self._encode_with_face_recognition(image_bytes)
-        return self._encode_with_hash(image_bytes)
+    def encode(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> FaceEncoding:
+        signature = ""
+        source = "hash"
+        if self._gemini and self._gemini.can_describe_faces:
+            try:
+                signature = self._gemini.describe_face(image_bytes, mime_type)
+                source = "gemini"
+            except GeminiUnavailableError as exc:
+                _LOGGER.warning("Gemini Vision unavailable, falling back to hash: %s", exc)
 
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-    def _encode_with_face_recognition(self, image_bytes: bytes) -> FaceEncoding:
-        assert face_recognition is not None  # for the type-checker
-        image = face_recognition.load_image_file(io.BytesIO(image_bytes))
-        encodings = face_recognition.face_encodings(image)
-        if not encodings:
-            raise ValueError("No faces detected in the uploaded image")
-        return FaceEncoding(np.asarray(encodings[0], dtype=np.float32))
+        if not signature:
+            signature = self._hash_signature(image_bytes)
+            source = "hash"
 
-    def _encode_with_hash(self, image_bytes: bytes) -> FaceEncoding:
-        digest = hashlib.sha256(image_bytes).digest()
-        # Repeat the digest to create a 128-dim pseudo embedding similar to dlib's size.
-        repeated = (digest * ((128 // len(digest)) + 1))[:128]
-        vector = np.frombuffer(repeated, dtype=np.uint8).astype(np.float32)
-        # Normalise to [0, 1] to roughly match the magnitude of a real encoding.
-        vector /= 255.0
-        return FaceEncoding(vector)
+        vector = self._vector_from_signature(signature)
+        return FaceEncoding(vector=vector, signature=signature, source=source)
 
     # ------------------------------------------------------------------
-    # Comparison helpers
-    # ------------------------------------------------------------------
+    def derive_member_id(self, encoding: FaceEncoding) -> str:
+        base = encoding.signature or self._hash_signature(encoding.vector.tobytes())
+        digest = hashlib.sha1(base.encode("utf-8")).hexdigest().upper()
+        return f"MEM{digest[:10]}"
+
     def distance(self, a: FaceEncoding, b: FaceEncoding) -> float:
+        if a.vector.shape != b.vector.shape:
+            return float("inf")
         return float(np.linalg.norm(a.vector - b.vector))
 
     def is_match(self, known: FaceEncoding, candidate: FaceEncoding) -> bool:
-        if self._has_face_recognition:
-            return self.distance(known, candidate) <= self.tolerance
-        # When running in hash mode we expect identical vectors.
-        return bool(np.array_equal(known.vector, candidate.vector))
+        if known.signature and candidate.signature:
+            return known.signature == candidate.signature
+        return self.distance(known, candidate) <= self.tolerance
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _hash_signature(payload: bytes | str) -> str:
+        if isinstance(payload, str):
+            payload = payload.encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+    @staticmethod
+    def _vector_from_signature(signature: str) -> np.ndarray:
+        digest = hashlib.sha256(signature.encode("utf-8")).digest()
+        repeated = (digest * ((128 // len(digest)) + 1))[:128]
+        vector = np.frombuffer(repeated, dtype=np.uint8).astype(np.float32)
+        vector /= 255.0
+        return vector
 

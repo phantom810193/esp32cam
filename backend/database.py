@@ -1,6 +1,7 @@
 """SQLite helper utilities for the ESP32-CAM MVP backend."""
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import sqlite3
@@ -71,6 +72,8 @@ class Database:
         with self._connect() as conn:
             for row in conn.execute("SELECT member_id, encoding_json FROM members"):
                 stored = FaceEncoding.from_jsonable(json.loads(row["encoding_json"]))
+                if stored.signature and stored.signature == encoding.signature:
+                    return row["member_id"], 0.0
                 distance = recognizer.distance(stored, encoding)
                 if recognizer.is_match(stored, encoding):
                     if best_distance is None or distance < best_distance:
@@ -78,18 +81,22 @@ class Database:
                         best_distance = distance
         return best_member, best_distance
 
-    def create_member(self, encoding: FaceEncoding) -> str:
-        member_id = self._generate_member_id()
+    def create_member(self, encoding: FaceEncoding, member_id: str | None = None) -> str:
+        member_id = member_id or self._generate_member_id(encoding)
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO members (member_id, encoding_json) VALUES (?, ?)",
-                (member_id, json.dumps(encoding.to_jsonable())),
+                (member_id, json.dumps(encoding.to_jsonable(), ensure_ascii=False)),
             )
             conn.commit()
         _LOGGER.info("Created new member %s", member_id)
         return member_id
 
-    def _generate_member_id(self) -> str:
+    def _generate_member_id(self, encoding: FaceEncoding | None = None) -> str:
+        if encoding and encoding.signature:
+            hashed = hashlib.sha1(encoding.signature.encode("utf-8")).hexdigest().upper()
+            return f"MEM{hashed[:10]}"
+
         with self._connect() as conn:
             total_members = conn.execute("SELECT COUNT(*) FROM members").fetchone()[0]
         return f"MEM{total_members + 1:03d}"
@@ -140,11 +147,14 @@ class Database:
         if not has_members:
             # Create a synthetic member using a deterministic encoding so it works both
             # with real and hash based recognition.
-            from .recognizer import FaceEncoding
             import numpy as np
 
-            encoding = FaceEncoding(np.zeros(128, dtype=np.float32))
-            demo_member = self.create_member(encoding)
+            encoding = FaceEncoding(
+                np.zeros(128, dtype=np.float32),
+                signature="demo-member",
+                source="seed",
+            )
+            demo_member = self.create_member(encoding, member_id="MEMDEMO001")
         else:
             with self._connect() as conn:
                 demo_member = conn.execute(
