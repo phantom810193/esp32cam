@@ -46,10 +46,48 @@
       </ul>
       <p>建議工作流程：</p>
       <ol>
-        <li>設定 ESP32-CAM 透過 Wi-Fi 拍照並呼叫 <code>/upload_face</code>。</li>
-        <li>在電視棒或電腦瀏覽器固定播放 <code>/ad/&lt;member_id&gt;</code> 頁面。</li>
+        <li>設定 ESP32-CAM 透過 Wi-Fi 拍照並呼叫 <code>http://&lt;server-ip&gt;:5000/upload_face</code>。</li>
+        <li>在電視棒或電腦瀏覽器固定播放 <code>http://&lt;server-ip&gt;:5000/ad/&lt;member_id&gt;</code> 頁面。</li>
         <li>當新的臉孔被辨識後，廣告頁會自動刷新。</li>
       </ol>
+      <h2>手動上傳測試</h2>
+      <p>沒有硬體也能直接在這裡測試 API，選擇一張臉部照片即可：</p>
+      <form id="upload-form">
+        <input type="file" id="photo" name="image" accept="image/*" required />
+        <button type="submit">上傳並辨識</button>
+      </form>
+      <pre
+        id="upload-result"
+        style="margin-top: 1.5rem; background: #e2e8f0; padding: 1rem; border-radius: 0.75rem; overflow-x: auto; display: none"
+      ></pre>
     </div>
+    <script>
+      const form = document.getElementById("upload-form");
+      const result = document.getElementById("upload-result");
+      form?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const fileInput = document.getElementById("photo");
+        if (!(fileInput instanceof HTMLInputElement) || !fileInput.files?.length) {
+          return;
+        }
+        const formData = new FormData();
+        formData.append("image", fileInput.files[0]);
+        result.style.display = "block";
+        result.textContent = "上傳中...";
+        try {
+          const response = await fetch("/upload_face", {
+            method: "POST",
+            body: formData,
+          });
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data.message || `HTTP ${response.status}`);
+          }
+          result.textContent = JSON.stringify(data, null, 2);
+        } catch (error) {
+          result.textContent = `上傳失敗：${error}`;
+        }
+      });
+    </script>
   </body>
 </html>

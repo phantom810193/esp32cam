@@ -1,4 +1,4 @@
-"""Face recognition utilities that leverage Gemini Vision for cloud IDs."""
+"""Face recognition utilities backed by Google Vision or hashing fallbacks."""
 from __future__ import annotations
 
 import hashlib
@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from .ai import GeminiService, GeminiUnavailableError
+from .vision import VisionService, VisionUnavailableError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,13 +20,17 @@ class FaceEncoding:
     vector: np.ndarray
     signature: str
     source: str = "hash"
+    metadata: dict[str, object] | None = None
 
     def to_jsonable(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "vector": self.vector.astype(float).tolist(),
             "signature": self.signature,
             "source": self.source,
         }
+        if self.metadata:
+            payload["metadata"] = self.metadata
+        return payload
 
     @classmethod
     def from_jsonable(cls, data: Any) -> "FaceEncoding":
@@ -37,33 +41,44 @@ class FaceEncoding:
             vector = np.asarray(data.get("vector", []), dtype=np.float32)
             signature = str(data.get("signature", ""))
             source = str(data.get("source", "")) or "hash"
-            return cls(vector=vector, signature=signature, source=source)
+            metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else None
+            return cls(vector=vector, signature=signature, source=source, metadata=metadata)
         raise TypeError(f"Unsupported encoding payload: {type(data)!r}")
 
 
 class FaceRecognizer:
     """Encapsulates the logic used to anonymise and match members."""
 
-    def __init__(self, gemini: GeminiService | None = None, tolerance: float = 0.32) -> None:
-        self._gemini = gemini
+    def __init__(self, *, vision: VisionService | None = None, tolerance: float = 0.32) -> None:
+        self._vision = vision
         self.tolerance = tolerance
 
     def encode(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> FaceEncoding:
         signature = ""
         source = "hash"
-        if self._gemini and self._gemini.can_describe_faces:
+        metadata: dict[str, object] | None = None
+        if self._vision and self._vision.enabled:
             try:
-                signature = self._gemini.describe_face(image_bytes, mime_type)
-                source = "gemini"
-            except GeminiUnavailableError as exc:
-                _LOGGER.warning("Gemini Vision unavailable, falling back to hash: %s", exc)
+                face = self._vision.describe_face(image_bytes)
+                signature = face.signature
+                source = "vision"
+                metadata = {
+                    "vision": {
+                        "landmarks": face.landmarks,
+                        "bounding_box": face.bounding_box,
+                    }
+                }
+            except VisionUnavailableError as exc:
+                _LOGGER.warning("Vision service unavailable, falling back to hash: %s", exc)
+            except ValueError:
+                raise
 
         if not signature:
             signature = self._hash_signature(image_bytes)
             source = "hash"
 
         vector = self._vector_from_signature(signature)
-        return FaceEncoding(vector=vector, signature=signature, source=source)
+        return FaceEncoding(vector=vector, signature=signature, source=source, metadata=metadata)
 
     # ------------------------------------------------------------------
     def derive_member_id(self, encoding: FaceEncoding) -> str:
