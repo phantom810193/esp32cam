@@ -141,6 +141,11 @@ static bool tryConnectToConfiguredNetworks();
 static bool connectToNetwork(const WifiCredential &credential);
 static CaptureResult captureAndSend();
 static bool detectFace(const camera_fb_t *fb);
+static bool loadStaticIpConfig(IPAddress *local_ip, IPAddress *gateway, IPAddress *subnet,
+                               IPAddress *primary_dns, bool *has_primary_dns,
+                               IPAddress *secondary_dns, bool *has_secondary_dns);
+static bool applyStaticIpConfiguration();
+static void configureWifiManagerStaticIp();
 
 void setup() {
   Serial.begin(115200);
@@ -149,6 +154,7 @@ void setup() {
 
   WiFi.mode(WIFI_STA);
   wifiManager.setConfigPortalTimeout(kConfigPortalTimeoutSeconds);
+  configureWifiManagerStaticIp();
 
   if (!initCamera()) {
     Serial.println("Camera init failed, halting.");
@@ -262,6 +268,23 @@ static bool tryConnectToConfiguredNetworks() {
 
 static bool connectToNetwork(const WifiCredential &credential) {
   Serial.printf("Connecting to Wi-Fi %s...\n", credential.ssid);
+  WiFi.disconnect(true);
+  delay(100);
+
+#if defined(STATIC_IP_ADDRESS) && defined(STATIC_GATEWAY) && defined(STATIC_SUBNET)
+  static bool logged_dhcp_fallback = false;
+  if (!applyStaticIpConfiguration()) {
+    if (!logged_dhcp_fallback) {
+      Serial.println(
+          "Static IP configuration missing or invalid; falling back to DHCP.");
+      logged_dhcp_fallback = true;
+    }
+    WiFi.config(IPAddress(), IPAddress(), IPAddress());
+  }
+#else
+  WiFi.config(IPAddress(), IPAddress(), IPAddress());
+#endif
+
   WiFi.begin(credential.ssid, credential.password);
 
   uint8_t retries = 0;
@@ -326,6 +349,155 @@ cleanup:
   esp_camera_fb_return(fb);
   return result;
 }
+
+#if defined(STATIC_IP_ADDRESS) && defined(STATIC_GATEWAY) && defined(STATIC_SUBNET)
+static bool loadStaticIpConfig(IPAddress *local_ip, IPAddress *gateway, IPAddress *subnet,
+                               IPAddress *primary_dns, bool *has_primary_dns,
+                               IPAddress *secondary_dns, bool *has_secondary_dns) {
+  static bool logged_invalid_core = false;
+  static bool logged_primary_warning = false;
+  static bool logged_secondary_warning = false;
+
+  if (has_primary_dns) {
+    *has_primary_dns = false;
+  }
+  if (has_secondary_dns) {
+    *has_secondary_dns = false;
+  }
+
+  if (STATIC_IP_ADDRESS[0] == '\0' || STATIC_GATEWAY[0] == '\0' ||
+      STATIC_SUBNET[0] == '\0') {
+    return false;
+  }
+
+  if (!local_ip->fromString(STATIC_IP_ADDRESS) ||
+      !gateway->fromString(STATIC_GATEWAY) ||
+      !subnet->fromString(STATIC_SUBNET)) {
+    if (!logged_invalid_core) {
+      Serial.println(
+          "Static IP core settings invalid; check STATIC_IP_ADDRESS, STATIC_GATEWAY, and STATIC_SUBNET.");
+      logged_invalid_core = true;
+    }
+    return false;
+  }
+
+#if defined(STATIC_PRIMARY_DNS)
+  if (primary_dns && STATIC_PRIMARY_DNS[0] != '\0') {
+    if (primary_dns->fromString(STATIC_PRIMARY_DNS)) {
+      if (has_primary_dns) {
+        *has_primary_dns = true;
+      }
+    } else if (!logged_primary_warning) {
+      Serial.printf("Failed to parse STATIC_PRIMARY_DNS (%s); ignoring.\n",
+                    STATIC_PRIMARY_DNS);
+      logged_primary_warning = true;
+    }
+  }
+#else
+  (void)primary_dns;
+#endif
+
+#if defined(STATIC_SECONDARY_DNS)
+  if (secondary_dns && STATIC_SECONDARY_DNS[0] != '\0') {
+    if (secondary_dns->fromString(STATIC_SECONDARY_DNS)) {
+      if (has_secondary_dns) {
+        *has_secondary_dns = true;
+      }
+    } else if (!logged_secondary_warning) {
+      Serial.printf(
+          "Failed to parse STATIC_SECONDARY_DNS (%s); ignoring.\n",
+          STATIC_SECONDARY_DNS);
+      logged_secondary_warning = true;
+    }
+  }
+#else
+  (void)secondary_dns;
+#endif
+
+  return true;
+}
+
+static bool applyStaticIpConfiguration() {
+  IPAddress local_ip;
+  IPAddress gateway;
+  IPAddress subnet;
+  IPAddress primary_dns;
+  IPAddress secondary_dns;
+  bool has_primary_dns = false;
+  bool has_secondary_dns = false;
+
+  if (!loadStaticIpConfig(&local_ip, &gateway, &subnet, &primary_dns,
+                          &has_primary_dns, &secondary_dns,
+                          &has_secondary_dns)) {
+    return false;
+  }
+
+  bool configured = false;
+  if (has_primary_dns && has_secondary_dns) {
+    configured = WiFi.config(local_ip, gateway, subnet, primary_dns,
+                             secondary_dns);
+  } else if (has_primary_dns) {
+    configured = WiFi.config(local_ip, gateway, subnet, primary_dns);
+  } else {
+    configured = WiFi.config(local_ip, gateway, subnet);
+  }
+
+  if (!configured) {
+    Serial.println("Failed to apply static IP configuration.");
+    return false;
+  }
+
+  Serial.print("Using static IP: ");
+  Serial.println(local_ip);
+  return true;
+}
+
+static void configureWifiManagerStaticIp() {
+  IPAddress local_ip;
+  IPAddress gateway;
+  IPAddress subnet;
+  IPAddress primary_dns;
+  IPAddress secondary_dns;
+  bool has_primary_dns = false;
+  bool has_secondary_dns = false;
+
+  if (!loadStaticIpConfig(&local_ip, &gateway, &subnet, &primary_dns,
+                          &has_primary_dns, &secondary_dns,
+                          &has_secondary_dns)) {
+    return;
+  }
+
+  if (has_primary_dns && has_secondary_dns) {
+    wifiManager.setSTAStaticIPConfig(local_ip, gateway, subnet, primary_dns,
+                                     secondary_dns);
+  } else if (has_primary_dns) {
+    wifiManager.setSTAStaticIPConfig(local_ip, gateway, subnet, primary_dns);
+  } else {
+    wifiManager.setSTAStaticIPConfig(local_ip, gateway, subnet);
+  }
+  Serial.print("Configured WiFiManager static IP: ");
+  Serial.println(local_ip);
+}
+#else
+static bool loadStaticIpConfig(IPAddress *local_ip, IPAddress *gateway, IPAddress *subnet,
+                               IPAddress *primary_dns, bool *has_primary_dns,
+                               IPAddress *secondary_dns, bool *has_secondary_dns) {
+  (void)local_ip;
+  (void)gateway;
+  (void)subnet;
+  (void)primary_dns;
+  (void)has_primary_dns;
+  (void)secondary_dns;
+  (void)has_secondary_dns;
+  return false;
+}
+
+static bool applyStaticIpConfiguration() {
+  return false;
+}
+
+static void configureWifiManagerStaticIp() {}
+#endif
 
 #if HAS_FACE_DETECTION
 static bool detectFace(const camera_fb_t *fb) {

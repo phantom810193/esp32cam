@@ -100,7 +100,8 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
    cp firmware/esp32cam_mvp/include/secrets_template.h firmware/esp32cam_mvp/include/secrets.h
    ```
 
-   編輯 `secrets.h`，填入 Wi-Fi SSID/Password 以及雲端 Flask `/upload_face` 的 HTTPS URL。
+   編輯 `secrets.h`，填入 Wi-Fi SSID/Password、固定的 `STATIC_IP_ADDRESS`（搭配 Gateway/Subnet/DNS）
+   以及雲端 Flask `/upload_face` 的 HTTP(S) URL；若要改回 DHCP，可將 Static IP 相關欄位留空字串。
 
 3. 使用 USB-TTL 連線並上傳：
 
