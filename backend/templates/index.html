@@ -29,6 +29,20 @@
         box-shadow: 0 10px 20px rgba(15, 23, 42, 0.1);
         max-width: 60rem;
       }
+      .device-card {
+        margin-top: 1.5rem;
+        border-left: 4px solid #2563eb;
+      }
+      .device-card h2 {
+        margin-top: 0;
+      }
+      .device-card a {
+        color: #2563eb;
+        text-decoration: none;
+      }
+      .device-card a:hover {
+        text-decoration: underline;
+      }
     </style>
   </head>
   <body>
@@ -51,5 +65,21 @@
         <li>當新的臉孔被辨識後，廣告頁會自動刷新。</li>
       </ol>
     </div>
+    {% if last_uploader_ip %}
+    <div class="card device-card">
+      <h2>最近上傳的裝置</h2>
+      <p>
+        IP 位址：<code>{{ last_uploader_ip }}</code>
+      </p>
+      {% if camera_stream_url %}
+      <p>
+        即時影像：
+        <a href="{{ camera_stream_url }}" target="_blank" rel="noopener"
+          >{{ camera_stream_url }}</a
+        >
+      </p>
+      {% endif %}
+    </div>
+    {% endif %}
   </body>
 </html>

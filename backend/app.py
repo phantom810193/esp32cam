@@ -28,14 +28,27 @@ database = Database(DB_PATH)
 database.ensure_demo_data()
 
 
+last_uploader_ip: str | None = None
+
+
 @app.get("/")
 def index() -> str:
-    return render_template("index.html")
+    ip_address = last_uploader_ip
+    stream_url = _build_stream_url(ip_address) if ip_address else None
+    return render_template(
+        "index.html",
+        last_uploader_ip=ip_address,
+        camera_stream_url=stream_url,
+    )
 
 
 @app.post("/upload_face")
 def upload_face():
     """Receive an image from the ESP32-CAM and return the member identifier."""
+
+    global last_uploader_ip
+
+    uploader_ip = _extract_client_ip(request)
 
     try:
         image_bytes, mime_type = _extract_image_payload(request)
@@ -62,6 +75,10 @@ def upload_face():
     }
     if distance is not None:
         payload["distance"] = distance
+
+    if uploader_ip:
+        last_uploader_ip = uploader_ip
+
     return jsonify(payload), 201 if new_member else 200
 
 
@@ -109,6 +126,34 @@ def _extract_image_payload(req) -> Tuple[bytes, str]:
     if not data:
         raise ValueError("No image data found in request")
     return data, req.mimetype or "image/jpeg"
+
+
+def _extract_client_ip(req) -> str | None:
+    forwarded_for = req.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        primary = forwarded_for.split(",")[0].strip()
+        if primary:
+            return primary
+
+    real_ip = req.headers.get("X-Real-IP")
+    if real_ip:
+        return real_ip.strip() or None
+
+    return req.remote_addr
+
+
+def _build_stream_url(ip_address: str | None) -> str | None:
+    if not ip_address:
+        return None
+
+    cleaned = ip_address.strip()
+    if not cleaned:
+        return None
+
+    if ":" in cleaned and not cleaned.startswith("["):
+        return f"http://[{cleaned}]:81/stream"
+
+    return f"http://{cleaned}:81/stream"
 
 
 def _create_welcome_purchase(member_id: str) -> None:
