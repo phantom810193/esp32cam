@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.sqlite3
+*.db
+backend/data/*.db
+backend/data/*.sqlite
+backend/data/*.sqlite3
+backend/data/encodings/*.json
+firmware/esp32cam_mvp/include/secrets.h
+.vscode/
+.idea/
+.DS_Store
+
+.venv/

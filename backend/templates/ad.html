@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <title>智慧零售廣告看板</title>
+    <meta http-equiv="refresh" content="5" />
+    <style>
+      body {
+        margin: 0;
+        font-family: "Noto Sans TC", "PingFang TC", sans-serif;
+        background: radial-gradient(circle at top, #fef3c7, #f8fafc);
+        color: #111827;
+      }
+      .banner {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+        text-align: center;
+        padding: 3rem 2rem;
+      }
+      h1 {
+        font-size: 3rem;
+        margin-bottom: 0.75rem;
+        color: #1d4ed8;
+      }
+      .subheading {
+        font-size: 1.5rem;
+        margin-bottom: 2rem;
+        color: #334155;
+        white-space: pre-line;
+      }
+      .highlight {
+        background: #ef4444;
+        color: white;
+        padding: 1.25rem 2rem;
+        border-radius: 1.5rem;
+        font-size: 1.75rem;
+        font-weight: 600;
+        box-shadow: 0 10px 30px rgba(239, 68, 68, 0.35);
+        max-width: 60rem;
+        white-space: pre-line;
+      }
+      .history {
+        margin-top: 3rem;
+        max-width: 70rem;
+        width: 100%;
+      }
+      .history h2 {
+        margin-bottom: 1rem;
+        font-size: 1.75rem;
+        color: #0f172a;
+      }
+      .history ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+        gap: 1rem;
+      }
+      .history li {
+        background: white;
+        border-radius: 1rem;
+        padding: 1.25rem;
+        box-shadow: 0 10px 25px rgba(15, 23, 42, 0.08);
+      }
+      .history .item {
+        display: block;
+        font-size: 1.3rem;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+      }
+      .history .date,
+      .history .discount {
+        display: block;
+        color: #475569;
+      }
+      .history-empty {
+        margin-top: 2rem;
+        font-size: 1.25rem;
+        color: #1e293b;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="banner">
+      <h1>{{ context.headline }}</h1>
+      <div class="subheading">{{ context.subheading }}</div>
+      <div class="highlight">{{ context.highlight }}</div>
+      {% if context.purchases %}
+      <div class="history">
+        <h2>歷史消費紀錄</h2>
+        <ul>
+          {% for purchase in context.purchases %}
+          <li>
+            <span class="item">{{ purchase.item }}</span>
+            <span class="date">{{ purchase.last_purchase }}</span>
+            {% if purchase.discount %}
+            <span class="discount">專屬折扣：{{ (purchase.discount * 100) | round(0, 'floor') }}%</span>
+            {% endif %}
+            <span class="discount">{{ purchase.recommendation }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% else %}
+      <div class="history-empty">尚無歷史紀錄，立即開啟您的專屬優惠！</div>
+      {% endif %}
+    </div>
+  </body>
+</html>
