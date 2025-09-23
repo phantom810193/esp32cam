@@ -11,6 +11,7 @@ from flask import Flask, jsonify, render_template, request, url_for
 from .advertising import build_ad_context
 from .ai import GeminiService, GeminiUnavailableError
 from .database import Database
+from .face_pipeline import AdvancedFacePipeline
 from .recognizer import FaceRecognizer
 
 logging.basicConfig(level=logging.INFO)
@@ -23,7 +24,10 @@ app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
 app.config["JSON_AS_ASCII"] = False
 
 gemini = GeminiService()
-recognizer = FaceRecognizer(gemini)
+pipeline = AdvancedFacePipeline()
+if not pipeline.is_available and pipeline.last_error:
+    logging.info("Advanced face pipeline disabled: %s", pipeline.last_error)
+recognizer = FaceRecognizer(gemini, pipeline=pipeline)
 database = Database(DB_PATH)
 database.ensure_demo_data()
 

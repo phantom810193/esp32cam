@@ -67,19 +67,18 @@ class Database:
         is found the ``member_id`` will be ``None``.
         """
 
-        best_member: str | None = None
-        best_distance: float | None = None
+        candidates: list[tuple[str, FaceEncoding]] = []
         with self._connect() as conn:
             for row in conn.execute("SELECT member_id, encoding_json FROM members"):
                 stored = FaceEncoding.from_jsonable(json.loads(row["encoding_json"]))
-                if stored.signature and stored.signature == encoding.signature:
+                if (
+                    stored.signature
+                    and encoding.signature
+                    and stored.signature == encoding.signature
+                ):
                     return row["member_id"], 0.0
-                distance = recognizer.distance(stored, encoding)
-                if recognizer.is_match(stored, encoding):
-                    if best_distance is None or distance < best_distance:
-                        best_member = row["member_id"]
-                        best_distance = distance
-        return best_member, best_distance
+                candidates.append((row["member_id"], stored))
+        return recognizer.find_best_match(candidates, encoding)
 
     def create_member(self, encoding: FaceEncoding, member_id: str | None = None) -> str:
         member_id = member_id or self._generate_member_id(encoding)
