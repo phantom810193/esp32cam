@@ -74,6 +74,12 @@ class Database:
                 stored = FaceEncoding.from_jsonable(json.loads(row["encoding_json"]))
                 if stored.signature and stored.signature == encoding.signature:
                     return row["member_id"], 0.0
+                if (
+                    stored.gemini_description
+                    and encoding.gemini_description
+                    and stored.gemini_description == encoding.gemini_description
+                ):
+                    return row["member_id"], 0.0
                 distance = recognizer.distance(stored, encoding)
                 if recognizer.is_match(stored, encoding):
                     if best_distance is None or distance < best_distance:
