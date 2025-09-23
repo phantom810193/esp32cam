@@ -61,7 +61,11 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
    - `GET /ad/<member_id>`：根據 SQLite + Gemini Text 的輸出生成廣告頁，內建 `<meta http-equiv="refresh" content="5">`，適合放在電視棒上自動輪播。
    - `GET /health`：基本健康檢查。
 
-5. SQLite 會自動建立資料庫與 Demo 資料。辨識到新臉孔時，系統會以 Gemini Vision 摘要雜湊生成匿名 `MEMxxxxxxxxxx` 並寫入歡迎禮優惠。
+5. SQLite 會自動建立資料庫與 Demo 資料。啟動時會讀取 `backend/demo_members.json`，
+   由 `pictures/` 內的示範照片產生會員編號與歷史消費紀錄（例如 `face6.jpg`
+   對應 `MEM1B5ADE459D`），便於直接開啟 `/ad/<member_id>` 頁面體驗流程。辨識到
+   新臉孔時，系統會以 Gemini Vision 摘要雜湊生成匿名 `MEMxxxxxxxxxx` 並寫入歡迎禮
+   優惠。
 
 6. 手動測試（使用任何 JPEG）：
 
