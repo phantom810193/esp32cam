@@ -72,16 +72,39 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
         http://localhost:8000/upload_face
    ```
 
-   回傳範例：
+ 回傳範例：
 
-   ```json
-   {
-     "status": "ok",
+  ```json
+  {
+    "status": "ok",
      "member_id": "MEM6A9C2A41F2",
      "new_member": false,
      "ad_url": "http://localhost:8000/ad/MEM6A9C2A41F2"
-   }
-   ```
+  }
+  ```
+
+### 進階臉部處理管線（Real-ESRGAN + GFPGAN + InsightFace + FAISS）
+
+- 後端內建 `AdvancedFacePipeline`，若偵測到必要套件與權重檔案，即會自動啟用：
+  1. **Real-ESRGAN** 進行影像超解析與雜訊抑制。
+  2. **GFPGAN** 修復臉部細節，提升嵌入向量的穩定度。
+  3. **InsightFace (ArcFace)** 產生 512 維的臉部特徵向量。
+  4. **FAISS** 以向量索引加速相似度搜尋。
+- 欲啟用此流程，請額外安裝：
+
+  ```bash
+  pip install insightface onnxruntime gfpgan realesrgan basicsr faiss-cpu
+  ```
+
+- 並將模型權重放入 `backend/models/` 目錄，例如：
+
+  ```
+  backend/models/
+    RealESRGAN_x4plus.pth
+    GFPGANv1.4.pth
+  ```
+
+- 若套件或權重缺漏，系統會自動退回原本的 Gemini Vision / 雜湊比對流程，不影響整體 API 行為。
 
 ## 前端展示（電視棒 / 螢幕）
 

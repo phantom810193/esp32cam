@@ -1,14 +1,16 @@
-"""Face recognition utilities that leverage Gemini Vision for cloud IDs."""
+"""Face recognition utilities that leverage Gemini Vision and local models."""
 from __future__ import annotations
 
 import hashlib
+import importlib
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 
 from .ai import GeminiService, GeminiUnavailableError
+from .face_pipeline import AdvancedFacePipeline, AdvancedFacePipelineError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,26 +46,56 @@ class FaceEncoding:
 class FaceRecognizer:
     """Encapsulates the logic used to anonymise and match members."""
 
-    def __init__(self, gemini: GeminiService | None = None, tolerance: float = 0.32) -> None:
+    def __init__(
+        self,
+        gemini: GeminiService | None = None,
+        tolerance: float = 0.32,
+        arcface_tolerance: float = 1.1,
+        pipeline: AdvancedFacePipeline | None = None,
+    ) -> None:
         self._gemini = gemini
         self.tolerance = tolerance
+        self.arcface_tolerance = arcface_tolerance
+        self._pipeline = pipeline
+        self._faiss = self._import_faiss()
 
     def encode(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> FaceEncoding:
+        vector: np.ndarray | None = None
         signature = ""
         source = "hash"
+
+        if self._pipeline and self._pipeline.is_available:
+            try:
+                processed = self._pipeline.process(image_bytes, mime_type=mime_type)
+            except AdvancedFacePipelineError as exc:
+                _LOGGER.warning("Advanced face pipeline unavailable, falling back: %s", exc)
+            else:
+                vector = processed.embedding.astype(np.float32, copy=False)
+                signature = self._hash_signature(vector.tobytes())
+                source = "insightface"
+
         if self._gemini and self._gemini.can_describe_faces:
             try:
-                signature = self._gemini.describe_face(image_bytes, mime_type)
-                source = "gemini"
+                gemini_signature = self._gemini.describe_face(image_bytes, mime_type)
+                if gemini_signature:
+                    if source == "hash":
+                        source = "gemini"
+                    else:
+                        source = f"{source}+gemini"
+                    signature = gemini_signature
             except GeminiUnavailableError as exc:
-                _LOGGER.warning("Gemini Vision unavailable, falling back to hash: %s", exc)
+                _LOGGER.warning("Gemini Vision unavailable, falling back to local pipeline: %s", exc)
 
-        if not signature:
-            signature = self._hash_signature(image_bytes)
-            source = "hash"
+        if vector is None:
+            if not signature:
+                signature = self._hash_signature(image_bytes)
+                source = "hash"
+            vector = self._vector_from_signature(signature)
+        else:
+            if not signature:
+                signature = self._hash_signature(vector.tobytes())
 
-        vector = self._vector_from_signature(signature)
-        return FaceEncoding(vector=vector, signature=signature, source=source)
+        return FaceEncoding(vector=vector.astype(np.float32, copy=False), signature=signature, source=source)
 
     # ------------------------------------------------------------------
     def derive_member_id(self, encoding: FaceEncoding) -> str:
@@ -79,7 +111,67 @@ class FaceRecognizer:
     def is_match(self, known: FaceEncoding, candidate: FaceEncoding) -> bool:
         if known.signature and candidate.signature:
             return known.signature == candidate.signature
-        return self.distance(known, candidate) <= self.tolerance
+        if known.vector.size == 0 or candidate.vector.size == 0:
+            return False
+        if known.vector.shape != candidate.vector.shape:
+            return False
+        distance = self.distance(known, candidate)
+        threshold = self.arcface_tolerance if known.vector.size >= 256 else self.tolerance
+        return distance <= threshold
+
+    # ------------------------------------------------------------------
+    def find_best_match(
+        self,
+        candidates: Sequence[tuple[str, FaceEncoding]],
+        target: FaceEncoding,
+    ) -> tuple[str | None, float | None]:
+        if not candidates:
+            return None, None
+
+        best_member: str | None = None
+        best_distance: float | None = None
+
+        if (
+            self._faiss is not None
+            and target.vector.size > 0
+            and target.vector.ndim == 1
+        ):
+            faiss_vectors: list[np.ndarray] = []
+            faiss_mapping: list[int] = []
+            for idx, (member_id, encoding) in enumerate(candidates):
+                if encoding.vector.shape == target.vector.shape and encoding.vector.size > 0:
+                    faiss_vectors.append(encoding.vector.astype(np.float32, copy=False))
+                    faiss_mapping.append(idx)
+            if faiss_vectors:
+                try:
+                    matrix = np.stack(faiss_vectors).astype(np.float32, copy=False)
+                    index = self._faiss.IndexFlatL2(matrix.shape[1])
+                    index.add(matrix)
+                    query = target.vector.reshape(1, -1).astype(np.float32, copy=False)
+                    k = min(5, matrix.shape[0])
+                    distances, indices = index.search(query, k)
+                    for pos in indices[0]:
+                        if pos < 0:
+                            continue
+                        candidate_idx = faiss_mapping[pos]
+                        member_id, encoding = candidates[candidate_idx]
+                        distance = self.distance(encoding, target)
+                        if self.is_match(encoding, target):
+                            return member_id, distance
+                        if best_distance is None or distance < best_distance:
+                            best_member, best_distance = member_id, distance
+                except Exception as exc:
+                    _LOGGER.warning("FAISS search failed, using linear scan: %s", exc)
+
+        for member_id, encoding in candidates:
+            distance = self.distance(encoding, target)
+            if not np.isfinite(distance):
+                continue
+            if self.is_match(encoding, target):
+                if best_distance is None or distance < best_distance:
+                    best_member, best_distance = member_id, distance
+
+        return best_member, best_distance
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -95,4 +187,13 @@ class FaceRecognizer:
         vector = np.frombuffer(repeated, dtype=np.uint8).astype(np.float32)
         vector /= 255.0
         return vector
+
+    @staticmethod
+    def _import_faiss():
+        for module_name in ("faiss", "faiss_cpu"):
+            try:
+                return importlib.import_module(module_name)
+            except ImportError:  # pragma: no cover - optional dependency
+                continue
+        return None
 
