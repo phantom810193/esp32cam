@@ -1,0 +1,20 @@
+[
+  {
+    "member_id": "MEM1B5ADE459D",
+    "image": "pictures/face6.jpg",
+    "purchases": [
+      {
+        "item": "精品濾掛咖啡",
+        "last_purchase": "2024-01-12",
+        "discount": 0.25,
+        "recommendation": "今日搭配手工可頌再享 85 折，限時優惠！"
+      },
+      {
+        "item": "手工磅蛋糕",
+        "last_purchase": "2023-12-08",
+        "discount": 0.1,
+        "recommendation": "甜點任選第二件半價，咖啡一起帶走最划算。"
+      }
+    ]
+  }
+]

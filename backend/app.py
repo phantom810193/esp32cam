@@ -25,7 +25,7 @@ app.config["JSON_AS_ASCII"] = False
 gemini = GeminiService()
 recognizer = FaceRecognizer(gemini)
 database = Database(DB_PATH)
-database.ensure_demo_data()
+database.ensure_demo_data(recognizer)
 
 
 @app.get("/")
