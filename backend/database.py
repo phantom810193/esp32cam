@@ -72,6 +72,12 @@ class Database:
         with self._connect() as conn:
             for row in conn.execute("SELECT member_id, encoding_json FROM members"):
                 stored = FaceEncoding.from_jsonable(json.loads(row["encoding_json"]))
+                if (
+                    encoding.azure_persisted_face_id
+                    and stored.azure_persisted_face_id
+                    and stored.azure_persisted_face_id == encoding.azure_persisted_face_id
+                ):
+                    return row["member_id"], 0.0
                 if encoding.azure_person_id and stored.azure_person_id:
                     if stored.azure_person_id == encoding.azure_person_id:
                         return row["member_id"], 0.0
@@ -91,6 +97,21 @@ class Database:
                         best_member = row["member_id"]
                         best_distance = distance
         return best_member, best_distance
+
+    def find_member_by_persisted_face_id(
+        self, persisted_face_id: str
+    ) -> tuple[str | None, FaceEncoding | None]:
+        """Return the member with the given Azure persisted face identifier."""
+
+        if not persisted_face_id:
+            return None, None
+
+        with self._connect() as conn:
+            for row in conn.execute("SELECT member_id, encoding_json FROM members"):
+                stored = FaceEncoding.from_jsonable(json.loads(row["encoding_json"]))
+                if stored.azure_persisted_face_id == persisted_face_id:
+                    return row["member_id"], stored
+        return None, None
 
     def get_member_encoding(self, member_id: str) -> FaceEncoding | None:
         with self._connect() as conn:

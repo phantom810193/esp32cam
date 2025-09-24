@@ -26,6 +26,9 @@ class FlakyAzureFace:
         self.person_id: str | None = None
         self.registered_member: str | None = None
         self.faces_added: list[bytes] = []
+        self.face_list_add_calls = 0
+        self.find_similar_calls = 0
+        self.persisted_faces: dict[str, str] = {}
 
     @property
     def can_describe_faces(self) -> bool:  # pragma: no cover - simple proxy
@@ -37,6 +40,10 @@ class FlakyAzureFace:
 
     @property
     def can_manage_person_group(self) -> bool:  # pragma: no cover - simple proxy
+        return True
+
+    @property
+    def can_use_face_list(self) -> bool:  # pragma: no cover - simple proxy
         return True
 
     @property
@@ -77,6 +84,40 @@ class FlakyAzureFace:
     def train_person_group(self, suppress_errors: bool = True) -> None:
         del suppress_errors
         self.trained_calls += 1
+
+    def add_face_to_face_list(
+        self,
+        member_id: str,
+        image_bytes: bytes,
+        *,
+        user_data: str | None = None,
+    ) -> str:
+        del user_data
+        self.face_list_add_calls += 1
+        persisted_id = f"persisted-{self.face_list_add_calls}"
+        self.persisted_faces[persisted_id] = member_id
+        self.faces_added.append(image_bytes)
+        return persisted_id
+
+    def find_similar_faces(
+        self,
+        face_id: str,
+        *,
+        max_candidates: int = 5,
+        mode: str | None = None,
+    ) -> list[dict[str, object]]:
+        del face_id, max_candidates, mode
+        self.find_similar_calls += 1
+        if not self.persisted_faces:
+            return []
+        persisted_id, member_id = next(iter(self.persisted_faces.items()))
+        return [
+            {
+                "persisted_face_id": persisted_id,
+                "confidence": 0.95,
+                "member": member_id,
+            }
+        ]
 
     def find_person_id_by_name(self, member_name: str) -> str | None:
         if self.registered_member == member_name:
@@ -136,6 +177,8 @@ def test_reuse_member_id_and_serialisation(client):
     assert stored_encoding["source"] == "azure-person-group"
     assert stored_encoding["azure_person_id"] == "person-1"
     assert stored_encoding["azure_person_name"] == member_id
+    assert stored_encoding["azure_face_id"] == "face-1"
+    assert stored_encoding["azure_persisted_face_id"] == "persisted-1"
     assert "gemini_description" not in stored_encoding
 
     response_again = _post_image(test_client, image_payload)
@@ -146,6 +189,8 @@ def test_reuse_member_id_and_serialisation(client):
     assert data_again["new_member"] is False
     assert service.calls == 2
     assert service.register_calls == 1
+    assert service.find_similar_calls >= 1
+    assert service.face_list_add_calls >= 1
 
 
 def test_person_group_training_creates_member(client):
@@ -167,12 +212,14 @@ def test_person_group_training_creates_member(client):
     assert service.register_calls == 1
     assert service.add_face_calls == 1
     assert service.trained_calls >= 1
+    assert service.face_list_add_calls == 2
 
     encoding = database.get_member_encoding("VIP001")
     assert encoding is not None
     assert encoding.azure_person_id == "person-1"
     assert encoding.azure_person_name == "VIP001"
     assert encoding.source == "azure-person-group"
+    assert encoding.azure_persisted_face_id == "persisted-1"
 
 
 def test_person_group_training_updates_existing_person(client):
@@ -206,9 +253,11 @@ def test_person_group_training_updates_existing_person(client):
     assert service.register_calls == 0
     assert service.add_face_calls == 2
     assert service.trained_calls == 1
+    assert service.face_list_add_calls == 2
 
     updated = database.get_member_encoding("VIP777")
     assert updated is not None
     assert updated.azure_person_id == "person-5"
     assert updated.azure_person_name == "VIP777"
     assert updated.source == "azure-person-group"
+    assert updated.azure_persisted_face_id == "persisted-1"

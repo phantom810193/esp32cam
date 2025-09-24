@@ -5,7 +5,7 @@
 ## 系統架構與技術流程
 
 1. **ESP32-CAM 拍照上傳**：韌體每隔數秒拍照並透過 HTTP POST 將 JPEG 送至雲端 `/upload_face` API。
-2. **Azure Face 雲端辨識**：Flask 後端把影像送進 Azure Face API，取得臉部特徵摘要並嘗試在指定的 Person Group 中進行身份比對；若找到既有 Person 就重用先前的會員 ID，否則建立新會員並將臉孔註冊到 Person Group，讓下一次造訪可以直接識別。
+2. **Azure Face 雲端辨識**：Flask 後端把影像送進 Azure Face API，取得臉部特徵摘要後會先透過 Find Similar API 與我們維護的 Face List 做比對；若命中，就直接重用既有會員 ID。若未找到或帳戶已獲得 Person Group 權限，系統也會同步更新 Person Group，讓後續還是能沿用 Azure 的 Person ID。
 3. **SQLite 會員 & 消費資料**：後端使用摘要向 SQLite 查詢既有會員與歷史訂單，找不到則建立新會員並寫入歡迎優惠。
 4. **模板產生廣告**：把會員歷史紀錄整理成 JSON，套用內建模板產出主標、副標、促購亮點的廣告文案，確保即使未啟用雲端 AI 也能維持完整流程。
 5. **廣告頁輸出**：後端將文案與歷史訂單傳入 Jinja2 模板 `/ad/<member_id>`，網頁每 5 秒自動刷新，適合放在 HDMI 電視棒或任何瀏覽器輪播。
@@ -46,15 +46,16 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
    ```bash
    export AZURE_FACE_ENDPOINT="https://<your-resource>.cognitiveservices.azure.com/"
    export AZURE_FACE_KEY="<your_face_api_key>"
-   export AZURE_FACE_PERSON_GROUP_ID="esp32cam-mvp"  # 可自訂，會自動建立
+   export AZURE_FACE_PERSON_GROUP_ID="esp32cam-mvp"    # 可自訂，會自動建立（選填）
+   export AZURE_FACE_LIST_ID="esp32cam-mvp-faces"      # Find Similar 使用的 Face List（可省略使用預設值）
    ```
 
    未設定時後端仍可運作，但只會使用雜湊簽名與預設廣告模板。部署到雲端（例如 Cloud Run）時，也可改放在環境變數或 Secret Manager。
 
    > ⚠️ **Person Group 權限申請**：Azure Face 的 Person Group / Identify API 需額外核准
    > 「Identification/Verification」功能才能啟用。若帳號尚未被核准，後端會自動停用
-   > 相關功能並僅保留臉部描述，頁面會提示前往 <https://aka.ms/facerecognition>
-   > 申請預覽權限。
+   > 相關功能並僅保留臉部描述與 Face List 比對；頁面會提示前往
+   > <https://aka.ms/facerecognition> 申請預覽權限。
 
 3. 啟動 Flask 伺服器（於專案根目錄執行）：
 
@@ -69,7 +70,7 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
    - `GET /health`：基本健康檢查。
    - `GET /person-group`：提供瀏覽器表單，可輸入會員 ID 並上傳多張臉部照片，預先將該會員訓練至 Azure Face Person Group。
 
-5. SQLite 會自動建立資料庫與 Demo 資料。辨識到新臉孔時，系統會以 Azure Face 摘要雜湊生成匿名 `MEMxxxxxxxxxx` 並寫入歡迎禮優惠，並同步把臉部資訊註冊到 Azure Person Group，後續造訪即可直接由雲端回傳 Person ID。
+5. SQLite 會自動建立資料庫與 Demo 資料。辨識到新臉孔時，系統會以 Azure Face 摘要雜湊生成匿名 `MEMxxxxxxxxxx` 並寫入歡迎禮優惠，同時把臉部向量註冊到 Azure Face List（及可用時的 Person Group），以便下一次造訪可直接透過 Find Similar 命中既有會員。
 
 6. 手動測試（使用任何 JPEG）：
 
@@ -91,10 +92,10 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
    }
    ```
 
-7. 需要先在 Person Group 中訓練特定顧客時，可開啟瀏覽器造訪 `http://localhost:8000/person-group`：
+7. 需要先在 Person Group / Face List 中訓練特定顧客時，可開啟瀏覽器造訪 `http://localhost:8000/person-group`：
 
    - 輸入既有或預期的會員 ID（例如從 CRM 匯出的代碼）。
-   - 一次選擇多張臉部照片並提交，系統會在 Azure 中建立/更新 Person，並同步把 Azure Person ID 存回 SQLite。
+   - 一次選擇多張臉部照片並提交，系統會在 Azure 中建立/更新 Person，並同步把 Face List 與（可用時）Person ID 存回 SQLite。
    - 若該會員在資料庫中不存在，後端會自動建立一筆基礎會員資料，方便後續比對。
 
 ## 前端展示（電視棒 / 螢幕）

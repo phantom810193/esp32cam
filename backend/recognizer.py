@@ -23,6 +23,8 @@ class FaceEncoding:
     azure_person_id: str | None = None
     azure_person_name: str | None = None
     azure_confidence: float | None = None
+    azure_face_id: str | None = None
+    azure_persisted_face_id: str | None = None
 
     def to_jsonable(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -36,6 +38,10 @@ class FaceEncoding:
             payload["azure_person_name"] = self.azure_person_name
         if self.azure_confidence is not None:
             payload["azure_confidence"] = float(self.azure_confidence)
+        if self.azure_face_id:
+            payload["azure_face_id"] = self.azure_face_id
+        if self.azure_persisted_face_id:
+            payload["azure_persisted_face_id"] = self.azure_persisted_face_id
         return payload
 
     @classmethod
@@ -54,6 +60,8 @@ class FaceEncoding:
             azure_person_id = data.get("azure_person_id")
             azure_person_name = data.get("azure_person_name")
             azure_confidence = data.get("azure_confidence")
+            azure_face_id = data.get("azure_face_id")
+            azure_persisted_face_id = data.get("azure_persisted_face_id")
             try:
                 confidence_value = float(azure_confidence)
             except (TypeError, ValueError):
@@ -69,6 +77,12 @@ class FaceEncoding:
                 if isinstance(azure_person_name, str) and azure_person_name
                 else None,
                 azure_confidence=confidence_value,
+                azure_face_id=str(azure_face_id)
+                if isinstance(azure_face_id, str) and azure_face_id
+                else None,
+                azure_persisted_face_id=str(azure_persisted_face_id)
+                if isinstance(azure_persisted_face_id, str) and azure_persisted_face_id
+                else None,
             )
         raise TypeError(f"Unsupported encoding payload: {type(data)!r}")
 
@@ -87,6 +101,7 @@ class FaceRecognizer:
         azure_person_id: str | None = None
         azure_person_name: str | None = None
         azure_confidence: float | None = None
+        azure_face_id: str | None = None
         if self._azure and self._azure.can_describe_faces:
             try:
                 analysis = self._azure.analyze_face(image_bytes, mime_type)
@@ -94,6 +109,7 @@ class FaceRecognizer:
                 _LOGGER.warning("Azure Face unavailable, falling back to hash: %s", exc)
             else:
                 description = analysis.description
+                azure_face_id = analysis.face_id
                 azure_person_id = str(analysis.person_id) if analysis.person_id else None
                 azure_person_name = str(analysis.person_name) if analysis.person_name else None
                 azure_confidence = analysis.confidence
@@ -102,7 +118,7 @@ class FaceRecognizer:
                 elif description:
                     source = "azure"
 
-        signature_seed = azure_person_id or description
+        signature_seed = azure_person_id or azure_face_id or description
         if not signature_seed:
             signature_seed = self._hash_signature(image_bytes)
             source = "hash"
@@ -116,6 +132,7 @@ class FaceRecognizer:
             azure_person_id=azure_person_id,
             azure_person_name=azure_person_name,
             azure_confidence=azure_confidence,
+            azure_face_id=azure_face_id,
         )
 
     # ------------------------------------------------------------------
@@ -123,6 +140,7 @@ class FaceRecognizer:
         base = (
             encoding.azure_person_name
             or encoding.azure_person_id
+            or encoding.azure_persisted_face_id
             or encoding.face_description
             or self._hash_signature(encoding.vector.tobytes())
         )
@@ -137,6 +155,13 @@ class FaceRecognizer:
     def is_match(self, known: FaceEncoding, candidate: FaceEncoding) -> bool:
         if known.azure_person_id and candidate.azure_person_id:
             return known.azure_person_id == candidate.azure_person_id
+        if (
+            known.azure_persisted_face_id
+            and candidate.azure_persisted_face_id
+            and known.azure_persisted_face_id
+            == candidate.azure_persisted_face_id
+        ):
+            return True
         if known.azure_person_name and candidate.azure_person_name:
             return known.azure_person_name == candidate.azure_person_name
         if known.face_description and candidate.face_description:

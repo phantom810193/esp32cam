@@ -84,6 +84,7 @@ def person_group_trainer():
         azure_person_id: str | None = None
         existing_encoding: FaceEncoding | None = None
         created_person = False
+        persisted_face_ids: list[str] = []
 
         if not context["errors"]:
             existing_encoding = database.get_member_encoding(member_id)
@@ -131,6 +132,17 @@ def person_group_trainer():
                             face_description=member_id,
                             source="azure-person-group",
                         )
+                if face_service.can_use_face_list:
+                    try:
+                        persisted_id = face_service.add_face_to_face_list(
+                            member_id,
+                            primary_upload["bytes"],
+                            user_data=member_id,
+                        )
+                    except AzureFaceError as exc:
+                        context["errors"].append(f"{primary_upload['name'] or 'face-1.jpg'} 加入 Face List 失敗：{exc}")
+                    else:
+                        persisted_face_ids.append(persisted_id)
 
             if azure_person_id:
                 for upload in uploads[start_index:]:
@@ -143,6 +155,19 @@ def person_group_trainer():
                     else:
                         context["faces_registered"] += 1
                         context["results"].append(upload["name"] or "face.jpg")
+                    if face_service.can_use_face_list:
+                        try:
+                            persisted_id = face_service.add_face_to_face_list(
+                                member_id,
+                                upload["bytes"],
+                                user_data=member_id,
+                            )
+                        except AzureFaceError as exc:
+                            context["errors"].append(
+                                f"{upload['name'] or '照片'} 加入 Face List 時失敗：{exc}"
+                            )
+                        else:
+                            persisted_face_ids.append(persisted_id)
 
                 if encoding is not None:
                     encoding.azure_person_id = azure_person_id
@@ -150,6 +175,10 @@ def person_group_trainer():
                     if not encoding.face_description:
                         encoding.face_description = member_id
                     encoding.source = "azure-person-group"
+                    if persisted_face_ids:
+                        encoding.azure_persisted_face_id = encoding.azure_persisted_face_id or persisted_face_ids[0]
+                        if encoding.source != "azure-person-group":
+                            encoding.source = "azure-face-list"
                     if existing_encoding is None:
                         database.create_member(encoding, member_id=member_id)
                         context["created_member"] = True
@@ -184,12 +213,72 @@ def upload_face():
 
     member_id: str | None = None
     distance: float | None = None
+    persisted_face_id: str | None = None
 
     if encoding.azure_person_name:
         stored_encoding = database.get_member_encoding(encoding.azure_person_name)
         if stored_encoding is not None:
             member_id = encoding.azure_person_name
             distance = 0.0
+
+    if (
+        member_id is None
+        and face_service.can_use_face_list
+        and encoding.azure_face_id
+    ):
+        try:
+            matches = face_service.find_similar_faces(
+                encoding.azure_face_id,
+                max_candidates=3,
+            )
+        except AzureFaceError as exc:
+            logging.warning("Azure Face findSimilar unavailable: %s", exc)
+        else:
+            for match in matches:
+                persisted = match.get("persisted_face_id")
+                if not isinstance(persisted, str) or not persisted:
+                    continue
+                matched_member, stored_encoding = database.find_member_by_persisted_face_id(
+                    persisted
+                )
+                if matched_member:
+                    member_id = matched_member
+                    distance = 0.0
+                    persisted_face_id = persisted
+                    confidence = match.get("confidence")
+                    try:
+                        encoding.azure_confidence = float(confidence) if confidence is not None else None
+                    except (TypeError, ValueError):
+                        encoding.azure_confidence = None
+                    encoding.azure_persisted_face_id = persisted
+                    if encoding.source != "azure-person-group":
+                        encoding.source = "azure-face-list"
+                    if stored_encoding is not None:
+                        updated = False
+                        if stored_encoding.azure_persisted_face_id != persisted:
+                            stored_encoding.azure_persisted_face_id = persisted
+                            updated = True
+                        if (
+                            encoding.azure_confidence is not None
+                            and stored_encoding.azure_confidence != encoding.azure_confidence
+                        ):
+                            stored_encoding.azure_confidence = encoding.azure_confidence
+                            updated = True
+                        if (
+                            encoding.face_description
+                            and not stored_encoding.face_description
+                        ):
+                            stored_encoding.face_description = encoding.face_description
+                            updated = True
+                        if (
+                            encoding.source != "hash"
+                            and stored_encoding.source != encoding.source
+                        ):
+                            stored_encoding.source = encoding.source
+                            updated = True
+                        if updated:
+                            database.update_member_encoding(matched_member, stored_encoding)
+                    break
 
     if member_id is None:
         member_id, distance = database.find_member_by_encoding(encoding, recognizer)
@@ -205,6 +294,19 @@ def upload_face():
                 encoding.source = "azure-person-group"
             except AzureFaceError as exc:
                 logging.warning("Azure Face registration unavailable: %s", exc)
+        if face_service.can_use_face_list:
+            try:
+                persisted_face_id = face_service.add_face_to_face_list(
+                    member_seed,
+                    image_bytes,
+                    user_data=member_seed,
+                )
+            except AzureFaceError as exc:
+                logging.warning("Azure Face face list unavailable: %s", exc)
+            else:
+                encoding.azure_persisted_face_id = persisted_face_id
+                if encoding.source != "azure-person-group":
+                    encoding.source = "azure-face-list"
         member_id = database.create_member(encoding, member_seed)
         _create_welcome_purchase(member_id)
         new_member = True
@@ -222,6 +324,12 @@ def upload_face():
             elif encoding.azure_person_id and not stored_encoding.azure_person_name:
                 stored_encoding.azure_person_name = member_id
                 changed = True
+            if (
+                persisted_face_id
+                and stored_encoding.azure_persisted_face_id != persisted_face_id
+            ):
+                stored_encoding.azure_persisted_face_id = persisted_face_id
+                changed = True
             if encoding.azure_confidence is not None:
                 stored_encoding.azure_confidence = encoding.azure_confidence
                 changed = True
@@ -235,6 +343,29 @@ def upload_face():
                 database.update_member_encoding(member_id, stored_encoding)
         if encoding.azure_person_id and not encoding.azure_person_name:
             encoding.azure_person_name = member_id
+        if (
+            persisted_face_id is None
+            and face_service.can_use_face_list
+            and not encoding.azure_persisted_face_id
+        ):
+            try:
+                persisted_face_id = face_service.add_face_to_face_list(
+                    member_id,
+                    image_bytes,
+                    user_data=member_id,
+                )
+            except AzureFaceError as exc:
+                logging.warning("Azure Face face list unavailable: %s", exc)
+            else:
+                encoding.azure_persisted_face_id = persisted_face_id
+                if encoding.source != "azure-person-group":
+                    encoding.source = "azure-face-list"
+                stored_encoding = database.get_member_encoding(member_id)
+                if stored_encoding is not None:
+                    stored_encoding.azure_persisted_face_id = persisted_face_id
+                    if stored_encoding.source == "hash":
+                        stored_encoding.source = encoding.source
+                    database.update_member_encoding(member_id, stored_encoding)
 
     payload = {
         "status": "ok",
