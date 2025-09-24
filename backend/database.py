@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import sqlite3
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -45,6 +46,15 @@ class Database:
                     encoding_json TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS face_list_faces (
+                    persisted_face_id TEXT PRIMARY KEY,
+                    member_id TEXT NOT NULL,
+                    FOREIGN KEY(member_id) REFERENCES members(member_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_face_list_member
+                    ON face_list_faces(member_id);
+
                 CREATE TABLE IF NOT EXISTS purchases (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     member_id TEXT NOT NULL,
@@ -72,7 +82,24 @@ class Database:
         with self._connect() as conn:
             for row in conn.execute("SELECT member_id, encoding_json FROM members"):
                 stored = FaceEncoding.from_jsonable(json.loads(row["encoding_json"]))
-                if stored.signature and stored.signature == encoding.signature:
+                if (
+                    encoding.azure_persisted_face_id
+                    and stored.azure_persisted_face_id
+                    and stored.azure_persisted_face_id == encoding.azure_persisted_face_id
+                ):
+                    return row["member_id"], 0.0
+                if encoding.azure_person_id and stored.azure_person_id:
+                    if stored.azure_person_id == encoding.azure_person_id:
+                        return row["member_id"], 0.0
+                if encoding.azure_person_name:
+                    if row["member_id"] == encoding.azure_person_name:
+                        return row["member_id"], 0.0
+                    if stored.azure_person_name == encoding.azure_person_name:
+                        return row["member_id"], 0.0
+                if (
+                    stored.face_description
+                    and stored.face_description == encoding.face_description
+                ):
                     return row["member_id"], 0.0
                 distance = recognizer.distance(stored, encoding)
                 if recognizer.is_match(stored, encoding):
@@ -81,20 +108,163 @@ class Database:
                         best_distance = distance
         return best_member, best_distance
 
+    def find_member_by_persisted_face_id(
+        self, persisted_face_id: str
+    ) -> tuple[str | None, FaceEncoding | None]:
+        """Return the member with the given Azure persisted face identifier."""
+
+        if not persisted_face_id:
+            return None, None
+
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT m.member_id, m.encoding_json
+                  FROM face_list_faces AS f
+                  JOIN members AS m ON m.member_id = f.member_id
+                 WHERE f.persisted_face_id = ?
+                """,
+                (persisted_face_id,),
+            ).fetchone()
+            if row is not None:
+                stored = FaceEncoding.from_jsonable(json.loads(row["encoding_json"]))
+                return row["member_id"], stored
+
+            for row in conn.execute("SELECT member_id, encoding_json FROM members"):
+                stored = FaceEncoding.from_jsonable(json.loads(row["encoding_json"]))
+                if stored.azure_persisted_face_id == persisted_face_id:
+                    return row["member_id"], stored
+        return None, None
+
+    def register_persisted_face(self, member_id: str, persisted_face_id: str) -> None:
+        """Record the association between an Azure face-list ID and a member."""
+
+        if not member_id or not persisted_face_id:
+            return
+
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO face_list_faces (persisted_face_id, member_id)
+                VALUES (?, ?)
+                ON CONFLICT(persisted_face_id) DO UPDATE SET member_id = excluded.member_id
+                """,
+                (persisted_face_id, member_id),
+            )
+            conn.commit()
+
+    def get_member_persisted_face_ids(self, member_id: str) -> list[str]:
+        """Return all Azure face-list identifiers known for ``member_id``."""
+
+        if not member_id:
+            return []
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT persisted_face_id FROM face_list_faces
+                 WHERE member_id = ?
+                 ORDER BY rowid
+                """,
+                (member_id,),
+            ).fetchall()
+        return [row["persisted_face_id"] for row in rows]
+
+    def find_member_by_person_id(
+        self, person_id: str
+    ) -> tuple[str | None, FaceEncoding | None]:
+        """Return the member registered with the specified Azure person identifier."""
+
+        if not person_id:
+            return None, None
+
+        with self._connect() as conn:
+            for row in conn.execute("SELECT member_id, encoding_json FROM members"):
+                stored = FaceEncoding.from_jsonable(json.loads(row["encoding_json"]))
+                if stored.azure_person_id == person_id:
+                    return row["member_id"], stored
+        return None, None
+
+    def get_member_encoding(self, member_id: str) -> FaceEncoding | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT encoding_json FROM members WHERE member_id = ?",
+                (member_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return FaceEncoding.from_jsonable(json.loads(row["encoding_json"]))
+
+    def update_member_encoding(self, member_id: str, encoding: FaceEncoding) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE members SET encoding_json = ? WHERE member_id = ?",
+                (json.dumps(encoding.to_jsonable(), ensure_ascii=False), member_id),
+            )
+            conn.commit()
+        if encoding.azure_persisted_face_id:
+            self.register_persisted_face(member_id, encoding.azure_persisted_face_id)
+
     def create_member(self, encoding: FaceEncoding, member_id: str | None = None) -> str:
-        member_id = member_id or self._generate_member_id(encoding)
+        """Persist a new member record, generating a unique ID when necessary."""
+
+        payload = json.dumps(encoding.to_jsonable(), ensure_ascii=False)
+        candidate_id = member_id or self._generate_member_id(encoding)
+
+        attempted: set[str] = set()
+        last_error: sqlite3.IntegrityError | None = None
+        try_sequential = True
+
+        while True:
+            try:
+                self._insert_member(candidate_id, payload)
+            except sqlite3.IntegrityError as exc:
+                last_error = exc
+                attempted.add(candidate_id)
+                _LOGGER.warning(
+                    "Member ID %s already exists, generating a new ID", candidate_id
+                )
+
+                next_id: str | None = None
+                if try_sequential:
+                    try_sequential = False
+                    sequential_id = self._generate_member_id(None)
+                    if sequential_id and sequential_id not in attempted:
+                        next_id = sequential_id
+
+                if next_id is None:
+                    for _ in range(32):
+                        generated = self._generate_random_member_id()
+                        if generated in attempted:
+                            continue
+                        next_id = generated
+                        break
+
+                if next_id is None:
+                    raise last_error
+
+                candidate_id = next_id
+                continue
+            else:
+                _LOGGER.info("Created new member %s", candidate_id)
+                if encoding.azure_persisted_face_id:
+                    self.register_persisted_face(candidate_id, encoding.azure_persisted_face_id)
+                return candidate_id
+
+    def _insert_member(self, member_id: str, payload: str) -> None:
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO members (member_id, encoding_json) VALUES (?, ?)",
-                (member_id, json.dumps(encoding.to_jsonable(), ensure_ascii=False)),
+                (member_id, payload),
             )
             conn.commit()
-        _LOGGER.info("Created new member %s", member_id)
-        return member_id
+
+    def _generate_random_member_id(self) -> str:
+        return f"MEM{uuid.uuid4().hex[:10].upper()}"
 
     def _generate_member_id(self, encoding: FaceEncoding | None = None) -> str:
-        if encoding and encoding.signature:
-            hashed = hashlib.sha1(encoding.signature.encode("utf-8")).hexdigest().upper()
+        if encoding and encoding.face_description:
+            hashed = hashlib.sha1(encoding.face_description.encode("utf-8")).hexdigest().upper()
             return f"MEM{hashed[:10]}"
 
         with self._connect() as conn:
@@ -151,7 +321,7 @@ class Database:
 
             encoding = FaceEncoding(
                 np.zeros(128, dtype=np.float32),
-                signature="demo-member",
+                face_description="demo-member",
                 source="seed",
             )
             demo_member = self.create_member(encoding, member_id="MEMDEMO001")

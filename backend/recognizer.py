@@ -1,4 +1,4 @@
-"""Face recognition utilities that leverage Gemini Vision for cloud IDs."""
+"""Face recognition utilities that leverage Azure Face for cloud IDs."""
 from __future__ import annotations
 
 import hashlib
@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from .ai import GeminiService, GeminiUnavailableError
+from .ai import AzureFaceError, AzureFaceService, FaceAnalysis
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -18,56 +18,132 @@ class FaceEncoding:
     """Container for the anonymised face signature."""
 
     vector: np.ndarray
-    signature: str
+    face_description: str
     source: str = "hash"
+    azure_person_id: str | None = None
+    azure_person_name: str | None = None
+    azure_confidence: float | None = None
+    azure_face_id: str | None = None
+    azure_persisted_face_id: str | None = None
 
     def to_jsonable(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "vector": self.vector.astype(float).tolist(),
-            "signature": self.signature,
+            "face_description": self.face_description,
             "source": self.source,
         }
+        if self.azure_person_id:
+            payload["azure_person_id"] = self.azure_person_id
+        if self.azure_person_name:
+            payload["azure_person_name"] = self.azure_person_name
+        if self.azure_confidence is not None:
+            payload["azure_confidence"] = float(self.azure_confidence)
+        if self.azure_face_id:
+            payload["azure_face_id"] = self.azure_face_id
+        if self.azure_persisted_face_id:
+            payload["azure_persisted_face_id"] = self.azure_persisted_face_id
+        return payload
 
     @classmethod
     def from_jsonable(cls, data: Any) -> "FaceEncoding":
         if isinstance(data, list):  # legacy format (vector only)
             vector = np.asarray(data, dtype=np.float32)
-            return cls(vector=vector, signature="", source="legacy")
+            return cls(vector=vector, face_description="", source="legacy")
         if isinstance(data, dict):
             vector = np.asarray(data.get("vector", []), dtype=np.float32)
-            signature = str(data.get("signature", ""))
+            face_description = str(
+                data.get("face_description")
+                or data.get("gemini_description")
+                or data.get("signature", "")
+            )
             source = str(data.get("source", "")) or "hash"
-            return cls(vector=vector, signature=signature, source=source)
+            azure_person_id = data.get("azure_person_id")
+            azure_person_name = data.get("azure_person_name")
+            azure_confidence = data.get("azure_confidence")
+            azure_face_id = data.get("azure_face_id")
+            azure_persisted_face_id = data.get("azure_persisted_face_id")
+            try:
+                confidence_value = float(azure_confidence)
+            except (TypeError, ValueError):
+                confidence_value = None
+            return cls(
+                vector=vector,
+                face_description=face_description,
+                source=source,
+                azure_person_id=str(azure_person_id)
+                if isinstance(azure_person_id, str) and azure_person_id
+                else None,
+                azure_person_name=str(azure_person_name)
+                if isinstance(azure_person_name, str) and azure_person_name
+                else None,
+                azure_confidence=confidence_value,
+                azure_face_id=str(azure_face_id)
+                if isinstance(azure_face_id, str) and azure_face_id
+                else None,
+                azure_persisted_face_id=str(azure_persisted_face_id)
+                if isinstance(azure_persisted_face_id, str) and azure_persisted_face_id
+                else None,
+            )
         raise TypeError(f"Unsupported encoding payload: {type(data)!r}")
 
 
 class FaceRecognizer:
     """Encapsulates the logic used to anonymise and match members."""
 
-    def __init__(self, gemini: GeminiService | None = None, tolerance: float = 0.32) -> None:
-        self._gemini = gemini
+    def __init__(self, azure_face: AzureFaceService | None = None, tolerance: float = 0.32) -> None:
+        self._azure = azure_face
         self.tolerance = tolerance
 
     def encode(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> FaceEncoding:
-        signature = ""
+        description = ""
         source = "hash"
-        if self._gemini and self._gemini.can_describe_faces:
+        analysis: FaceAnalysis | None = None
+        azure_person_id: str | None = None
+        azure_person_name: str | None = None
+        azure_confidence: float | None = None
+        azure_face_id: str | None = None
+        if self._azure and self._azure.can_describe_faces:
             try:
-                signature = self._gemini.describe_face(image_bytes, mime_type)
-                source = "gemini"
-            except GeminiUnavailableError as exc:
-                _LOGGER.warning("Gemini Vision unavailable, falling back to hash: %s", exc)
+                analysis = self._azure.analyze_face(image_bytes, mime_type)
+            except AzureFaceError as exc:
+                _LOGGER.warning("Azure Face unavailable, falling back to hash: %s", exc)
+            else:
+                description = analysis.description
+                azure_face_id = analysis.face_id
+                azure_person_id = str(analysis.person_id) if analysis.person_id else None
+                azure_person_name = str(analysis.person_name) if analysis.person_name else None
+                azure_confidence = analysis.confidence
+                if azure_person_id:
+                    source = "azure-person-group"
+                elif description:
+                    source = "azure"
 
-        if not signature:
-            signature = self._hash_signature(image_bytes)
+        signature_seed = azure_person_id or azure_face_id or description
+        if not signature_seed:
+            signature_seed = self._hash_signature(image_bytes)
             source = "hash"
 
-        vector = self._vector_from_signature(signature)
-        return FaceEncoding(vector=vector, signature=signature, source=source)
+        vector = self._vector_from_signature(signature_seed)
+        face_description = description or azure_person_name or signature_seed
+        return FaceEncoding(
+            vector=vector,
+            face_description=face_description,
+            source=source,
+            azure_person_id=azure_person_id,
+            azure_person_name=azure_person_name,
+            azure_confidence=azure_confidence,
+            azure_face_id=azure_face_id,
+        )
 
     # ------------------------------------------------------------------
     def derive_member_id(self, encoding: FaceEncoding) -> str:
-        base = encoding.signature or self._hash_signature(encoding.vector.tobytes())
+        base = (
+            encoding.azure_person_name
+            or encoding.azure_person_id
+            or encoding.azure_persisted_face_id
+            or encoding.face_description
+            or self._hash_signature(encoding.vector.tobytes())
+        )
         digest = hashlib.sha1(base.encode("utf-8")).hexdigest().upper()
         return f"MEM{digest[:10]}"
 
@@ -77,8 +153,19 @@ class FaceRecognizer:
         return float(np.linalg.norm(a.vector - b.vector))
 
     def is_match(self, known: FaceEncoding, candidate: FaceEncoding) -> bool:
-        if known.signature and candidate.signature:
-            return known.signature == candidate.signature
+        if known.azure_person_id and candidate.azure_person_id:
+            return known.azure_person_id == candidate.azure_person_id
+        if (
+            known.azure_persisted_face_id
+            and candidate.azure_persisted_face_id
+            and known.azure_persisted_face_id
+            == candidate.azure_persisted_face_id
+        ):
+            return True
+        if known.azure_person_name and candidate.azure_person_name:
+            return known.azure_person_name == candidate.azure_person_name
+        if known.face_description and candidate.face_description:
+            return known.face_description == candidate.face_description
         return self.distance(known, candidate) <= self.tolerance
 
     # ------------------------------------------------------------------
