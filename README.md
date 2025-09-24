@@ -39,7 +39,7 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
    cd ..  # 回到專案根目錄
    ```
 
-   `requirements.txt` 內包含 `azure-cognitiveservices-vision-face` 與 `msrest` 等 Azure Face SDK。若暫時沒有金鑰，後端會自動退回到純雜湊比對與固定模板。
+   `requirements.txt` 內包含最新版的 `azure-ai-vision-face` SDK。若暫時沒有金鑰，後端會自動退回到純雜湊比對與固定模板。
 
 2. 設定 Azure Face 認證：
 
