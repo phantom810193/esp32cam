@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import sqlite3
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -113,6 +114,21 @@ class Database:
                     return row["member_id"], stored
         return None, None
 
+    def find_member_by_person_id(
+        self, person_id: str
+    ) -> tuple[str | None, FaceEncoding | None]:
+        """Return the member registered with the specified Azure person identifier."""
+
+        if not person_id:
+            return None, None
+
+        with self._connect() as conn:
+            for row in conn.execute("SELECT member_id, encoding_json FROM members"):
+                stored = FaceEncoding.from_jsonable(json.loads(row["encoding_json"]))
+                if stored.azure_person_id == person_id:
+                    return row["member_id"], stored
+        return None, None
+
     def get_member_encoding(self, member_id: str) -> FaceEncoding | None:
         with self._connect() as conn:
             row = conn.execute(
@@ -132,15 +148,52 @@ class Database:
             conn.commit()
 
     def create_member(self, encoding: FaceEncoding, member_id: str | None = None) -> str:
-        member_id = member_id or self._generate_member_id(encoding)
+        """Persist a new member record, generating a unique ID when necessary."""
+
+        payload = json.dumps(encoding.to_jsonable(), ensure_ascii=False)
+        candidate_id = member_id or self._generate_member_id(encoding)
+
+        try:
+            self._insert_member(candidate_id, payload)
+        except sqlite3.IntegrityError as exc:
+            _LOGGER.warning("Member ID %s already exists, generating a new ID", candidate_id)
+            last_error: sqlite3.IntegrityError | None = exc
+
+            fallback_candidates = []
+            sequential_id = self._generate_member_id(None)
+            if sequential_id and sequential_id != candidate_id:
+                fallback_candidates.append(sequential_id)
+
+            # Guarantee progress even under concurrent inserts by appending
+            # a few UUID based identifiers.
+            for _ in range(5):
+                fallback_candidates.append(self._generate_random_member_id())
+
+            for fallback in fallback_candidates:
+                try:
+                    self._insert_member(fallback, payload)
+                except sqlite3.IntegrityError as inner_exc:
+                    last_error = inner_exc
+                    continue
+                else:
+                    _LOGGER.info("Created new member %s", fallback)
+                    return fallback
+
+            raise last_error
+        else:
+            _LOGGER.info("Created new member %s", candidate_id)
+            return candidate_id
+
+    def _insert_member(self, member_id: str, payload: str) -> None:
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO members (member_id, encoding_json) VALUES (?, ?)",
-                (member_id, json.dumps(encoding.to_jsonable(), ensure_ascii=False)),
+                (member_id, payload),
             )
             conn.commit()
-        _LOGGER.info("Created new member %s", member_id)
-        return member_id
+
+    def _generate_random_member_id(self) -> str:
+        return f"MEM{uuid.uuid4().hex[:10].upper()}"
 
     def _generate_member_id(self, encoding: FaceEncoding | None = None) -> str:
         if encoding and encoding.face_description:

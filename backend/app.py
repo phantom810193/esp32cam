@@ -215,11 +215,18 @@ def upload_face():
     distance: float | None = None
     persisted_face_id: str | None = None
 
-    if encoding.azure_person_name:
-        stored_encoding = database.get_member_encoding(encoding.azure_person_name)
-        if stored_encoding is not None:
-            member_id = encoding.azure_person_name
+    if encoding.azure_person_id:
+        matched_member, stored_encoding = database.find_member_by_person_id(
+            encoding.azure_person_id
+        )
+        if matched_member:
+            member_id = matched_member
             distance = 0.0
+            if encoding.azure_person_name != matched_member:
+                encoding.azure_person_name = matched_member
+            if stored_encoding and stored_encoding.azure_person_name != matched_member:
+                stored_encoding.azure_person_name = matched_member
+                database.update_member_encoding(matched_member, stored_encoding)
 
     if (
         member_id is None
@@ -308,6 +315,9 @@ def upload_face():
                 if encoding.source != "azure-person-group":
                     encoding.source = "azure-face-list"
         member_id = database.create_member(encoding, member_seed)
+        if encoding.azure_person_id and encoding.azure_person_name != member_id:
+            encoding.azure_person_name = member_id
+            database.update_member_encoding(member_id, encoding)
         _create_welcome_purchase(member_id)
         new_member = True
     else:
@@ -318,11 +328,11 @@ def upload_face():
             if encoding.azure_person_id and stored_encoding.azure_person_id != encoding.azure_person_id:
                 stored_encoding.azure_person_id = encoding.azure_person_id
                 changed = True
-            if encoding.azure_person_name and stored_encoding.azure_person_name != encoding.azure_person_name:
-                stored_encoding.azure_person_name = encoding.azure_person_name
-                changed = True
-            elif encoding.azure_person_id and not stored_encoding.azure_person_name:
+            if encoding.azure_person_id and stored_encoding.azure_person_name != member_id:
                 stored_encoding.azure_person_name = member_id
+                changed = True
+            elif not stored_encoding.azure_person_name and encoding.azure_person_name:
+                stored_encoding.azure_person_name = encoding.azure_person_name
                 changed = True
             if (
                 persisted_face_id
@@ -341,7 +351,9 @@ def upload_face():
                 changed = True
             if changed:
                 database.update_member_encoding(member_id, stored_encoding)
-        if encoding.azure_person_id and not encoding.azure_person_name:
+        if encoding.azure_person_id:
+            encoding.azure_person_name = member_id
+        elif not encoding.azure_person_name:
             encoding.azure_person_name = member_id
         if (
             persisted_face_id is None

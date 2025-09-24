@@ -261,3 +261,36 @@ def test_person_group_training_updates_existing_person(client):
     assert updated.azure_person_name == "VIP777"
     assert updated.source == "azure-person-group"
     assert updated.azure_persisted_face_id == "persisted-1"
+
+
+def test_upload_generates_new_id_when_seed_conflicts(client, monkeypatch):
+    test_client, service, database = client
+
+    conflict_id = "MEMCOLLIDE"
+    legacy = FaceEncoding(
+        vector=np.zeros(128, dtype=np.float32),
+        face_description="legacy-member",
+        source="seed",
+    )
+    database.create_member(legacy, member_id=conflict_id)
+
+    monkeypatch.setattr(
+        "backend.app.recognizer.derive_member_id", lambda encoding: conflict_id
+    )
+
+    response = _post_image(test_client, b"new-face-bytes")
+    assert response.status_code == 201
+
+    payload = response.get_json()
+    assert payload["status"] == "ok"
+    assert payload["new_member"] is True
+    assert payload["member_id"] != conflict_id
+
+    stored_conflict = database.get_member_encoding(conflict_id)
+    assert stored_conflict is not None
+    assert stored_conflict.azure_person_id is None
+
+    fallback_encoding = database.get_member_encoding(payload["member_id"])
+    assert fallback_encoding is not None
+    assert fallback_encoding.azure_person_id is not None
+    assert fallback_encoding.azure_person_name == payload["member_id"]
