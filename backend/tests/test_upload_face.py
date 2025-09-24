@@ -110,7 +110,7 @@ class FlakyAzureFace:
         self.find_similar_calls += 1
         if not self.persisted_faces:
             return []
-        persisted_id, member_id = next(iter(self.persisted_faces.items()))
+        persisted_id, member_id = list(self.persisted_faces.items())[-1]
         return [
             {
                 "persisted_face_id": persisted_id,
@@ -180,6 +180,7 @@ def test_reuse_member_id_and_serialisation(client):
     assert stored_encoding["azure_face_id"] == "face-1"
     assert stored_encoding["azure_persisted_face_id"] == "persisted-1"
     assert "gemini_description" not in stored_encoding
+    assert database.get_member_persisted_face_ids(member_id) == ["persisted-1"]
 
     response_again = _post_image(test_client, image_payload)
     assert response_again.status_code == 200
@@ -191,6 +192,50 @@ def test_reuse_member_id_and_serialisation(client):
     assert service.register_calls == 1
     assert service.find_similar_calls >= 1
     assert service.face_list_add_calls >= 1
+    assert database.get_member_persisted_face_ids(member_id) == [
+        "persisted-1",
+        "persisted-2",
+    ]
+    assert database.find_member_by_persisted_face_id("persisted-1")[0] == member_id
+    assert database.find_member_by_persisted_face_id("persisted-2")[0] == member_id
+
+
+def test_find_similar_matches_additional_faces(client):
+    test_client, service, database = client
+
+    response = _post_image(test_client, b"first-face")
+    assert response.status_code == 201
+    member_id = response.get_json()["member_id"]
+
+    response_train = test_client.post(
+        "/person-group",
+        data={
+            "member_id": member_id,
+            "images": [(io.BytesIO(b"extra-face"), "extra.jpg", "image/jpeg")],
+        },
+        content_type="multipart/form-data",
+    )
+    assert response_train.status_code == 200
+
+    assert database.get_member_persisted_face_ids(member_id) == [
+        "persisted-1",
+        "persisted-2",
+    ]
+
+    service.person_id = None
+    service.registered_member = None
+    service.description = "戴眼鏡顧客"
+
+    returning = _post_image(test_client, b"returning-face")
+    assert returning.status_code == 200
+    payload = returning.get_json()
+    assert payload["member_id"] == member_id
+    assert payload["new_member"] is False
+    assert database.get_member_persisted_face_ids(member_id) == [
+        "persisted-1",
+        "persisted-2",
+    ]
+    assert service.find_similar_calls >= 2
 
 
 def test_person_group_training_creates_member(client):
@@ -220,6 +265,10 @@ def test_person_group_training_creates_member(client):
     assert encoding.azure_person_name == "VIP001"
     assert encoding.source == "azure-person-group"
     assert encoding.azure_persisted_face_id == "persisted-1"
+    assert database.get_member_persisted_face_ids("VIP001") == [
+        "persisted-1",
+        "persisted-2",
+    ]
 
 
 def test_person_group_training_updates_existing_person(client):
@@ -261,6 +310,10 @@ def test_person_group_training_updates_existing_person(client):
     assert updated.azure_person_name == "VIP777"
     assert updated.source == "azure-person-group"
     assert updated.azure_persisted_face_id == "persisted-1"
+    assert database.get_member_persisted_face_ids("VIP777") == [
+        "persisted-1",
+        "persisted-2",
+    ]
 
 
 def test_upload_generates_new_id_when_seed_conflicts(client, monkeypatch):

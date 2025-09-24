@@ -185,6 +185,9 @@ def person_group_trainer():
                     else:
                         database.update_member_encoding(member_id, encoding)
 
+                    for persisted in persisted_face_ids:
+                        database.register_persisted_face(member_id, persisted)
+
                 additional_faces = context["faces_registered"] - (1 if created_person else 0)
                 if additional_faces > 0:
                     try:
@@ -252,6 +255,7 @@ def upload_face():
                     member_id = matched_member
                     distance = 0.0
                     persisted_face_id = persisted
+                    database.register_persisted_face(matched_member, persisted)
                     confidence = match.get("confidence")
                     try:
                         encoding.azure_confidence = float(confidence) if confidence is not None else None
@@ -315,6 +319,10 @@ def upload_face():
                 if encoding.source != "azure-person-group":
                     encoding.source = "azure-face-list"
         member_id = database.create_member(encoding, member_seed)
+        if encoding.azure_persisted_face_id:
+            database.register_persisted_face(member_id, encoding.azure_persisted_face_id)
+        if persisted_face_id and persisted_face_id != encoding.azure_persisted_face_id:
+            database.register_persisted_face(member_id, persisted_face_id)
         if encoding.azure_person_id and encoding.azure_person_name != member_id:
             encoding.azure_person_name = member_id
             database.update_member_encoding(member_id, encoding)
@@ -372,6 +380,7 @@ def upload_face():
                 encoding.azure_persisted_face_id = persisted_face_id
                 if encoding.source != "azure-person-group":
                     encoding.source = "azure-face-list"
+                database.register_persisted_face(member_id, persisted_face_id)
                 stored_encoding = database.get_member_encoding(member_id)
                 if stored_encoding is not None:
                     stored_encoding.azure_persisted_face_id = persisted_face_id

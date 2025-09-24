@@ -46,6 +46,15 @@ class Database:
                     encoding_json TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS face_list_faces (
+                    persisted_face_id TEXT PRIMARY KEY,
+                    member_id TEXT NOT NULL,
+                    FOREIGN KEY(member_id) REFERENCES members(member_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_face_list_member
+                    ON face_list_faces(member_id);
+
                 CREATE TABLE IF NOT EXISTS purchases (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     member_id TEXT NOT NULL,
@@ -108,11 +117,58 @@ class Database:
             return None, None
 
         with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT m.member_id, m.encoding_json
+                  FROM face_list_faces AS f
+                  JOIN members AS m ON m.member_id = f.member_id
+                 WHERE f.persisted_face_id = ?
+                """,
+                (persisted_face_id,),
+            ).fetchone()
+            if row is not None:
+                stored = FaceEncoding.from_jsonable(json.loads(row["encoding_json"]))
+                return row["member_id"], stored
+
             for row in conn.execute("SELECT member_id, encoding_json FROM members"):
                 stored = FaceEncoding.from_jsonable(json.loads(row["encoding_json"]))
                 if stored.azure_persisted_face_id == persisted_face_id:
                     return row["member_id"], stored
         return None, None
+
+    def register_persisted_face(self, member_id: str, persisted_face_id: str) -> None:
+        """Record the association between an Azure face-list ID and a member."""
+
+        if not member_id or not persisted_face_id:
+            return
+
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO face_list_faces (persisted_face_id, member_id)
+                VALUES (?, ?)
+                ON CONFLICT(persisted_face_id) DO UPDATE SET member_id = excluded.member_id
+                """,
+                (persisted_face_id, member_id),
+            )
+            conn.commit()
+
+    def get_member_persisted_face_ids(self, member_id: str) -> list[str]:
+        """Return all Azure face-list identifiers known for ``member_id``."""
+
+        if not member_id:
+            return []
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT persisted_face_id FROM face_list_faces
+                 WHERE member_id = ?
+                 ORDER BY rowid
+                """,
+                (member_id,),
+            ).fetchall()
+        return [row["persisted_face_id"] for row in rows]
 
     def find_member_by_person_id(
         self, person_id: str
@@ -146,6 +202,8 @@ class Database:
                 (json.dumps(encoding.to_jsonable(), ensure_ascii=False), member_id),
             )
             conn.commit()
+        if encoding.azure_persisted_face_id:
+            self.register_persisted_face(member_id, encoding.azure_persisted_face_id)
 
     def create_member(self, encoding: FaceEncoding, member_id: str | None = None) -> str:
         """Persist a new member record, generating a unique ID when necessary."""
@@ -189,6 +247,8 @@ class Database:
                 continue
             else:
                 _LOGGER.info("Created new member %s", candidate_id)
+                if encoding.azure_persisted_face_id:
+                    self.register_persisted_face(candidate_id, encoding.azure_persisted_face_id)
                 return candidate_id
 
     def _insert_member(self, member_id: str, payload: str) -> None:
