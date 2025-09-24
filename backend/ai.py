@@ -1,24 +1,38 @@
-"""Utilities for interacting with Gemini to power the cloud-based MVP."""
+"""Utilities for interacting with Azure Face to power the cloud-based MVP."""
 from __future__ import annotations
 
+import inspect
+import io
 import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Iterator, Sequence
+from urllib import error as urllib_error
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
 
 try:  # pragma: no cover - optional dependency for offline development
-    import google.generativeai as genai  # type: ignore
-    from google.api_core import exceptions as google_exceptions  # type: ignore
+    from azure.ai.vision.face import FaceClient as VisionFaceClient  # type: ignore
+    from azure.core.credentials import AzureKeyCredential  # type: ignore
 except Exception:  # pragma: no cover - guard against missing dependencies
-    genai = None  # type: ignore
-    google_exceptions = None  # type: ignore
+    VisionFaceClient = None  # type: ignore
+    AzureKeyCredential = None  # type: ignore
+
+try:  # pragma: no cover - optional dependency for offline development
+    from azure.cognitiveservices.vision.face import FaceClient as CognitiveFaceClient  # type: ignore
+    from azure.cognitiveservices.vision.face.models import FaceAttributeType  # type: ignore
+    from msrest.authentication import CognitiveServicesCredentials  # type: ignore
+except Exception:  # pragma: no cover - guard against missing dependencies
+    CognitiveFaceClient = None  # type: ignore
+    FaceAttributeType = None  # type: ignore
+    CognitiveServicesCredentials = None  # type: ignore
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class GeminiUnavailableError(RuntimeError):
-    """Raised when Gemini features are requested but not configured."""
+class AzureFaceError(RuntimeError):
+    """Raised when Azure Face features are requested but not configured."""
 
 
 @dataclass
@@ -30,154 +44,1734 @@ class AdCreative:
     highlight: str
 
 
-class GeminiService:
-    """Thin wrapper around the Gemini Vision + Text APIs used by the MVP."""
+@dataclass
+class FaceAnalysis:
+    """Aggregated view of a detected face returned by Azure Face."""
+
+    description: str
+    face_id: str | None = None
+    person_id: str | None = None
+    person_name: str | None = None
+    confidence: float | None = None
+
+
+class AzureFaceService:
+    """Thin wrapper around the Azure Face APIs used by the MVP."""
+
+    _DEFAULT_FACE_ATTRIBUTES: Sequence[str] = (
+        "age",
+        "gender",
+        "glasses",
+        "facialHair",
+        "emotion",
+        "hair",
+        "makeup",
+        "accessories",
+        "smile",
+    )
 
     def __init__(
         self,
+        endpoint: str | None = None,
         api_key: str | None = None,
         *,
-        vision_model: str = "gemini-1.5-flash",
-        text_model: str = "gemini-1.5-flash",
-        timeout: float = 20.0,
+        client: Any | None = None,
+        detection_model: str = "detection_04",
+        recognition_model: str = "recognition_04",
+        person_group_id: str | None = None,
+        face_list_id: str | None = None,
     ) -> None:
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
-        self._vision_model_name = vision_model
-        self._text_model_name = text_model
-        self._timeout = timeout
-        self._vision_model = None
-        self._text_model = None
+        self.endpoint = endpoint or os.getenv("AZURE_FACE_ENDPOINT")
+        self.api_key = api_key or os.getenv("AZURE_FACE_KEY")
+        self._detection_model = detection_model
+        self._recognition_model = recognition_model
+        self._client = client
+        self._client_variant: str | None = None
+        self._rest_adapter: _AzureFaceRestAdapter | None = None
+        self.person_group_id = (
+            (person_group_id or os.getenv("AZURE_FACE_PERSON_GROUP_ID") or "esp32cam-mvp")
+            .strip()
+            .lower()
+        )
+        default_face_list = (
+            f"{self.person_group_id}-faces" if self.person_group_id else "esp32cam-mvp-faces"
+        )
+        self.face_list_id = (
+            (face_list_id or os.getenv("AZURE_FACE_LIST_ID") or default_face_list)
+            .strip()
+            .lower()
+        )
+        self._person_group_ready = False
+        self._person_group_enabled = bool(self.person_group_id)
+        self._person_group_error: str | None = None
+        self._face_list_ready = False
+        self._face_list_enabled = bool(self.face_list_id)
 
-        if self.api_key and genai is not None:
-            genai.configure(api_key=self.api_key)
-            try:
-                self._vision_model = genai.GenerativeModel(self._vision_model_name)
-                self._text_model = genai.GenerativeModel(self._text_model_name)
-                _LOGGER.info(
-                    "Gemini service initialised with models %s (vision) / %s (text)",
-                    self._vision_model_name,
-                    self._text_model_name,
-                )
-            except Exception as exc:  # pragma: no cover - configuration failure
-                _LOGGER.error("Failed to initialise Gemini models: %s", exc)
-                self._vision_model = None
-                self._text_model = None
-        elif self.api_key and genai is None:
-            _LOGGER.warning(
-                "google-generativeai is not installed. Install it to enable Gemini features."
-            )
+        if self._client is None and self.endpoint and self.api_key:
+            self._client, self._client_variant = self._create_client()
+        elif self._client is not None:
+            self._client_variant = "custom"
         else:
-            _LOGGER.info("GEMINI_API_KEY not provided. Gemini-powered features are disabled.")
+            _LOGGER.info(
+                "Azure Face 未設定（需要 AZURE_FACE_ENDPOINT / AZURE_FACE_KEY），將使用雜湊 fallback"
+            )
+
+        if self._client is not None and self.person_group_id:
+            try:
+                self._ensure_person_group()
+            except AzureFaceError as exc:  # pragma: no cover - network/runtime errors
+                if not self._person_group_enabled and self._person_group_error:
+                    _LOGGER.warning(
+                        "Azure Face person group disabled: %s", self._person_group_error
+                    )
+                else:
+                    _LOGGER.warning("Failed to prepare Azure Face person group: %s", exc)
+        if self._client is not None and self.face_list_id:
+            try:
+                self._ensure_face_list()
+            except AzureFaceError as exc:  # pragma: no cover - runtime errors
+                _LOGGER.warning("Failed to prepare Azure Face face list: %s", exc)
+
+    # ------------------------------------------------------------------
+    def _create_client(self) -> tuple[Any | None, str | None]:
+        if VisionFaceClient is not None and AzureKeyCredential is not None:
+            try:
+                client = VisionFaceClient(self.endpoint, AzureKeyCredential(self.api_key))  # type: ignore[arg-type]
+                _LOGGER.info("Azure Face service initialised using azure-ai-vision-face")
+                return client, "vision"
+            except Exception as exc:  # pragma: no cover - runtime failure
+                _LOGGER.error("Failed to initialise azure-ai-vision-face client: %s", exc)
+
+        if CognitiveFaceClient is not None and CognitiveServicesCredentials is not None:
+            try:
+                client = CognitiveFaceClient(
+                    self.endpoint, CognitiveServicesCredentials(self.api_key)
+                )
+                _LOGGER.info(
+                    "Azure Face service initialised using azure-cognitiveservices-vision-face"
+                )
+                return client, "cognitive"
+            except Exception as exc:  # pragma: no cover - runtime failure
+                _LOGGER.error(
+                    "Failed to initialise azure-cognitiveservices-vision-face client: %s", exc
+                )
+
+        if self.endpoint and self.api_key:
+            _LOGGER.warning(
+                "Azure Face SDK 未安裝，請安裝 azure-ai-vision-face 或 azure-cognitiveservices-vision-face"
+            )
+        return None, None
 
     # ------------------------------------------------------------------
     @property
     def can_describe_faces(self) -> bool:
-        return self._vision_model is not None
+        return self._client is not None
 
     @property
     def can_generate_ads(self) -> bool:
-        return self._text_model is not None
+        # Azure Face 僅提供臉部偵測；我們保留一個簡單模板供廣告頁面使用。
+        return True
+
+    @property
+    def can_manage_person_group(self) -> bool:
+        return self.can_describe_faces and self._person_group_enabled
+
+    @property
+    def can_use_face_list(self) -> bool:
+        return self.can_describe_faces and self._face_list_enabled
+
+    @property
+    def person_group_error(self) -> str | None:
+        return self._person_group_error
 
     # ------------------------------------------------------------------
-    def describe_face(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
-        """Return a stable textual signature for the supplied face image."""
+    def analyze_face(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> FaceAnalysis:
+        """Detect a face, return its description and any known Azure person mapping."""
+
+        del mime_type
 
         if not self.can_describe_faces:
-            raise GeminiUnavailableError("Gemini Vision model is not configured")
-
-        assert self._vision_model is not None  # for the type checker
-        prompt = (
-            "你是一個用於匿名會員辨識的生物特徵助手。請用 3~4 個重點描述此照片中人物"\
-            "的臉部特徵（例如：髮型、配件、年齡層、明顯特徵），"\
-            "並輸出為單行中文短句，避免包含任何個資或主觀評價。"
-        )
-
-        content: Sequence[object] = (
-            {"mime_type": mime_type or "image/jpeg", "data": image_bytes},
-            prompt,
-        )
-        try:
-            response = self._vision_model.generate_content(
-                content,
-                request_options={"timeout": self._timeout},
+            raise AzureFaceError(
+                "Azure Face service is not configured. Set AZURE_FACE_ENDPOINT and AZURE_FACE_KEY."
             )
-        except Exception as exc:  # pragma: no cover - network/runtime errors
-            if google_exceptions and isinstance(exc, google_exceptions.GoogleAPICallError):
-                raise GeminiUnavailableError(f"Gemini Vision API error: {exc}") from exc
-            raise GeminiUnavailableError(f"Gemini Vision failed: {exc}") from exc
 
-        description = (response.text or "").strip()
-        if not description:
-            raise GeminiUnavailableError("Gemini Vision returned an empty description")
-        _LOGGER.debug("Gemini Vision signature: %s", description)
-        return description
+        stream = io.BytesIO(image_bytes)
+        try:
+            faces = self._detect_with_stream(stream, return_face_id=True)
+        except AzureFaceError:
+            raise
+        except Exception as exc:  # pragma: no cover - network/runtime errors
+            raise AzureFaceError(f"Azure Face detection failed: {exc}") from exc
+
+        if not faces:
+            raise AzureFaceError("Azure Face did not detect any faces in the image")
+        if len(faces) > 1:
+            _LOGGER.debug("Azure Face detected %d faces, selecting the first", len(faces))
+
+        face = faces[0]
+        attributes = self._extract_face_attributes(face)
+        description = self._format_face_description(attributes)
+        face_id = self._extract_face_id(face)
+
+        person_id = None
+        person_name = None
+        confidence = None
+        if self.can_manage_person_group and face_id:
+            try:
+                self._ensure_person_group()
+                results = self._identify_face_ids([face_id])
+                candidate = self._select_best_candidate(results)
+                if candidate is not None:
+                    person_id = candidate["person_id"]
+                    confidence = candidate.get("confidence")
+                    person_name = self._resolve_person_name(person_id)
+            except AzureFaceError as exc:
+                _LOGGER.warning("Azure Face identify failed: %s", exc)
+
+        if not description and not person_id:
+            raise AzureFaceError("Azure Face returned no usable attributes for the detected face")
+
+        analysis = FaceAnalysis(
+            description=description or "",
+            face_id=face_id,
+            person_id=person_id,
+            person_name=person_name,
+            confidence=confidence,
+        )
+        _LOGGER.debug(
+            "Azure Face analysis: id=%s, name=%s, confidence=%s, description=%s",
+            analysis.person_id,
+            analysis.person_name,
+            analysis.confidence,
+            analysis.description,
+        )
+        return analysis
+
+    def describe_face(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
+        """Return a stable textual description for the supplied face image."""
+
+        analysis = self.analyze_face(image_bytes, mime_type=mime_type)
+        return analysis.description
+
+    def register_person(
+        self,
+        member_id: str,
+        image_bytes: bytes,
+        *,
+        user_data: str | None = None,
+    ) -> str:
+        """Add a new Azure Face person and associate the uploaded face image."""
+
+        if not self.can_manage_person_group:
+            raise AzureFaceError("Azure Face person group features are not available")
+
+        self._ensure_person_group()
+        person_client = self._get_person_group_person_client()
+        stream = io.BytesIO(image_bytes)
+
+        try:
+            create_params = self._build_call_args(
+                getattr(person_client, "create"),
+                {
+                    "person_group_id": self.person_group_id,
+                    "name": member_id,
+                    "user_data": user_data or member_id,
+                },
+            )
+            person = person_client.create(**create_params)
+        except Exception as exc:  # pragma: no cover - runtime failures
+            raise self._transform_person_group_exception(
+                exc, "Failed to create Azure Face person"
+            ) from exc
+
+        person_id = self._extract_person_id(person)
+        if not person_id:
+            raise AzureFaceError("Azure Face did not return a person identifier")
+
+        self._attach_face_to_person_stream(person_id, stream)
+
+        self.train_person_group()
+
+        return person_id
+
+    # ------------------------------------------------------------------
+    def add_face_to_person(self, person_id: str, image_bytes: bytes) -> None:
+        """Associate an additional face image with an existing Azure person."""
+
+        if not self.can_manage_person_group:
+            raise AzureFaceError("Azure Face person group features are not available")
+
+        self._ensure_person_group()
+        stream = io.BytesIO(image_bytes)
+        self._attach_face_to_person_stream(person_id, stream)
+
+    def train_person_group(self, *, suppress_errors: bool = True) -> None:
+        """Trigger training for the configured Azure Face person group."""
+
+        if not self.can_manage_person_group:
+            raise AzureFaceError("Azure Face person group features are not available")
+
+        group_client = self._get_person_group_client()
+        try:
+            train_params = self._build_call_args(
+                getattr(group_client, "train"),
+                {"person_group_id": self.person_group_id},
+            )
+            group_client.train(**train_params)
+        except Exception as exc:  # pragma: no cover - runtime failures
+            transformed = self._transform_person_group_exception(
+                exc, "Failed to train Azure Face person group"
+            )
+            if suppress_errors:
+                _LOGGER.warning(str(transformed))
+                return
+            raise transformed from exc
+
+    def add_face_to_face_list(
+        self,
+        member_id: str,
+        image_bytes: bytes,
+        *,
+        user_data: str | None = None,
+    ) -> str:
+        """Persist the supplied face image into the configured Azure face list."""
+
+        if not self.can_use_face_list:
+            raise AzureFaceError("Azure Face face list features are not available")
+
+        self._ensure_face_list()
+        face_list_client = self._get_face_list_client()
+        if face_list_client is None:
+            raise AzureFaceError("Azure Face client does not expose face list operations")
+
+        stream = io.BytesIO(image_bytes)
+        stream.seek(0)
+        candidate_kwargs = {
+            "face_list_id": self.face_list_id,
+            "image": stream,
+            "stream": stream,
+            "input": stream,
+            "image_stream": stream,
+            "user_data": user_data or member_id,
+            "detection_model": self._detection_model,
+        }
+        add_args = self._build_call_args(
+            getattr(face_list_client, "add_face_from_stream", None),
+            candidate_kwargs,
+        )
+        if add_args is None:
+            raise AzureFaceError("Azure Face client does not provide add_face_from_stream")
+
+        try:
+            result = face_list_client.add_face_from_stream(**add_args)
+        except TypeError:
+            remaining_kwargs = {
+                key: value
+                for key, value in candidate_kwargs.items()
+                if key not in {"image", "stream", "input", "image_stream"}
+            }
+            try:
+                result = face_list_client.add_face_from_stream(stream, **remaining_kwargs)
+            except Exception as exc:  # pragma: no cover - runtime failures
+                raise AzureFaceError(f"Failed to add face to Azure face list: {exc}") from exc
+        except Exception as exc:  # pragma: no cover - runtime failures
+            raise AzureFaceError(f"Failed to add face to Azure face list: {exc}") from exc
+
+        persisted_face_id = self._extract_persisted_face_id(result)
+        if not persisted_face_id:
+            raise AzureFaceError("Azure Face did not return a persisted face identifier")
+        return persisted_face_id
+
+    def find_similar_faces(
+        self,
+        face_id: str,
+        *,
+        max_candidates: int = 5,
+        mode: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Use Azure Face findSimilar to locate persisted faces similar to ``face_id``."""
+
+        if not self.can_use_face_list:
+            raise AzureFaceError("Azure Face face list features are not available")
+        if not face_id:
+            raise AzureFaceError("face_id is required to call Azure Face findSimilar")
+
+        self._ensure_face_list()
+
+        face_operations = self._get_face_operations()
+        if face_operations is None:
+            raise AzureFaceError("Azure Face client does not expose face operations")
+
+        candidate_kwargs = {
+            "face_id": face_id,
+            "face_list_id": self.face_list_id,
+            "max_num_of_candidates_returned": max_candidates,
+            "max_num_of_candidates": max_candidates,
+            "mode": mode or "matchPerson",
+        }
+        call_args = self._build_call_args(
+            getattr(face_operations, "find_similar", None),
+            candidate_kwargs,
+        )
+        if call_args is None:
+            raise AzureFaceError("Azure Face client does not provide find_similar")
+
+        try:
+            results = face_operations.find_similar(**call_args)
+        except Exception as exc:  # pragma: no cover - runtime failures
+            raise AzureFaceError(f"Azure Face findSimilar failed: {exc}") from exc
+
+        matches: list[dict[str, Any]] = []
+        if isinstance(results, (list, tuple)):
+            for item in results:
+                persisted = self._extract_persisted_face_id(item)
+                confidence = self._safe_get(item, "confidence")
+                matches.append(
+                    {
+                        "persisted_face_id": persisted,
+                        "confidence": confidence,
+                        "raw": item,
+                    }
+                )
+        return matches
+
+    def find_person_id_by_name(self, member_name: str) -> str | None:
+        """Return the Azure person identifier registered with the given name."""
+
+        if not self.can_manage_person_group:
+            return None
+
+        self._ensure_person_group()
+        person_client = self._get_person_group_person_client()
+
+        try:
+            call_args = self._build_call_args(
+                getattr(person_client, "list", None),
+                {"person_group_id": self.person_group_id},
+            )
+            if call_args is None:
+                raise AttributeError("list")
+            persons = person_client.list(**call_args)
+        except Exception as exc:  # pragma: no cover - runtime failures
+            raise self._transform_person_group_exception(
+                exc, "Failed to enumerate Azure Face persons"
+            ) from exc
+
+        if persons is None:
+            return None
+
+        for person in persons:
+            if isinstance(person, dict):
+                name = person.get("name")
+                user_data = person.get("user_data") or person.get("userData")
+            else:
+                name = getattr(person, "name", None)
+                user_data = getattr(person, "user_data", None) or getattr(
+                    person, "userData", None
+                )
+
+            if isinstance(name, str) and name == member_name:
+                return self._extract_person_id(person)
+            if isinstance(user_data, str) and user_data == member_name:
+                return self._extract_person_id(person)
+
+        return None
+
+    # ------------------------------------------------------------------
+    def _detect_with_stream(self, stream: io.BytesIO, *, return_face_id: bool = False):
+        stream.seek(0)
+        if self._client is None:
+            raise AzureFaceError("Azure Face client is not available")
+
+        face_operation = getattr(self._client, "face", None)
+        kwargs = {
+            "return_face_attributes": self._resolve_face_attributes(),
+            "detection_model": self._detection_model,
+            "recognition_model": self._recognition_model,
+            "return_face_id": return_face_id,
+        }
+
+        if callable(face_operation):  # pragma: no cover - unexpected signature
+            face_operation = face_operation()
+
+        if face_operation is not None and hasattr(face_operation, "detect_with_stream"):
+            detector = getattr(face_operation, "detect_with_stream")
+        else:
+            detector = getattr(self._client, "detect_with_stream", None)
+
+        if detector is None:
+            raise AzureFaceError("Azure Face client does not provide detect_with_stream")
+
+        candidate_kwargs = {
+            "image": stream,
+            "stream": stream,
+            "input": stream,
+            "image_stream": stream,
+            "detection_model": self._detection_model,
+            "recognition_model": self._recognition_model,
+            "return_face_attributes": kwargs["return_face_attributes"],
+            "return_face_id": return_face_id,
+        }
+        call_args = self._build_call_args(detector, candidate_kwargs)
+        try:
+            return detector(**call_args)
+        except TypeError:
+            # Fallback to legacy signature where stream is the first positional argument.
+            remaining_kwargs = {
+                key: value
+                for key, value in candidate_kwargs.items()
+                if key not in {"image", "stream", "input", "image_stream"}
+            }
+            return detector(stream, **remaining_kwargs)
+
+    def _resolve_face_attributes(self) -> Sequence[Any]:
+        if FaceAttributeType is None:
+            return self._DEFAULT_FACE_ATTRIBUTES
+        return [
+            FaceAttributeType.age,
+            FaceAttributeType.gender,
+            FaceAttributeType.glasses,
+            FaceAttributeType.facial_hair,
+            FaceAttributeType.emotion,
+            FaceAttributeType.hair,
+            FaceAttributeType.makeup,
+            FaceAttributeType.accessories,
+            FaceAttributeType.smile,
+        ]
+
+    @staticmethod
+    def _extract_face_attributes(face: Any) -> Any:
+        for attribute_name in ("face_attributes", "faceAttributes"):
+            if hasattr(face, attribute_name):
+                return getattr(face, attribute_name)
+            if isinstance(face, dict) and attribute_name in face:
+                return face[attribute_name]
+        return face
+
+    @staticmethod
+    def _extract_face_id(face: Any) -> str | None:
+        for attribute_name in ("face_id", "faceId", "id"):
+            value = None
+            if hasattr(face, attribute_name):
+                value = getattr(face, attribute_name)
+            elif isinstance(face, dict):
+                value = face.get(attribute_name)
+            if isinstance(value, str) and value:
+                return value
+        return None
+
+    def _format_face_description(self, attrs: Any) -> str:
+        parts: list[str] = []
+
+        age = self._safe_get(attrs, "age")
+        if isinstance(age, (int, float)) and age > 0:
+            parts.append(f"約 {int(round(age)):d} 歲")
+
+        gender = self._safe_get(attrs, "gender")
+        if isinstance(gender, str) and gender:
+            cleaned = gender.strip().lower()
+            if cleaned in {"male", "female"}:
+                parts.append("男性" if cleaned == "male" else "女性")
+            else:
+                parts.append(gender.strip())
+
+        hair = self._describe_hair(attrs)
+        if hair:
+            parts.append(hair)
+
+        glasses = self._describe_glasses(attrs)
+        if glasses:
+            parts.append(glasses)
+
+        accessories = self._describe_accessories(attrs)
+        if accessories:
+            parts.append(accessories)
+
+        facial_hair = self._describe_facial_hair(attrs)
+        if facial_hair:
+            parts.append(facial_hair)
+
+        smile = self._safe_get(attrs, "smile")
+        if isinstance(smile, (int, float)) and smile >= 0.5:
+            parts.append("帶著笑容")
+
+        emotion = self._describe_emotion(attrs)
+        if emotion:
+            parts.append(emotion)
+
+        description = "、".join(part for part in parts if part)
+        return description.strip()
+
+    @staticmethod
+    def _safe_get(obj: Any, attribute: str) -> Any:
+        if obj is None:
+            return None
+        if isinstance(obj, dict):
+            return obj.get(attribute)
+        return getattr(obj, attribute, None)
+
+    def _describe_hair(self, attrs: Any) -> str:
+        hair = self._safe_get(attrs, "hair")
+        if hair is None:
+            return ""
+
+        length = self._safe_get(hair, "hair_length") or self._safe_get(hair, "length")
+        if isinstance(length, str):
+            length = length.replace("_", " ")
+
+        colours = self._safe_get(hair, "hair_color") or self._safe_get(hair, "hairColor")
+        colour_label = ""
+        best_confidence = 0.0
+        if colours:
+            for colour in colours:
+                if isinstance(colour, dict):
+                    label = colour.get("color")
+                    confidence = colour.get("confidence", 0.0)
+                else:
+                    label = getattr(colour, "color", None)
+                    confidence = getattr(colour, "confidence", 0.0)
+                try:
+                    score = float(confidence)
+                except (TypeError, ValueError):
+                    score = 0.0
+                if score >= best_confidence and isinstance(label, str) and label:
+                    best_confidence = score
+                    colour_label = label.replace("_", " ")
+
+        segments = []
+        if colour_label:
+            segments.append(colour_label)
+        if isinstance(length, str) and length:
+            segments.append(length)
+        if segments:
+            return "".join(segments) + "髮"
+        return ""
+
+    def _describe_glasses(self, attrs: Any) -> str:
+        glasses = self._safe_get(attrs, "glasses")
+        if isinstance(glasses, str):
+            cleaned = glasses.strip().lower()
+            if cleaned and cleaned not in {"noglasses", "no_glasses", "none"}:
+                if "sunglasses" in cleaned:
+                    return "配戴墨鏡"
+                return "配戴眼鏡"
+        return ""
+
+    def _describe_accessories(self, attrs: Any) -> str:
+        accessories = self._safe_get(attrs, "accessories")
+        if not accessories:
+            return ""
+        labels: list[str] = []
+        for accessory in accessories:
+            if isinstance(accessory, dict):
+                label = accessory.get("type") or accessory.get("type_")
+                confidence = accessory.get("confidence")
+            else:
+                label = getattr(accessory, "type", None) or getattr(accessory, "type_", None)
+                confidence = getattr(accessory, "confidence", None)
+            try:
+                score = float(confidence) if confidence is not None else 0.0
+            except (TypeError, ValueError):
+                score = 0.0
+            if score < 0.3 or not isinstance(label, str):
+                continue
+            cleaned = label.split(".")[-1].replace("_", " ")
+            labels.append(cleaned)
+        if labels:
+            return f"配戴{'、'.join(labels)}"
+        return ""
+
+    def _describe_facial_hair(self, attrs: Any) -> str:
+        facial_hair = self._safe_get(attrs, "facial_hair") or self._safe_get(attrs, "facialHair")
+        if not facial_hair:
+            return ""
+        scores = []
+        for key in ("beard", "moustache", "sideburns"):
+            value = self._safe_get(facial_hair, key)
+            if isinstance(value, (int, float)):
+                scores.append(float(value))
+        if any(score > 0.5 for score in scores):
+            return "留有鬍鬚"
+        return ""
+
+    def _describe_emotion(self, attrs: Any) -> str:
+        emotion = self._safe_get(attrs, "emotion")
+        if not emotion:
+            return ""
+
+        mapping = {
+            "happiness": "開朗",
+            "sadness": "憂鬱",
+            "neutral": "神情平和",
+            "anger": "表情嚴肅",
+            "surprise": "略顯驚訝",
+        }
+        best_label = ""
+        best_score = 0.0
+        for name, value in self._iter_properties(emotion):
+            if name in {"additional_properties"}:
+                continue
+            try:
+                score = float(value)
+            except (TypeError, ValueError):
+                continue
+            if score > best_score:
+                best_score = score
+                best_label = mapping.get(name, "")
+        if best_label and best_score >= 0.5:
+            return best_label
+        return ""
+
+    @staticmethod
+    def _iter_properties(obj: Any) -> Iterator[tuple[str, Any]]:
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                yield key, value
+        else:
+            for name in dir(obj):
+                if name.startswith("_"):
+                    continue
+                value = getattr(obj, name, None)
+                if callable(value):
+                    continue
+                yield name, value
+
+    # ------------------------------------------------------------------
+    def _identify_face_ids(self, face_ids: Sequence[str]):
+        if not face_ids:
+            return []
+        if not self.can_manage_person_group:
+            raise AzureFaceError("Azure Face person group features are not available")
+
+        face_operation = getattr(self._client, "face", None)
+        if callable(face_operation):  # pragma: no cover - unexpected signature
+            face_operation = face_operation()
+
+        if face_operation is not None and hasattr(face_operation, "identify"):
+            identify = getattr(face_operation, "identify")
+        else:
+            identify = getattr(self._client, "identify", None)
+
+        if identify is None:
+            adapter = self._get_rest_adapter()
+            if adapter is not None:
+                identify = adapter.identify
+
+        if identify is None:
+            raise AzureFaceError("Azure Face client does not provide identify")
+
+        call_args = self._build_call_args(
+            identify,
+            {
+                "person_group_id": self.person_group_id,
+                "face_ids": list(face_ids),
+                "max_num_of_candidates_return": 1,
+                "max_num_of_candidates": 1,
+            },
+        )
+
+        try:
+            return identify(**call_args)
+        except Exception as exc:  # pragma: no cover - runtime failures
+            raise self._transform_person_group_exception(
+                exc, "Azure Face identification failed"
+            ) from exc
+
+    def _select_best_candidate(self, results: Any) -> dict[str, Any] | None:
+        best_candidate: dict[str, Any] | None = None
+        best_confidence = 0.0
+
+        if isinstance(results, Sequence) and not isinstance(results, (str, bytes)):
+            iterable = results
+        else:
+            iterable = [results]
+        for result in iterable:
+            candidates = getattr(result, "candidates", None) or (
+                result.get("candidates") if isinstance(result, dict) else None
+            )
+            if not candidates:
+                continue
+            for candidate in candidates:
+                person_id = getattr(candidate, "person_id", None) or (
+                    candidate.get("person_id") if isinstance(candidate, dict) else None
+                )
+                if person_id is None:
+                    person_id = getattr(candidate, "personId", None)
+                confidence = getattr(candidate, "confidence", None)
+                if isinstance(candidate, dict):
+                    confidence = candidate.get("confidence", confidence)
+                try:
+                    score = float(confidence) if confidence is not None else 0.0
+                except (TypeError, ValueError):
+                    score = 0.0
+                if not isinstance(person_id, str) or not person_id:
+                    continue
+                if best_candidate is None or score > best_confidence:
+                    best_confidence = score
+                    best_candidate = {
+                        "person_id": person_id,
+                        "confidence": score,
+                    }
+        return best_candidate
+
+    def _get_rest_adapter(self) -> _AzureFaceRestAdapter | None:
+        if self._rest_adapter is not None:
+            return self._rest_adapter
+        if not self.endpoint or not self.api_key:
+            return None
+        try:
+            self._rest_adapter = _AzureFaceRestAdapter(
+                self.endpoint,
+                self.api_key,
+                detection_model=self._detection_model,
+                recognition_model=self._recognition_model,
+            )
+        except AzureFaceError as exc:  # pragma: no cover - runtime errors
+            _LOGGER.warning("Failed to initialise Azure Face REST fallback: %s", exc)
+            return None
+        return self._rest_adapter
+
+    def _resolve_person_name(self, person_id: str | None) -> str | None:
+        if not person_id or not self.can_manage_person_group:
+            return None
+
+        person_client = self._get_person_group_person_client()
+        try:
+            call_args = self._build_call_args(
+                getattr(person_client, "get"),
+                {
+                    "person_group_id": self.person_group_id,
+                    "person_id": person_id,
+                },
+            )
+            person = person_client.get(**call_args)
+        except Exception as exc:  # pragma: no cover - runtime failures
+            message = self._detect_identification_permission_issue(exc)
+            if message:
+                self._disable_person_group(message)
+                _LOGGER.warning("Azure Face person group disabled: %s", message)
+            else:
+                _LOGGER.warning("Failed to fetch Azure Face person metadata: %s", exc)
+            return None
+
+        for attribute in ("name", "user_data", "userData"):
+            value = getattr(person, attribute, None)
+            if isinstance(person, dict):
+                value = value or person.get(attribute)
+            if isinstance(value, str) and value:
+                return value
+        return None
+
+    def _ensure_person_group(self) -> None:
+        if not self.can_manage_person_group:
+            if self._person_group_error:
+                raise AzureFaceError(self._person_group_error)
+            raise AzureFaceError("Azure Face person group features are not available")
+        if self._person_group_ready:
+            return
+        group_client = self._get_person_group_client()
+        try:
+            call_args = self._build_call_args(
+                getattr(group_client, "get"),
+                {"person_group_id": self.person_group_id},
+            )
+            group_client.get(**call_args)
+        except Exception as exc:  # pragma: no cover - runtime failures
+            message = self._detect_identification_permission_issue(exc)
+            if message:
+                self._disable_person_group(message)
+                raise AzureFaceError(message) from exc
+            try:
+                self._create_person_group()
+            except AzureFaceError as inner_exc:
+                raise inner_exc
+        else:
+            self._person_group_ready = True
+
+    def _create_person_group(self) -> None:
+        group_client = self._get_person_group_client()
+        try:
+            call_args = self._build_call_args(
+                getattr(group_client, "create"),
+                {
+                    "person_group_id": self.person_group_id,
+                    "name": self.person_group_id,
+                    "recognition_model": self._recognition_model,
+                },
+            )
+            group_client.create(**call_args)
+            self._person_group_ready = True
+        except Exception as exc:  # pragma: no cover - runtime failures
+            raise self._transform_person_group_exception(
+                exc, "Failed to create Azure Face person group"
+            ) from exc
+
+    def _get_person_group_client(self):
+        candidate_attributes = (
+            "person_group",
+            "personGroup",
+            "person_group_client",
+            "personGroupClient",
+            "person_group_operations",
+            "personGroupOperations",
+            "get_person_group_client",
+            "get_person_group",
+        )
+
+        last_error: Exception | None = None
+        for attribute in candidate_attributes:
+            group_client = getattr(self._client, attribute, None)
+            if group_client is None:
+                continue
+
+            if callable(group_client):
+                try:
+                    call_args = self._build_call_args(
+                        group_client,
+                        {"person_group_id": self.person_group_id},
+                    )
+                    group_client = group_client(**call_args)
+                except TypeError:  # pragma: no cover - signature without kwargs
+                    try:
+                        group_client = group_client()
+                    except Exception as exc:  # pragma: no cover - runtime failure
+                        last_error = exc
+                        continue
+                except Exception as exc:  # pragma: no cover - runtime failure
+                    last_error = exc
+                    continue
+
+            if group_client is not None:
+                return group_client
+
+        adapter = self._get_rest_adapter()
+        if adapter is not None:
+            _LOGGER.info("Using Azure Face REST fallback for person group operations")
+            return adapter.person_group
+
+        if last_error is not None:
+            raise AzureFaceError(
+                f"Failed to obtain Azure Face person group client: {last_error}"
+            ) from last_error
+        raise AzureFaceError("Azure Face client does not expose person group operations")
+
+    def _get_person_group_person_client(self):
+        candidate_attributes = (
+            "person_group_person",
+            "personGroupPerson",
+            "person_group_person_client",
+            "personGroupPersonClient",
+            "person_group_person_operations",
+            "personGroupPersonOperations",
+            "get_person_group_person_client",
+            "get_person_group_person",
+        )
+
+        last_error: Exception | None = None
+        for attribute in candidate_attributes:
+            person_client = getattr(self._client, attribute, None)
+            if person_client is None:
+                continue
+
+            if callable(person_client):
+                try:
+                    call_args = self._build_call_args(
+                        person_client,
+                        {"person_group_id": self.person_group_id},
+                    )
+                    person_client = person_client(**call_args)
+                except TypeError:  # pragma: no cover - signature without kwargs
+                    try:
+                        person_client = person_client()
+                    except Exception as exc:  # pragma: no cover - runtime failure
+                        last_error = exc
+                        continue
+                except Exception as exc:  # pragma: no cover - runtime failure
+                    last_error = exc
+                    continue
+
+            if person_client is not None:
+                return person_client
+
+        adapter = self._get_rest_adapter()
+        if adapter is not None:
+            _LOGGER.info("Using Azure Face REST fallback for person operations")
+            return adapter.person_group_person
+
+        if last_error is not None:
+            raise AzureFaceError(
+                f"Failed to obtain Azure Face person client: {last_error}"
+            ) from last_error
+        raise AzureFaceError("Azure Face client does not expose person operations")
+
+    def _ensure_face_list(self) -> None:
+        if not self.can_use_face_list:
+            raise AzureFaceError("Azure Face face list features are not available")
+        if self._face_list_ready:
+            return
+
+        face_list_client = self._get_face_list_client()
+        if face_list_client is None:
+            raise AzureFaceError("Azure Face client does not expose face list operations")
+
+        try:
+            call_args = self._build_call_args(
+                getattr(face_list_client, "get", None),
+                {"face_list_id": self.face_list_id},
+            )
+            if call_args is None:
+                raise AttributeError("get")
+            face_list_client.get(**call_args)
+        except Exception:
+            self._create_face_list()
+        else:
+            self._face_list_ready = True
+
+    def _create_face_list(self) -> None:
+        face_list_client = self._get_face_list_client()
+        if face_list_client is None:
+            raise AzureFaceError("Azure Face client does not expose face list operations")
+
+        try:
+            call_args = self._build_call_args(
+                getattr(face_list_client, "create", None),
+                {
+                    "face_list_id": self.face_list_id,
+                    "name": self.face_list_id,
+                    "recognition_model": self._recognition_model,
+                },
+            )
+            if call_args is None:
+                raise AttributeError("create")
+            face_list_client.create(**call_args)
+            self._face_list_ready = True
+        except Exception as exc:  # pragma: no cover - runtime failures
+            raise AzureFaceError(f"Failed to create Azure face list: {exc}") from exc
+
+    def _get_face_list_client(self):
+        candidate_attributes = (
+            "face_list",
+            "faceList",
+            "face_list_client",
+            "faceListClient",
+            "face_list_operations",
+            "faceListOperations",
+            "large_face_list",
+            "largeFaceList",
+            "get_face_list_client",
+        )
+
+        for attribute in candidate_attributes:
+            face_list_client = getattr(self._client, attribute, None)
+            if face_list_client is None:
+                continue
+            if callable(face_list_client):
+                try:
+                    face_list_client = face_list_client()
+                except Exception:  # pragma: no cover - runtime failures
+                    continue
+            if face_list_client is not None:
+                return face_list_client
+
+        adapter = self._get_rest_adapter()
+        if adapter is not None:
+            return getattr(adapter, "face_list", None)
+        return None
+
+    def _get_face_operations(self):
+        candidate_attributes = (
+            "face",
+            "face_client",
+            "faceClient",
+            "face_operations",
+            "faceOperations",
+            "get_face_client",
+        )
+
+        for attribute in candidate_attributes:
+            operations = getattr(self._client, attribute, None)
+            if operations is None:
+                continue
+            if callable(operations):
+                try:
+                    operations = operations()
+                except Exception:  # pragma: no cover - runtime failures
+                    continue
+            if operations is not None:
+                return operations
+
+        adapter = self._get_rest_adapter()
+        if adapter is not None:
+            return getattr(adapter, "face", None)
+        return None
+
+    @staticmethod
+    def _extract_person_id(person: Any) -> str | None:
+        if isinstance(person, dict):
+            for key in ("person_id", "personId", "id"):
+                value = person.get(key)
+                if isinstance(value, str) and value:
+                    return value
+        else:
+            for attribute in ("person_id", "personId", "id"):
+                value = getattr(person, attribute, None)
+                if isinstance(value, str) and value:
+                    return value
+        return None
+
+    @staticmethod
+    def _extract_persisted_face_id(obj: Any) -> str | None:
+        for attribute in (
+            "persisted_face_id",
+            "persistedFaceId",
+            "face_id",
+            "faceId",
+            "id",
+        ):
+            value = None
+            if hasattr(obj, attribute):
+                value = getattr(obj, attribute)
+            elif isinstance(obj, dict):
+                value = obj.get(attribute)
+            if isinstance(value, str) and value:
+                return value
+        return None
+
+    @staticmethod
+    def _build_call_args(func: Any, candidate_kwargs: dict[str, Any], *, allow_positional: bool = False):
+        if func is None:
+            return None
+        try:
+            signature = inspect.signature(func)
+        except (TypeError, ValueError):  # pragma: no cover - builtins
+            return candidate_kwargs
+
+        parameters = signature.parameters
+        call_args: dict[str, Any] = {}
+        for name, value in candidate_kwargs.items():
+            if name in parameters:
+                call_args[name] = value
+        if allow_positional and any(param.kind == inspect.Parameter.POSITIONAL_ONLY for param in parameters.values()):
+            # Legacy SDK expects the image stream as the first positional argument; leave kwargs empty so
+            # the caller can retry with positional usage.
+            call_args.update({k: v for k, v in candidate_kwargs.items() if k in parameters})
+            call_args.update({k: v for k, v in candidate_kwargs.items() if k not in call_args})
+            return call_args
+
+        # Fall back to any parameters that look compatible when names do not match exactly.
+        for name, param in parameters.items():
+            if name in call_args:
+                continue
+            lowered = name.lower()
+            for candidate, value in candidate_kwargs.items():
+                if candidate.lower() == lowered:
+                    call_args[name] = value
+        return call_args
+
+    # ------------------------------------------------------------------
+    def _disable_person_group(self, reason: str | None = None) -> None:
+        if not self._person_group_enabled:
+            if reason and not self._person_group_error:
+                self._person_group_error = reason
+            return
+        self._person_group_enabled = False
+        self._person_group_ready = False
+        self._person_group_error = reason
+        if reason:
+            _LOGGER.warning("Azure Face person group support disabled: %s", reason)
+        else:
+            _LOGGER.warning("Azure Face person group support disabled")
+
+    def _transform_person_group_exception(self, exc: Exception, context: str) -> AzureFaceError:
+        message = self._detect_identification_permission_issue(exc)
+        if message:
+            self._disable_person_group(message)
+            return AzureFaceError(message)
+        return AzureFaceError(f"{context}: {exc}")
+
+    def _detect_identification_permission_issue(self, exc: Exception) -> str | None:
+        search_space: list[str] = []
+
+        error_obj = getattr(exc, "error", None)
+        if error_obj is not None:
+            for attr in ("code", "message"):
+                value = getattr(error_obj, attr, None)
+                if isinstance(value, str):
+                    search_space.append(value)
+            inner = getattr(error_obj, "innererror", None) or getattr(error_obj, "inner_error", None)
+            if inner is not None:
+                for attr in ("code", "message"):
+                    value = getattr(inner, attr, None)
+                    if isinstance(value, str):
+                        search_space.append(value)
+
+        search_space.append(str(exc))
+
+        tokens = (
+            "unsupportedfeature",
+            "missing approval",
+            "identification,verification",
+            "apply for access",
+            "identification verification",
+        )
+
+        for text in search_space:
+            if not text:
+                continue
+            lowered = text.lower()
+            if any(token in lowered for token in tokens):
+                detail = self._extract_error_message_from_text(text)
+                base = (
+                    "Azure Face 帳戶尚未啟用 Person Group（Identification/Verification）功能，"
+                    "請先於 https://aka.ms/facerecognition 申請權限後再試。"
+                )
+                if detail and detail.lower() not in {"unsupportedfeature", "identification,verification"}:
+                    return f"{base}（Azure 訊息：{detail}）"
+                return base
+        return None
+
+    @staticmethod
+    def _extract_error_message_from_text(text: str) -> str:
+        text = text.strip()
+        if not text:
+            return text
+
+        if text.startswith("{"):
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                payload = None
+            else:
+                message = AzureFaceService._dig_error_message(payload)
+                if message:
+                    return message
+                return text
+
+        brace_index = text.find("{")
+        if brace_index != -1:
+            try:
+                payload = json.loads(text[brace_index:])
+            except json.JSONDecodeError:
+                payload = None
+            else:
+                message = AzureFaceService._dig_error_message(payload)
+                if message:
+                    return message
+        return text
+
+    @staticmethod
+    def _dig_error_message(payload: Any) -> str | None:
+        if isinstance(payload, dict):
+            for key in ("message", "Message"):
+                value = payload.get(key)
+                if isinstance(value, str) and value:
+                    return value
+            for key in ("error", "Error", "innererror", "innerError", "details"):
+                nested = payload.get(key)
+                message = AzureFaceService._dig_error_message(nested)
+                if message:
+                    return message
+            return None
+        if isinstance(payload, list):
+            for item in payload:
+                message = AzureFaceService._dig_error_message(item)
+                if message:
+                    return message
+        if isinstance(payload, str):
+            return payload
+        return None
+
+    # ------------------------------------------------------------------
+    def _attach_face_to_person_stream(self, person_id: str, stream: io.BytesIO) -> None:
+        person_client = self._get_person_group_person_client()
+        stream.seek(0)
+        try:
+            add_face_params = self._build_call_args(
+                getattr(person_client, "add_face_from_stream", None),
+                {
+                    "person_group_id": self.person_group_id,
+                    "person_id": person_id,
+                    "image": stream,
+                    "detection_model": self._detection_model,
+                },
+            )
+            if add_face_params is None:
+                raise AttributeError("add_face_from_stream")
+            person_client.add_face_from_stream(**add_face_params)
+        except Exception as exc:  # pragma: no cover - runtime failures
+            raise self._transform_person_group_exception(
+                exc, "Failed to attach face to Azure person"
+            ) from exc
 
     # ------------------------------------------------------------------
     def generate_ad_copy(self, member_id: str, purchases: Iterable[dict[str, object]]) -> AdCreative:
-        """Use Gemini Text to produce fresh advertising copy."""
+        """Produce a simple, deterministic advertising copy template."""
 
-        if not self.can_generate_ads:
-            raise GeminiUnavailableError("Gemini text model is not configured")
-
-        assert self._text_model is not None  # for the type checker
         purchase_list = list(purchases)
-        prompt_payload = json.dumps(purchase_list, ensure_ascii=False)
-        prompt = f"""
-你是一位零售行銷 AI，目標是根據歷史消費紀錄產生一段動態廣告文案。
-請閱讀以下 JSON 陣列描述的購買紀錄：{prompt_payload}
-每筆包含 item、last_purchase、discount、recommendation 等欄位，discount 以 0~1 表示。
-請輸出符合以下格式的 JSON（不要加任何額外說明）：
-{{
-  "headline": "...主標...",
-  "subheading": "...副標...",
-  "highlight": "...吸睛促購語..."
-}}
-文案語氣請友善、以繁體中文呈現，若沒有歷史紀錄，請推廣今日的主打商品。
-會員代號：{member_id}
-"""
-        try:
-            response = self._text_model.generate_content(
-                prompt,
-                request_options={"timeout": self._timeout},
-            )
-        except Exception as exc:  # pragma: no cover - network/runtime errors
-            if google_exceptions and isinstance(exc, google_exceptions.GoogleAPICallError):
-                raise GeminiUnavailableError(f"Gemini Text API error: {exc}") from exc
-            raise GeminiUnavailableError(f"Gemini Text generation failed: {exc}") from exc
-
-        text = (response.text or "").strip()
-        if not text:
-            raise GeminiUnavailableError("Gemini Text returned an empty response")
-        return self._parse_ad_response(text)
-
-    # ------------------------------------------------------------------
-    def _parse_ad_response(self, text: str) -> AdCreative:
-        cleaned = self._strip_code_fence(text)
-        try:
-            payload = json.loads(cleaned)
-        except json.JSONDecodeError as exc:
-            raise GeminiUnavailableError(f"無法解析 Gemini 回傳的 JSON：{exc}") from exc
-
-        if not isinstance(payload, dict):
-            raise GeminiUnavailableError("Gemini 廣告文案格式不正確，預期 JSON 物件")
-
-        headline = str(payload.get("headline", "")).strip()
-        subheading = str(payload.get("subheading", "")).strip()
-        highlight = str(payload.get("highlight", "")).strip()
-        if not any((headline, subheading, highlight)):
-            raise GeminiUnavailableError("Gemini 廣告文案為空")
+        if purchase_list:
+            latest = purchase_list[0]
+            item = str(latest.get("item", "精選商品"))
+            discount = latest.get("discount")
+            if isinstance(discount, (int, float)) and discount > 0:
+                discount_text = f"{int(discount * 100)}% OFF"
+            else:
+                discount_text = "限時加購禮"
+            headline = f"會員 {member_id}，歡迎回來！"
+            subheading = f"上次購買：{item}"
+            highlight = f"今天享有 {discount_text}，立即入手！"
+        else:
+            headline = f"歡迎加入，會員 {member_id}!"
+            subheading = "首次來店禮已為您準備"
+            highlight = "人氣咖啡豆搭配手工點心，今日限定好禮"
         return AdCreative(headline=headline, subheading=subheading, highlight=highlight)
 
-    @staticmethod
-    def _strip_code_fence(text: str) -> str:
-        text = text.strip()
-        if text.startswith("```"):
-            lines = text.splitlines()
-            # drop first fence
-            lines = lines[1:]
-            # drop closing fence if present
-            if lines and lines[-1].strip().startswith("```"):
-                lines = lines[:-1]
-            return "\n".join(lines).strip()
-        return text
 
+class _AzureFaceRestAdapter:
+    """Fallback helper that issues REST requests when SDK operations are missing."""
+
+    def __init__(
+        self,
+        endpoint: str,
+        api_key: str,
+        *,
+        detection_model: str,
+        recognition_model: str,
+    ) -> None:
+        self._api = _AzureFaceRestAPI(endpoint, api_key)
+        self.person_group = _AzureFaceRestPersonGroupOperations(
+            self._api, recognition_model=recognition_model
+        )
+        self.person_group_person = _AzureFaceRestPersonOperations(
+            self._api, detection_model=detection_model
+        )
+        self.face_list = _AzureFaceRestFaceListOperations(
+            self._api,
+            detection_model=detection_model,
+            recognition_model=recognition_model,
+        )
+        self.face = _AzureFaceRestFaceOperations(self._api)
+
+    def identify(
+        self,
+        *,
+        person_group_id: str,
+        face_ids: Sequence[str],
+        max_num_of_candidates_return: int | None = None,
+        max_num_of_candidates: int | None = None,
+    ) -> Any:
+        max_candidates = max_num_of_candidates_return or max_num_of_candidates or 1
+        try:
+            value = int(max_candidates)
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            value = 1
+        if value <= 0:
+            value = 1
+        return self._api.identify(
+            person_group_id=person_group_id,
+            face_ids=list(face_ids),
+            max_candidates=value,
+        )
+
+
+class _AzureFaceRestPersonGroupOperations:
+    """REST implementation of the person group operations used by the service."""
+
+    def __init__(self, api: "_AzureFaceRestAPI", *, recognition_model: str) -> None:
+        self._api = api
+        self._recognition_model = recognition_model
+
+    def get(self, *, person_group_id: str) -> Any:
+        return self._api.get_person_group(person_group_id)
+
+    def create(
+        self,
+        *,
+        person_group_id: str,
+        name: str,
+        recognition_model: str | None = None,
+    ) -> Any:
+        return self._api.create_person_group(
+            person_group_id,
+            name=name,
+            recognition_model=recognition_model or self._recognition_model,
+        )
+
+    def train(self, *, person_group_id: str) -> Any:
+        return self._api.train_person_group(person_group_id)
+
+
+class _AzureFaceRestPersonOperations:
+    """REST implementation of the person operations used by the service."""
+
+    def __init__(self, api: "_AzureFaceRestAPI", *, detection_model: str) -> None:
+        self._api = api
+        self._detection_model = detection_model
+
+    def create(
+        self,
+        *,
+        person_group_id: str,
+        name: str,
+        user_data: str | None = None,
+    ) -> Any:
+        return self._api.create_person(
+            person_group_id,
+            name=name,
+            user_data=user_data,
+        )
+
+    def add_face_from_stream(
+        self,
+        *,
+        person_group_id: str,
+        person_id: str,
+        image: Any,
+        detection_model: str | None = None,
+    ) -> Any:
+        return self._api.add_person_face(
+            person_group_id,
+            person_id,
+            image,
+            detection_model=detection_model or self._detection_model,
+        )
+
+    def list(self, *, person_group_id: str) -> Any:
+        return self._api.list_persons(person_group_id)
+
+    def get(self, *, person_group_id: str, person_id: str) -> Any:
+        return self._api.get_person(person_group_id, person_id)
+
+
+class _AzureFaceRestFaceListOperations:
+    """REST implementation of the face list operations used by the service."""
+
+    def __init__(
+        self,
+        api: "_AzureFaceRestAPI",
+        *,
+        detection_model: str,
+        recognition_model: str,
+    ) -> None:
+        self._api = api
+        self._detection_model = detection_model
+        self._recognition_model = recognition_model
+
+    def get(self, *, face_list_id: str) -> Any:
+        return self._api.get_face_list(face_list_id)
+
+    def create(
+        self,
+        *,
+        face_list_id: str,
+        name: str,
+        recognition_model: str | None = None,
+    ) -> Any:
+        return self._api.create_face_list(
+            face_list_id,
+            name=name,
+            recognition_model=recognition_model or self._recognition_model,
+        )
+
+    def add_face_from_stream(
+        self,
+        *,
+        face_list_id: str,
+        image: Any,
+        detection_model: str | None = None,
+        user_data: str | None = None,
+    ) -> Any:
+        return self._api.add_face_to_face_list(
+            face_list_id,
+            image,
+            detection_model=detection_model or self._detection_model,
+            user_data=user_data,
+        )
+
+
+class _AzureFaceRestFaceOperations:
+    """REST implementation of the face operations used by the service."""
+
+    def __init__(self, api: "_AzureFaceRestAPI") -> None:
+        self._api = api
+
+    def find_similar(
+        self,
+        *,
+        face_id: str,
+        face_list_id: str | None = None,
+        face_ids: Sequence[str] | None = None,
+        max_num_of_candidates_returned: int | None = None,
+        max_num_of_candidates: int | None = None,
+        mode: str | None = None,
+    ) -> Any:
+        max_candidates = max_num_of_candidates_returned or max_num_of_candidates or 1
+        try:
+            value = int(max_candidates)
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            value = 1
+        if value <= 0:
+            value = 1
+        return self._api.find_similar(
+            face_id,
+            face_list_id=face_list_id,
+            face_ids=face_ids,
+            max_candidates=value,
+            mode=mode,
+        )
+
+
+class _AzureFaceRestAPI:
+    """Minimal REST client for Azure Face person group operations."""
+
+    _TIMEOUT_SECONDS = 15
+
+    def __init__(self, endpoint: str, api_key: str) -> None:
+        if not endpoint or not api_key:
+            raise AzureFaceError("Azure Face endpoint and key are required for REST fallback")
+        base = endpoint.rstrip("/")
+        lower = base.lower()
+        if "/face/v1.0" in lower:
+            self._base_url = base
+        else:
+            self._base_url = f"{base}/face/v1.0"
+        self._api_key = api_key
+
+    # ------------------------------------------------------------------
+    def identify(self, *, person_group_id: str, face_ids: Sequence[str], max_candidates: int) -> Any:
+        payload = {
+            "personGroupId": person_group_id,
+            "faceIds": list(face_ids),
+            "maxNumOfCandidatesReturned": max(1, int(max_candidates)),
+        }
+        return self._request("POST", "identify", json_body=payload, expected_status=(200,))
+
+    def get_person_group(self, person_group_id: str) -> Any:
+        return self._request("GET", f"persongroups/{person_group_id}", expected_status=(200,))
+
+    def create_person_group(
+        self,
+        person_group_id: str,
+        *,
+        name: str,
+        recognition_model: str | None,
+    ) -> Any:
+        payload = {"name": name}
+        if recognition_model:
+            payload["recognitionModel"] = recognition_model
+        return self._request(
+            "PUT",
+            f"persongroups/{person_group_id}",
+            json_body=payload,
+            expected_status=(200, 202, 204),
+        )
+
+    def train_person_group(self, person_group_id: str) -> Any:
+        return self._request(
+            "POST",
+            f"persongroups/{person_group_id}/train",
+            expected_status=(202, 200, 204),
+        )
+
+    def list_persons(self, person_group_id: str) -> Any:
+        result = self._request(
+            "GET",
+            f"persongroups/{person_group_id}/persons",
+            expected_status=(200,),
+        )
+        return result or []
+
+    def get_person(self, person_group_id: str, person_id: str) -> Any:
+        return self._request(
+            "GET",
+            f"persongroups/{person_group_id}/persons/{person_id}",
+            expected_status=(200,),
+        )
+
+    def create_person(
+        self,
+        person_group_id: str,
+        *,
+        name: str,
+        user_data: str | None,
+    ) -> Any:
+        payload = {"name": name}
+        if user_data:
+            payload["userData"] = user_data
+        return self._request(
+            "POST",
+            f"persongroups/{person_group_id}/persons",
+            json_body=payload,
+            expected_status=(200, 201),
+        )
+
+    def add_person_face(
+        self,
+        person_group_id: str,
+        person_id: str,
+        image: Any,
+        *,
+        detection_model: str | None,
+    ) -> Any:
+        params = {}
+        if detection_model:
+            params["detectionModel"] = detection_model
+        return self._request(
+            "POST",
+            f"persongroups/{person_group_id}/persons/{person_id}/persistedFaces",
+            params=params,
+            data=image,
+            headers={"Content-Type": "application/octet-stream"},
+            expected_status=(200, 202),
+        )
+
+    def get_face_list(self, face_list_id: str) -> Any:
+        return self._request(
+            "GET",
+            f"facelists/{face_list_id}",
+            expected_status=(200,),
+        )
+
+    def create_face_list(
+        self,
+        face_list_id: str,
+        *,
+        name: str,
+        recognition_model: str | None,
+    ) -> Any:
+        payload = {"name": name}
+        if recognition_model:
+            payload["recognitionModel"] = recognition_model
+        return self._request(
+            "PUT",
+            f"facelists/{face_list_id}",
+            json_body=payload,
+            expected_status=(200, 201),
+        )
+
+    def add_face_to_face_list(
+        self,
+        face_list_id: str,
+        image: Any,
+        *,
+        detection_model: str | None,
+        user_data: str | None,
+    ) -> Any:
+        params = {}
+        if detection_model:
+            params["detectionModel"] = detection_model
+        if user_data:
+            params["userData"] = user_data
+        return self._request(
+            "POST",
+            f"facelists/{face_list_id}/persistedFaces",
+            params=params,
+            data=image,
+            headers={"Content-Type": "application/octet-stream"},
+            expected_status=(200, 202),
+        )
+
+    def find_similar(
+        self,
+        face_id: str,
+        *,
+        face_list_id: str | None,
+        face_ids: Sequence[str] | None,
+        max_candidates: int,
+        mode: str | None,
+    ) -> Any:
+        try:
+            limit = int(max_candidates)
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            limit = 1
+        if limit <= 0:
+            limit = 1
+        payload: dict[str, Any] = {
+            "faceId": face_id,
+            "maxNumOfCandidatesReturned": limit,
+        }
+        if face_list_id:
+            payload["faceListId"] = face_list_id
+        if face_ids:
+            payload["faceIds"] = list(face_ids)
+        if mode:
+            payload["mode"] = mode
+        return self._request(
+            "POST",
+            "findsimilars",
+            json_body=payload,
+            expected_status=(200,),
+        )
+
+    # ------------------------------------------------------------------
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: Any | None = None,
+        data: Any | None = None,
+        headers: dict[str, str] | None = None,
+        expected_status: Sequence[int] = (200,),
+    ) -> Any:
+        url = self._build_url(path, params)
+        request_headers = {"Ocp-Apim-Subscription-Key": self._api_key}
+        if headers:
+            request_headers.update(headers)
+
+        body: bytes | None = None
+        if json_body is not None:
+            body = json.dumps(json_body).encode("utf-8")
+            request_headers.setdefault("Content-Type", "application/json")
+        elif data is not None:
+            if hasattr(data, "read"):
+                body = data.read()
+            else:
+                body = data
+            if body is None:
+                body = b""
+            if not isinstance(body, (bytes, bytearray)):
+                body = bytes(body)
+            request_headers.setdefault("Content-Type", "application/octet-stream")
+
+        req = urllib_request.Request(url, data=body, headers=request_headers, method=method.upper())
+        try:
+            with urllib_request.urlopen(req, timeout=self._TIMEOUT_SECONDS) as response:
+                status = getattr(response, "status", response.getcode())
+                payload = response.read()
+        except urllib_error.HTTPError as exc:  # pragma: no cover - network/runtime errors
+            status = exc.code
+            try:
+                detail = exc.read()
+            except Exception:  # pragma: no cover - read failure
+                detail = b""
+            message = detail.decode("utf-8", "ignore").strip() or str(exc)
+            raise AzureFaceError(f"Azure Face REST request failed: {status} {message}") from exc
+        except Exception as exc:  # pragma: no cover - network/runtime errors
+            raise AzureFaceError(f"Azure Face REST request failed: {exc}") from exc
+
+        if status not in expected_status:
+            raise AzureFaceError(f"Azure Face REST request returned status {status}")
+        if not payload:
+            return None
+        text = payload.decode("utf-8", "ignore").strip()
+        if not text:
+            return None
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return payload
+
+    def _build_url(self, path: str, params: dict[str, Any] | None) -> str:
+        clean_path = path.lstrip("/")
+        if clean_path:
+            url = f"{self._base_url}/{clean_path}"
+        else:
+            url = self._base_url
+        if params:
+            filtered = {key: value for key, value in params.items() if value is not None}
+            if filtered:
+                url = f"{url}?{urllib_parse.urlencode(filtered)}"
+        return url
+
+__all__ = ["AdCreative", "AzureFaceError", "AzureFaceService", "FaceAnalysis"]

@@ -72,7 +72,24 @@ class Database:
         with self._connect() as conn:
             for row in conn.execute("SELECT member_id, encoding_json FROM members"):
                 stored = FaceEncoding.from_jsonable(json.loads(row["encoding_json"]))
-                if stored.signature and stored.signature == encoding.signature:
+                if (
+                    encoding.azure_persisted_face_id
+                    and stored.azure_persisted_face_id
+                    and stored.azure_persisted_face_id == encoding.azure_persisted_face_id
+                ):
+                    return row["member_id"], 0.0
+                if encoding.azure_person_id and stored.azure_person_id:
+                    if stored.azure_person_id == encoding.azure_person_id:
+                        return row["member_id"], 0.0
+                if encoding.azure_person_name:
+                    if row["member_id"] == encoding.azure_person_name:
+                        return row["member_id"], 0.0
+                    if stored.azure_person_name == encoding.azure_person_name:
+                        return row["member_id"], 0.0
+                if (
+                    stored.face_description
+                    and stored.face_description == encoding.face_description
+                ):
                     return row["member_id"], 0.0
                 distance = recognizer.distance(stored, encoding)
                 if recognizer.is_match(stored, encoding):
@@ -80,6 +97,39 @@ class Database:
                         best_member = row["member_id"]
                         best_distance = distance
         return best_member, best_distance
+
+    def find_member_by_persisted_face_id(
+        self, persisted_face_id: str
+    ) -> tuple[str | None, FaceEncoding | None]:
+        """Return the member with the given Azure persisted face identifier."""
+
+        if not persisted_face_id:
+            return None, None
+
+        with self._connect() as conn:
+            for row in conn.execute("SELECT member_id, encoding_json FROM members"):
+                stored = FaceEncoding.from_jsonable(json.loads(row["encoding_json"]))
+                if stored.azure_persisted_face_id == persisted_face_id:
+                    return row["member_id"], stored
+        return None, None
+
+    def get_member_encoding(self, member_id: str) -> FaceEncoding | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT encoding_json FROM members WHERE member_id = ?",
+                (member_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return FaceEncoding.from_jsonable(json.loads(row["encoding_json"]))
+
+    def update_member_encoding(self, member_id: str, encoding: FaceEncoding) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE members SET encoding_json = ? WHERE member_id = ?",
+                (json.dumps(encoding.to_jsonable(), ensure_ascii=False), member_id),
+            )
+            conn.commit()
 
     def create_member(self, encoding: FaceEncoding, member_id: str | None = None) -> str:
         member_id = member_id or self._generate_member_id(encoding)
@@ -93,8 +143,8 @@ class Database:
         return member_id
 
     def _generate_member_id(self, encoding: FaceEncoding | None = None) -> str:
-        if encoding and encoding.signature:
-            hashed = hashlib.sha1(encoding.signature.encode("utf-8")).hexdigest().upper()
+        if encoding and encoding.face_description:
+            hashed = hashlib.sha1(encoding.face_description.encode("utf-8")).hexdigest().upper()
             return f"MEM{hashed[:10]}"
 
         with self._connect() as conn:
@@ -151,7 +201,7 @@ class Database:
 
             encoding = FaceEncoding(
                 np.zeros(128, dtype=np.float32),
-                signature="demo-member",
+                face_description="demo-member",
                 source="seed",
             )
             demo_member = self.create_member(encoding, member_id="MEMDEMO001")
