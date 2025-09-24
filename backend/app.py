@@ -200,6 +200,122 @@ def person_group_trainer():
     return render_template("person_group.html", context=context)
 
 
+@app.route("/face-list", methods=["GET", "POST"])
+def face_list_trainer():
+    """Render a UI for registering multiple photos into the Azure Face List."""
+
+    context = {
+        "azure_enabled": face_service.can_use_face_list,
+        "azure_configured": face_service.can_describe_faces,
+        "face_list_id": getattr(face_service, "face_list_id", None),
+        "member_id": "",
+        "results": [],
+        "errors": [],
+        "faces_registered": 0,
+        "created_member": False,
+    }
+
+    if request.method == "POST":
+        member_id = (request.form.get("member_id") or "").strip()
+        context["member_id"] = member_id
+
+        if not member_id:
+            context["errors"].append("請輸入會員 ID。")
+
+        uploads: list[dict[str, str | bytes]] = []
+        if request.files:
+            for field in ("images", "image", "files", "photos"):
+                for storage in request.files.getlist(field):
+                    data = storage.read()
+                    if not data:
+                        continue
+                    uploads.append(
+                        {
+                            "name": storage.filename,
+                            "bytes": data,
+                            "mimetype": storage.mimetype
+                            or request.mimetype
+                            or "image/jpeg",
+                        }
+                    )
+        if not uploads:
+            context["errors"].append("請選擇至少一張要上傳的照片。")
+
+        if not face_service.can_use_face_list:
+            if not face_service.can_describe_faces:
+                context["errors"].append(
+                    "目前尚未設定 AZURE_FACE_ENDPOINT / AZURE_FACE_KEY，無法呼叫 Azure Face API。"
+                )
+            else:
+                context["errors"].append(
+                    "Azure Face List 功能未啟用，請確認 AZURE_FACE_LIST_ID 設定是否正確。"
+                )
+
+        persisted_face_ids: list[str] = []
+        existing_encoding: FaceEncoding | None = None
+        encoding: FaceEncoding | None = None
+
+        if not context["errors"] and uploads:
+            existing_encoding = database.get_member_encoding(member_id)
+            encoding = existing_encoding
+
+            if encoding is None:
+                primary_upload = uploads[0]
+                try:
+                    encoding = recognizer.encode(
+                        primary_upload["bytes"],
+                        mime_type=str(primary_upload["mimetype"]),
+                    )
+                except ValueError as exc:
+                    context["errors"].append(f"無法產生臉部特徵：{exc}")
+
+        if not context["errors"] and uploads:
+            for index, upload in enumerate(uploads, start=1):
+                try:
+                    persisted_id = face_service.add_face_to_face_list(
+                        member_id,
+                        upload["bytes"],
+                        user_data=member_id or None,
+                    )
+                except AzureFaceError as exc:
+                    context["errors"].append(
+                        f"{upload['name'] or f'face-{index}.jpg'} 加入 Face List 時失敗：{exc}"
+                    )
+                else:
+                    persisted_face_ids.append(persisted_id)
+                    context["results"].append(upload["name"] or f"face-{index}.jpg")
+
+        if persisted_face_ids and encoding is not None:
+            if not encoding.face_description:
+                encoding.face_description = (
+                    encoding.azure_person_name
+                    or member_id
+                    or encoding.face_description
+                    or persisted_face_ids[0]
+                )
+            if encoding.azure_persisted_face_id is None:
+                encoding.azure_persisted_face_id = persisted_face_ids[0]
+            if encoding.source not in {"azure-person-group", "azure-face-list"}:
+                encoding.source = "azure-face-list"
+
+            if existing_encoding is None:
+                saved_member_id = database.create_member(encoding, member_id=member_id or None)
+                member_id = saved_member_id
+                context["member_id"] = saved_member_id
+                context["created_member"] = True
+            else:
+                database.update_member_encoding(member_id, encoding)
+
+            for persisted_id in persisted_face_ids:
+                database.register_persisted_face(member_id, persisted_id)
+
+            context["faces_registered"] = len(persisted_face_ids)
+        elif not persisted_face_ids and not context["errors"]:
+            context["errors"].append("沒有成功將任何照片加入 Face List。")
+
+    return render_template("face_list.html", context=context)
+
+
 @app.post("/upload_face")
 def upload_face():
     """Receive an image from the ESP32-CAM and return the member identifier."""

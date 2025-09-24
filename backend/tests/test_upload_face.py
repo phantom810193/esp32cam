@@ -16,7 +16,14 @@ from ..recognizer import FaceEncoding, FaceRecognizer
 class FlakyAzureFace:
     """Test double that mimics the Azure Face interface."""
 
-    def __init__(self, description: str = "短髮微笑顧客", fail_first: bool = False) -> None:
+    def __init__(
+        self,
+        description: str = "短髮微笑顧客",
+        fail_first: bool = False,
+        *,
+        person_group_enabled: bool = True,
+        face_list_enabled: bool = True,
+    ) -> None:
         self.description = description
         self.fail_first = fail_first
         self.calls = 0
@@ -29,6 +36,8 @@ class FlakyAzureFace:
         self.face_list_add_calls = 0
         self.find_similar_calls = 0
         self.persisted_faces: dict[str, str] = {}
+        self.person_group_enabled = person_group_enabled
+        self.face_list_enabled = face_list_enabled
 
     @property
     def can_describe_faces(self) -> bool:  # pragma: no cover - simple proxy
@@ -40,11 +49,11 @@ class FlakyAzureFace:
 
     @property
     def can_manage_person_group(self) -> bool:  # pragma: no cover - simple proxy
-        return True
+        return self.person_group_enabled
 
     @property
     def can_use_face_list(self) -> bool:  # pragma: no cover - simple proxy
-        return True
+        return self.face_list_enabled
 
     @property
     def person_group_error(self) -> str | None:  # pragma: no cover - simple proxy
@@ -311,6 +320,38 @@ def test_person_group_training_updates_existing_person(client):
     assert updated.source == "azure-person-group"
     assert updated.azure_persisted_face_id == "persisted-1"
     assert database.get_member_persisted_face_ids("VIP777") == [
+        "persisted-1",
+        "persisted-2",
+    ]
+
+
+def test_face_list_trainer_registers_faces_without_person_group(client):
+    test_client, service, database = client
+
+    service.person_group_enabled = False
+
+    response = test_client.post(
+        "/face-list",
+        data={
+            "member_id": "VIPFACE",
+            "images": [
+                (io.BytesIO(b"face-one"), "one.jpg", "image/jpeg"),
+                (io.BytesIO(b"face-two"), "two.jpg", "image/jpeg"),
+            ],
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    assert service.register_calls == 0
+    assert service.face_list_add_calls == 2
+
+    encoding = database.get_member_encoding("VIPFACE")
+    assert encoding is not None
+    assert encoding.azure_person_id is None
+    assert encoding.azure_persisted_face_id == "persisted-1"
+    assert encoding.source == "azure-face-list"
+    assert database.get_member_persisted_face_ids("VIPFACE") == [
         "persisted-1",
         "persisted-2",
     ]

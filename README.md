@@ -69,6 +69,7 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
    - `GET /ad/<member_id>`：根據 SQLite + 模板化文案輸出生成廣告頁，內建 `<meta http-equiv="refresh" content="5">`，適合放在電視棒上自動輪播。
    - `GET /health`：基本健康檢查。
    - `GET /person-group`：提供瀏覽器表單，可輸入會員 ID 並上傳多張臉部照片，預先將該會員訓練至 Azure Face Person Group。
+   - `GET /face-list`：若帳戶暫未獲得 Person Group 核准，可改用此頁面批次上傳多張照片並綁定同一個會員 ID，供 Face List / Find Similar 使用。
 
 5. SQLite 會自動建立資料庫與 Demo 資料。辨識到新臉孔時，系統會以 Azure Face 摘要雜湊生成匿名 `MEMxxxxxxxxxx` 並寫入歡迎禮優惠，同時把臉部向量註冊到 Azure Face List（及可用時的 Person Group），以便下一次造訪可直接透過 Find Similar 命中既有會員。
 
@@ -92,11 +93,11 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
    }
    ```
 
-7. 需要先在 Person Group / Face List 中訓練特定顧客時，可開啟瀏覽器造訪 `http://localhost:8000/person-group`：
+7. 需要先為特定顧客補上多張照片時，可視 Azure 權限選擇以下工具：
 
-   - 輸入既有或預期的會員 ID（例如從 CRM 匯出的代碼）。
-   - 一次選擇多張臉部照片並提交，系統會在 Azure 中建立/更新 Person，並同步把 Face List 與（可用時）Person ID 存回 SQLite。
-   - 若該會員在資料庫中不存在，後端會自動建立一筆基礎會員資料，方便後續比對。
+   - `http://localhost:8000/person-group`：輸入會員 ID 後上傳多張影像，系統會在 Azure 中建立/更新 Person，並觸發訓練；同時會把 Face List 與（可用時）Person ID 存回 SQLite。
+   - `http://localhost:8000/face-list`：若帳戶尚未取得 Person Group 核准，仍可透過此頁面把多張影像加入 Face List，確保 Find Similar 可以命中既有會員，並把 persisted face ID 註冊回資料庫。
+   - 兩個頁面都會在資料庫找不到該會員時自動建立基礎資料，方便日後辨識。
 
 ## 前端展示（電視棒 / 螢幕）
 
