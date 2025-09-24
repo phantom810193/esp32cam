@@ -93,8 +93,14 @@
 
       {% if not context.azure_enabled %}
       <div class="notice">
+        {% if context.azure_person_group_error %}
+        ⚠️ {{ context.azure_person_group_error }}
+        {% elif not context.azure_configured %}
         ⚠️ 目前尚未設定 AZURE_FACE_ENDPOINT / AZURE_FACE_KEY，無法呼叫 Azure Face
         Person Group API。
+        {% else %}
+        ⚠️ Azure Face Person Group 功能已停用，僅保留臉部偵測與描述。
+        {% endif %}
       </div>
       {% endif %}
 

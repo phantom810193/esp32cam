@@ -51,6 +51,11 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
 
    未設定時後端仍可運作，但只會使用雜湊簽名與預設廣告模板。部署到雲端（例如 Cloud Run）時，也可改放在環境變數或 Secret Manager。
 
+   > ⚠️ **Person Group 權限申請**：Azure Face 的 Person Group / Identify API 需額外核准
+   > 「Identification/Verification」功能才能啟用。若帳號尚未被核准，後端會自動停用
+   > 相關功能並僅保留臉部描述，頁面會提示前往 <https://aka.ms/facerecognition>
+   > 申請預覽權限。
+
 3. 啟動 Flask 伺服器（於專案根目錄執行）：
 
    ```bash

@@ -39,6 +39,8 @@ def person_group_trainer():
 
     context = {
         "azure_enabled": face_service.can_manage_person_group,
+        "azure_configured": face_service.can_describe_faces,
+        "azure_person_group_error": getattr(face_service, "person_group_error", None),
         "member_id": "",
         "results": [],
         "errors": [],
@@ -72,9 +74,12 @@ def person_group_trainer():
             context["errors"].append("請選擇至少一張要上傳的照片。")
 
         if not face_service.can_manage_person_group:
-            context["errors"].append(
-                "Azure Face Person Group 功能未啟用，請設定 AZURE_FACE_ENDPOINT / AZURE_FACE_KEY。"
-            )
+            if face_service.person_group_error:
+                context["errors"].append(face_service.person_group_error)
+            else:
+                context["errors"].append(
+                    "Azure Face Person Group 功能未啟用，請設定 AZURE_FACE_ENDPOINT / AZURE_FACE_KEY。"
+                )
 
         azure_person_id: str | None = None
         existing_encoding: FaceEncoding | None = None

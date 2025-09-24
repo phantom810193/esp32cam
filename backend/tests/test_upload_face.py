@@ -39,6 +39,10 @@ class FlakyAzureFace:
     def can_manage_person_group(self) -> bool:  # pragma: no cover - simple proxy
         return True
 
+    @property
+    def person_group_error(self) -> str | None:  # pragma: no cover - simple proxy
+        return None
+
     def analyze_face(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> FaceAnalysis:
         del mime_type
         self.calls += 1

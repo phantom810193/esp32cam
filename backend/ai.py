@@ -93,6 +93,8 @@ class AzureFaceService:
             .lower()
         )
         self._person_group_ready = False
+        self._person_group_enabled = bool(self.person_group_id)
+        self._person_group_error: str | None = None
 
         if self._client is None and self.endpoint and self.api_key:
             self._client, self._client_variant = self._create_client()
@@ -107,7 +109,12 @@ class AzureFaceService:
             try:
                 self._ensure_person_group()
             except AzureFaceError as exc:  # pragma: no cover - network/runtime errors
-                _LOGGER.warning("Failed to prepare Azure Face person group: %s", exc)
+                if not self._person_group_enabled and self._person_group_error:
+                    _LOGGER.warning(
+                        "Azure Face person group disabled: %s", self._person_group_error
+                    )
+                else:
+                    _LOGGER.warning("Failed to prepare Azure Face person group: %s", exc)
 
     # ------------------------------------------------------------------
     def _create_client(self) -> tuple[Any | None, str | None]:
@@ -151,7 +158,11 @@ class AzureFaceService:
 
     @property
     def can_manage_person_group(self) -> bool:
-        return self.can_describe_faces and bool(self.person_group_id)
+        return self.can_describe_faces and self._person_group_enabled
+
+    @property
+    def person_group_error(self) -> str | None:
+        return self._person_group_error
 
     # ------------------------------------------------------------------
     def analyze_face(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> FaceAnalysis:
@@ -249,7 +260,9 @@ class AzureFaceService:
             )
             person = person_client.create(**create_params)
         except Exception as exc:  # pragma: no cover - runtime failures
-            raise AzureFaceError(f"Failed to create Azure Face person: {exc}") from exc
+            raise self._transform_person_group_exception(
+                exc, "Failed to create Azure Face person"
+            ) from exc
 
         person_id = self._extract_person_id(person)
         if not person_id:
@@ -286,11 +299,13 @@ class AzureFaceService:
             )
             group_client.train(**train_params)
         except Exception as exc:  # pragma: no cover - runtime failures
-            message = f"Failed to train Azure Face person group: {exc}"
+            transformed = self._transform_person_group_exception(
+                exc, "Failed to train Azure Face person group"
+            )
             if suppress_errors:
-                _LOGGER.warning(message)
+                _LOGGER.warning(str(transformed))
                 return
-            raise AzureFaceError(message) from exc
+            raise transformed from exc
 
     def find_person_id_by_name(self, member_name: str) -> str | None:
         """Return the Azure person identifier registered with the given name."""
@@ -310,7 +325,9 @@ class AzureFaceService:
                 raise AttributeError("list")
             persons = person_client.list(**call_args)
         except Exception as exc:  # pragma: no cover - runtime failures
-            raise AzureFaceError(f"Failed to enumerate Azure Face persons: {exc}") from exc
+            raise self._transform_person_group_exception(
+                exc, "Failed to enumerate Azure Face persons"
+            ) from exc
 
         if persons is None:
             return None
@@ -628,7 +645,9 @@ class AzureFaceService:
         try:
             return identify(**call_args)
         except Exception as exc:  # pragma: no cover - runtime failures
-            raise AzureFaceError(f"Azure Face identification failed: {exc}") from exc
+            raise self._transform_person_group_exception(
+                exc, "Azure Face identification failed"
+            ) from exc
 
     def _select_best_candidate(self, results: Any) -> dict[str, Any] | None:
         best_candidate: dict[str, Any] | None = None
@@ -699,7 +718,12 @@ class AzureFaceService:
             )
             person = person_client.get(**call_args)
         except Exception as exc:  # pragma: no cover - runtime failures
-            _LOGGER.warning("Failed to fetch Azure Face person metadata: %s", exc)
+            message = self._detect_identification_permission_issue(exc)
+            if message:
+                self._disable_person_group(message)
+                _LOGGER.warning("Azure Face person group disabled: %s", message)
+            else:
+                _LOGGER.warning("Failed to fetch Azure Face person metadata: %s", exc)
             return None
 
         for attribute in ("name", "user_data", "userData"):
@@ -712,21 +736,27 @@ class AzureFaceService:
 
     def _ensure_person_group(self) -> None:
         if not self.can_manage_person_group:
+            if self._person_group_error:
+                raise AzureFaceError(self._person_group_error)
             raise AzureFaceError("Azure Face person group features are not available")
         if self._person_group_ready:
             return
+        group_client = self._get_person_group_client()
         try:
-            group_client = self._get_person_group_client()
             call_args = self._build_call_args(
                 getattr(group_client, "get"),
                 {"person_group_id": self.person_group_id},
             )
             group_client.get(**call_args)
-        except Exception:
+        except Exception as exc:  # pragma: no cover - runtime failures
+            message = self._detect_identification_permission_issue(exc)
+            if message:
+                self._disable_person_group(message)
+                raise AzureFaceError(message) from exc
             try:
                 self._create_person_group()
-            except AzureFaceError as exc:
-                raise exc
+            except AzureFaceError as inner_exc:
+                raise inner_exc
         else:
             self._person_group_ready = True
 
@@ -744,7 +774,9 @@ class AzureFaceService:
             group_client.create(**call_args)
             self._person_group_ready = True
         except Exception as exc:  # pragma: no cover - runtime failures
-            raise AzureFaceError(f"Failed to create Azure Face person group: {exc}") from exc
+            raise self._transform_person_group_exception(
+                exc, "Failed to create Azure Face person group"
+            ) from exc
 
     def _get_person_group_client(self):
         candidate_attributes = (
@@ -890,6 +922,119 @@ class AzureFaceService:
         return call_args
 
     # ------------------------------------------------------------------
+    def _disable_person_group(self, reason: str | None = None) -> None:
+        if not self._person_group_enabled:
+            if reason and not self._person_group_error:
+                self._person_group_error = reason
+            return
+        self._person_group_enabled = False
+        self._person_group_ready = False
+        self._person_group_error = reason
+        if reason:
+            _LOGGER.warning("Azure Face person group support disabled: %s", reason)
+        else:
+            _LOGGER.warning("Azure Face person group support disabled")
+
+    def _transform_person_group_exception(self, exc: Exception, context: str) -> AzureFaceError:
+        message = self._detect_identification_permission_issue(exc)
+        if message:
+            self._disable_person_group(message)
+            return AzureFaceError(message)
+        return AzureFaceError(f"{context}: {exc}")
+
+    def _detect_identification_permission_issue(self, exc: Exception) -> str | None:
+        search_space: list[str] = []
+
+        error_obj = getattr(exc, "error", None)
+        if error_obj is not None:
+            for attr in ("code", "message"):
+                value = getattr(error_obj, attr, None)
+                if isinstance(value, str):
+                    search_space.append(value)
+            inner = getattr(error_obj, "innererror", None) or getattr(error_obj, "inner_error", None)
+            if inner is not None:
+                for attr in ("code", "message"):
+                    value = getattr(inner, attr, None)
+                    if isinstance(value, str):
+                        search_space.append(value)
+
+        search_space.append(str(exc))
+
+        tokens = (
+            "unsupportedfeature",
+            "missing approval",
+            "identification,verification",
+            "apply for access",
+            "identification verification",
+        )
+
+        for text in search_space:
+            if not text:
+                continue
+            lowered = text.lower()
+            if any(token in lowered for token in tokens):
+                detail = self._extract_error_message_from_text(text)
+                base = (
+                    "Azure Face 帳戶尚未啟用 Person Group（Identification/Verification）功能，"
+                    "請先於 https://aka.ms/facerecognition 申請權限後再試。"
+                )
+                if detail and detail.lower() not in {"unsupportedfeature", "identification,verification"}:
+                    return f"{base}（Azure 訊息：{detail}）"
+                return base
+        return None
+
+    @staticmethod
+    def _extract_error_message_from_text(text: str) -> str:
+        text = text.strip()
+        if not text:
+            return text
+
+        if text.startswith("{"):
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                payload = None
+            else:
+                message = AzureFaceService._dig_error_message(payload)
+                if message:
+                    return message
+                return text
+
+        brace_index = text.find("{")
+        if brace_index != -1:
+            try:
+                payload = json.loads(text[brace_index:])
+            except json.JSONDecodeError:
+                payload = None
+            else:
+                message = AzureFaceService._dig_error_message(payload)
+                if message:
+                    return message
+        return text
+
+    @staticmethod
+    def _dig_error_message(payload: Any) -> str | None:
+        if isinstance(payload, dict):
+            for key in ("message", "Message"):
+                value = payload.get(key)
+                if isinstance(value, str) and value:
+                    return value
+            for key in ("error", "Error", "innererror", "innerError", "details"):
+                nested = payload.get(key)
+                message = AzureFaceService._dig_error_message(nested)
+                if message:
+                    return message
+            return None
+        if isinstance(payload, list):
+            for item in payload:
+                message = AzureFaceService._dig_error_message(item)
+                if message:
+                    return message
+        if isinstance(payload, str):
+            return payload
+        return None
+
+    # ------------------------------------------------------------------
     def _attach_face_to_person_stream(self, person_id: str, stream: io.BytesIO) -> None:
         person_client = self._get_person_group_person_client()
         stream.seek(0)
@@ -907,7 +1052,9 @@ class AzureFaceService:
                 raise AttributeError("add_face_from_stream")
             person_client.add_face_from_stream(**add_face_params)
         except Exception as exc:  # pragma: no cover - runtime failures
-            raise AzureFaceError(f"Failed to attach face to Azure person: {exc}") from exc
+            raise self._transform_person_group_exception(
+                exc, "Failed to attach face to Azure person"
+            ) from exc
 
     # ------------------------------------------------------------------
     def generate_ad_copy(self, member_id: str, purchases: Iterable[dict[str, object]]) -> AdCreative:
