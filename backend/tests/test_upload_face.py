@@ -294,3 +294,53 @@ def test_upload_generates_new_id_when_seed_conflicts(client, monkeypatch):
     assert fallback_encoding is not None
     assert fallback_encoding.azure_person_id is not None
     assert fallback_encoding.azure_person_name == payload["member_id"]
+
+
+def test_create_member_recovers_from_repeated_collisions(tmp_path, monkeypatch):
+    database = Database(tmp_path / "collisions.sqlite3")
+
+    base_encoding = FaceEncoding(
+        vector=np.zeros(128, dtype=np.float32),
+        face_description="existing-face",
+        source="seed",
+    )
+    payload = json.dumps(base_encoding.to_jsonable(), ensure_ascii=False)
+
+    for member_id in ["MEMCOLLIDE", "MEMLOCKED", "MEMDUP1", "MEMDUP2"]:
+        database._insert_member(member_id, payload)  # pylint: disable=protected-access
+
+    new_encoding = FaceEncoding(
+        vector=np.ones(128, dtype=np.float32),
+        face_description="new-face",
+        source="seed",
+    )
+
+    def fake_generate_member_id(self, encoding=None):  # pragma: no cover - patched in test
+        del self
+        if encoding is None:
+            return "MEMLOCKED"
+        return "MEMCOLLIDE"
+
+    random_ids = iter(["MEMDUP1", "MEMDUP2", "MEMUNIQUE"])
+
+    def fake_generate_random_member_id(self):  # pragma: no cover - patched in test
+        del self
+        return next(random_ids)
+
+    monkeypatch.setattr(
+        database,
+        "_generate_member_id",
+        fake_generate_member_id.__get__(database, Database),
+    )
+    monkeypatch.setattr(
+        database,
+        "_generate_random_member_id",
+        fake_generate_random_member_id.__get__(database, Database),
+    )
+
+    member_id = database.create_member(new_encoding)
+    assert member_id == "MEMUNIQUE"
+
+    stored = database.get_member_encoding(member_id)
+    assert stored is not None
+    assert stored.face_description == "new-face"

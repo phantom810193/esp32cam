@@ -153,36 +153,43 @@ class Database:
         payload = json.dumps(encoding.to_jsonable(), ensure_ascii=False)
         candidate_id = member_id or self._generate_member_id(encoding)
 
-        try:
-            self._insert_member(candidate_id, payload)
-        except sqlite3.IntegrityError as exc:
-            _LOGGER.warning("Member ID %s already exists, generating a new ID", candidate_id)
-            last_error: sqlite3.IntegrityError | None = exc
+        attempted: set[str] = set()
+        last_error: sqlite3.IntegrityError | None = None
+        try_sequential = True
 
-            fallback_candidates = []
-            sequential_id = self._generate_member_id(None)
-            if sequential_id and sequential_id != candidate_id:
-                fallback_candidates.append(sequential_id)
+        while True:
+            try:
+                self._insert_member(candidate_id, payload)
+            except sqlite3.IntegrityError as exc:
+                last_error = exc
+                attempted.add(candidate_id)
+                _LOGGER.warning(
+                    "Member ID %s already exists, generating a new ID", candidate_id
+                )
 
-            # Guarantee progress even under concurrent inserts by appending
-            # a few UUID based identifiers.
-            for _ in range(5):
-                fallback_candidates.append(self._generate_random_member_id())
+                next_id: str | None = None
+                if try_sequential:
+                    try_sequential = False
+                    sequential_id = self._generate_member_id(None)
+                    if sequential_id and sequential_id not in attempted:
+                        next_id = sequential_id
 
-            for fallback in fallback_candidates:
-                try:
-                    self._insert_member(fallback, payload)
-                except sqlite3.IntegrityError as inner_exc:
-                    last_error = inner_exc
-                    continue
-                else:
-                    _LOGGER.info("Created new member %s", fallback)
-                    return fallback
+                if next_id is None:
+                    for _ in range(32):
+                        generated = self._generate_random_member_id()
+                        if generated in attempted:
+                            continue
+                        next_id = generated
+                        break
 
-            raise last_error
-        else:
-            _LOGGER.info("Created new member %s", candidate_id)
-            return candidate_id
+                if next_id is None:
+                    raise last_error
+
+                candidate_id = next_id
+                continue
+            else:
+                _LOGGER.info("Created new member %s", candidate_id)
+                return candidate_id
 
     def _insert_member(self, member_id: str, payload: str) -> None:
         with self._connect() as conn:
