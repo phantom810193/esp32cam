@@ -1,4 +1,5 @@
 Flask>=2.3
 numpy>=1.24
 Pillow>=9.5
-google-generativeai>=0.5.0
+azure-cognitiveservices-vision-face>=0.7.0
+msrest>=0.7.1
