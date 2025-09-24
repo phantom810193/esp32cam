@@ -3,10 +3,14 @@ from __future__ import annotations
 
 import inspect
 import io
+import json
 import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Iterable, Iterator, Sequence
+from urllib import error as urllib_error
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
 
 try:  # pragma: no cover - optional dependency for offline development
     from azure.ai.vision.face import FaceClient as VisionFaceClient  # type: ignore
@@ -82,6 +86,7 @@ class AzureFaceService:
         self._recognition_model = recognition_model
         self._client = client
         self._client_variant: str | None = None
+        self._rest_adapter: _AzureFaceRestAdapter | None = None
         self.person_group_id = (
             (person_group_id or os.getenv("AZURE_FACE_PERSON_GROUP_ID") or "esp32cam-mvp")
             .strip()
@@ -603,6 +608,11 @@ class AzureFaceService:
             identify = getattr(self._client, "identify", None)
 
         if identify is None:
+            adapter = self._get_rest_adapter()
+            if adapter is not None:
+                identify = adapter.identify
+
+        if identify is None:
             raise AzureFaceError("Azure Face client does not provide identify")
 
         call_args = self._build_call_args(
@@ -656,6 +666,23 @@ class AzureFaceService:
                         "confidence": score,
                     }
         return best_candidate
+
+    def _get_rest_adapter(self) -> _AzureFaceRestAdapter | None:
+        if self._rest_adapter is not None:
+            return self._rest_adapter
+        if not self.endpoint or not self.api_key:
+            return None
+        try:
+            self._rest_adapter = _AzureFaceRestAdapter(
+                self.endpoint,
+                self.api_key,
+                detection_model=self._detection_model,
+                recognition_model=self._recognition_model,
+            )
+        except AzureFaceError as exc:  # pragma: no cover - runtime errors
+            _LOGGER.warning("Failed to initialise Azure Face REST fallback: %s", exc)
+            return None
+        return self._rest_adapter
 
     def _resolve_person_name(self, person_id: str | None) -> str | None:
         if not person_id or not self.can_manage_person_group:
@@ -757,6 +784,11 @@ class AzureFaceService:
             if group_client is not None:
                 return group_client
 
+        adapter = self._get_rest_adapter()
+        if adapter is not None:
+            _LOGGER.info("Using Azure Face REST fallback for person group operations")
+            return adapter.person_group
+
         if last_error is not None:
             raise AzureFaceError(
                 f"Failed to obtain Azure Face person group client: {last_error}"
@@ -800,6 +832,11 @@ class AzureFaceService:
 
             if person_client is not None:
                 return person_client
+
+        adapter = self._get_rest_adapter()
+        if adapter is not None:
+            _LOGGER.info("Using Azure Face REST fallback for person operations")
+            return adapter.person_group_person
 
         if last_error is not None:
             raise AzureFaceError(
@@ -894,5 +931,291 @@ class AzureFaceService:
             highlight = "人氣咖啡豆搭配手工點心，今日限定好禮"
         return AdCreative(headline=headline, subheading=subheading, highlight=highlight)
 
+
+class _AzureFaceRestAdapter:
+    """Fallback helper that issues REST requests when SDK operations are missing."""
+
+    def __init__(
+        self,
+        endpoint: str,
+        api_key: str,
+        *,
+        detection_model: str,
+        recognition_model: str,
+    ) -> None:
+        self._api = _AzureFaceRestAPI(endpoint, api_key)
+        self.person_group = _AzureFaceRestPersonGroupOperations(
+            self._api, recognition_model=recognition_model
+        )
+        self.person_group_person = _AzureFaceRestPersonOperations(
+            self._api, detection_model=detection_model
+        )
+
+    def identify(
+        self,
+        *,
+        person_group_id: str,
+        face_ids: Sequence[str],
+        max_num_of_candidates_return: int | None = None,
+        max_num_of_candidates: int | None = None,
+    ) -> Any:
+        max_candidates = max_num_of_candidates_return or max_num_of_candidates or 1
+        try:
+            value = int(max_candidates)
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            value = 1
+        if value <= 0:
+            value = 1
+        return self._api.identify(
+            person_group_id=person_group_id,
+            face_ids=list(face_ids),
+            max_candidates=value,
+        )
+
+
+class _AzureFaceRestPersonGroupOperations:
+    """REST implementation of the person group operations used by the service."""
+
+    def __init__(self, api: "_AzureFaceRestAPI", *, recognition_model: str) -> None:
+        self._api = api
+        self._recognition_model = recognition_model
+
+    def get(self, *, person_group_id: str) -> Any:
+        return self._api.get_person_group(person_group_id)
+
+    def create(
+        self,
+        *,
+        person_group_id: str,
+        name: str,
+        recognition_model: str | None = None,
+    ) -> Any:
+        return self._api.create_person_group(
+            person_group_id,
+            name=name,
+            recognition_model=recognition_model or self._recognition_model,
+        )
+
+    def train(self, *, person_group_id: str) -> Any:
+        return self._api.train_person_group(person_group_id)
+
+
+class _AzureFaceRestPersonOperations:
+    """REST implementation of the person operations used by the service."""
+
+    def __init__(self, api: "_AzureFaceRestAPI", *, detection_model: str) -> None:
+        self._api = api
+        self._detection_model = detection_model
+
+    def create(
+        self,
+        *,
+        person_group_id: str,
+        name: str,
+        user_data: str | None = None,
+    ) -> Any:
+        return self._api.create_person(
+            person_group_id,
+            name=name,
+            user_data=user_data,
+        )
+
+    def add_face_from_stream(
+        self,
+        *,
+        person_group_id: str,
+        person_id: str,
+        image: Any,
+        detection_model: str | None = None,
+    ) -> Any:
+        return self._api.add_person_face(
+            person_group_id,
+            person_id,
+            image,
+            detection_model=detection_model or self._detection_model,
+        )
+
+    def list(self, *, person_group_id: str) -> Any:
+        return self._api.list_persons(person_group_id)
+
+    def get(self, *, person_group_id: str, person_id: str) -> Any:
+        return self._api.get_person(person_group_id, person_id)
+
+
+class _AzureFaceRestAPI:
+    """Minimal REST client for Azure Face person group operations."""
+
+    _TIMEOUT_SECONDS = 15
+
+    def __init__(self, endpoint: str, api_key: str) -> None:
+        if not endpoint or not api_key:
+            raise AzureFaceError("Azure Face endpoint and key are required for REST fallback")
+        base = endpoint.rstrip("/")
+        lower = base.lower()
+        if "/face/v1.0" in lower:
+            self._base_url = base
+        else:
+            self._base_url = f"{base}/face/v1.0"
+        self._api_key = api_key
+
+    # ------------------------------------------------------------------
+    def identify(self, *, person_group_id: str, face_ids: Sequence[str], max_candidates: int) -> Any:
+        payload = {
+            "personGroupId": person_group_id,
+            "faceIds": list(face_ids),
+            "maxNumOfCandidatesReturned": max(1, int(max_candidates)),
+        }
+        return self._request("POST", "identify", json_body=payload, expected_status=(200,))
+
+    def get_person_group(self, person_group_id: str) -> Any:
+        return self._request("GET", f"persongroups/{person_group_id}", expected_status=(200,))
+
+    def create_person_group(
+        self,
+        person_group_id: str,
+        *,
+        name: str,
+        recognition_model: str | None,
+    ) -> Any:
+        payload = {"name": name}
+        if recognition_model:
+            payload["recognitionModel"] = recognition_model
+        return self._request(
+            "PUT",
+            f"persongroups/{person_group_id}",
+            json_body=payload,
+            expected_status=(200, 202, 204),
+        )
+
+    def train_person_group(self, person_group_id: str) -> Any:
+        return self._request(
+            "POST",
+            f"persongroups/{person_group_id}/train",
+            expected_status=(202, 200, 204),
+        )
+
+    def list_persons(self, person_group_id: str) -> Any:
+        result = self._request(
+            "GET",
+            f"persongroups/{person_group_id}/persons",
+            expected_status=(200,),
+        )
+        return result or []
+
+    def get_person(self, person_group_id: str, person_id: str) -> Any:
+        return self._request(
+            "GET",
+            f"persongroups/{person_group_id}/persons/{person_id}",
+            expected_status=(200,),
+        )
+
+    def create_person(
+        self,
+        person_group_id: str,
+        *,
+        name: str,
+        user_data: str | None,
+    ) -> Any:
+        payload = {"name": name}
+        if user_data:
+            payload["userData"] = user_data
+        return self._request(
+            "POST",
+            f"persongroups/{person_group_id}/persons",
+            json_body=payload,
+            expected_status=(200, 201),
+        )
+
+    def add_person_face(
+        self,
+        person_group_id: str,
+        person_id: str,
+        image: Any,
+        *,
+        detection_model: str | None,
+    ) -> Any:
+        params = {}
+        if detection_model:
+            params["detectionModel"] = detection_model
+        return self._request(
+            "POST",
+            f"persongroups/{person_group_id}/persons/{person_id}/persistedFaces",
+            params=params,
+            data=image,
+            headers={"Content-Type": "application/octet-stream"},
+            expected_status=(200, 202),
+        )
+
+    # ------------------------------------------------------------------
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: Any | None = None,
+        data: Any | None = None,
+        headers: dict[str, str] | None = None,
+        expected_status: Sequence[int] = (200,),
+    ) -> Any:
+        url = self._build_url(path, params)
+        request_headers = {"Ocp-Apim-Subscription-Key": self._api_key}
+        if headers:
+            request_headers.update(headers)
+
+        body: bytes | None = None
+        if json_body is not None:
+            body = json.dumps(json_body).encode("utf-8")
+            request_headers.setdefault("Content-Type", "application/json")
+        elif data is not None:
+            if hasattr(data, "read"):
+                body = data.read()
+            else:
+                body = data
+            if body is None:
+                body = b""
+            if not isinstance(body, (bytes, bytearray)):
+                body = bytes(body)
+            request_headers.setdefault("Content-Type", "application/octet-stream")
+
+        req = urllib_request.Request(url, data=body, headers=request_headers, method=method.upper())
+        try:
+            with urllib_request.urlopen(req, timeout=self._TIMEOUT_SECONDS) as response:
+                status = getattr(response, "status", response.getcode())
+                payload = response.read()
+        except urllib_error.HTTPError as exc:  # pragma: no cover - network/runtime errors
+            status = exc.code
+            try:
+                detail = exc.read()
+            except Exception:  # pragma: no cover - read failure
+                detail = b""
+            message = detail.decode("utf-8", "ignore").strip() or str(exc)
+            raise AzureFaceError(f"Azure Face REST request failed: {status} {message}") from exc
+        except Exception as exc:  # pragma: no cover - network/runtime errors
+            raise AzureFaceError(f"Azure Face REST request failed: {exc}") from exc
+
+        if status not in expected_status:
+            raise AzureFaceError(f"Azure Face REST request returned status {status}")
+        if not payload:
+            return None
+        text = payload.decode("utf-8", "ignore").strip()
+        if not text:
+            return None
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return payload
+
+    def _build_url(self, path: str, params: dict[str, Any] | None) -> str:
+        clean_path = path.lstrip("/")
+        if clean_path:
+            url = f"{self._base_url}/{clean_path}"
+        else:
+            url = self._base_url
+        if params:
+            filtered = {key: value for key, value in params.items() if value is not None}
+            if filtered:
+                url = f"{url}?{urllib_parse.urlencode(filtered)}"
+        return url
 
 __all__ = ["AdCreative", "AzureFaceError", "AzureFaceService", "FaceAnalysis"]
