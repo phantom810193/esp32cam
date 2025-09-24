@@ -720,21 +720,91 @@ class AzureFaceService:
             raise AzureFaceError(f"Failed to create Azure Face person group: {exc}") from exc
 
     def _get_person_group_client(self):
-        for attribute in ("person_group", "personGroup"):
+        candidate_attributes = (
+            "person_group",
+            "personGroup",
+            "person_group_client",
+            "personGroupClient",
+            "person_group_operations",
+            "personGroupOperations",
+            "get_person_group_client",
+            "get_person_group",
+        )
+
+        last_error: Exception | None = None
+        for attribute in candidate_attributes:
             group_client = getattr(self._client, attribute, None)
+            if group_client is None:
+                continue
+
+            if callable(group_client):
+                try:
+                    call_args = self._build_call_args(
+                        group_client,
+                        {"person_group_id": self.person_group_id},
+                    )
+                    group_client = group_client(**call_args)
+                except TypeError:  # pragma: no cover - signature without kwargs
+                    try:
+                        group_client = group_client()
+                    except Exception as exc:  # pragma: no cover - runtime failure
+                        last_error = exc
+                        continue
+                except Exception as exc:  # pragma: no cover - runtime failure
+                    last_error = exc
+                    continue
+
             if group_client is not None:
-                if callable(group_client):  # pragma: no cover - unexpected signature
-                    group_client = group_client()
                 return group_client
+
+        if last_error is not None:
+            raise AzureFaceError(
+                f"Failed to obtain Azure Face person group client: {last_error}"
+            ) from last_error
         raise AzureFaceError("Azure Face client does not expose person group operations")
 
     def _get_person_group_person_client(self):
-        for attribute in ("person_group_person", "personGroupPerson"):
+        candidate_attributes = (
+            "person_group_person",
+            "personGroupPerson",
+            "person_group_person_client",
+            "personGroupPersonClient",
+            "person_group_person_operations",
+            "personGroupPersonOperations",
+            "get_person_group_person_client",
+            "get_person_group_person",
+        )
+
+        last_error: Exception | None = None
+        for attribute in candidate_attributes:
             person_client = getattr(self._client, attribute, None)
+            if person_client is None:
+                continue
+
+            if callable(person_client):
+                try:
+                    call_args = self._build_call_args(
+                        person_client,
+                        {"person_group_id": self.person_group_id},
+                    )
+                    person_client = person_client(**call_args)
+                except TypeError:  # pragma: no cover - signature without kwargs
+                    try:
+                        person_client = person_client()
+                    except Exception as exc:  # pragma: no cover - runtime failure
+                        last_error = exc
+                        continue
+                except Exception as exc:  # pragma: no cover - runtime failure
+                    last_error = exc
+                    continue
+
             if person_client is not None:
-                if callable(person_client):  # pragma: no cover - unexpected signature
-                    person_client = person_client()
                 return person_client
+
+        if last_error is not None:
+            raise AzureFaceError(
+                f"Failed to obtain Azure Face person client: {last_error}"
+            ) from last_error
         raise AzureFaceError("Azure Face client does not expose person operations")
 
     @staticmethod
