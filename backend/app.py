@@ -3,10 +3,19 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+import mimetypes
 from pathlib import Path
+from time import perf_counter
 from typing import Tuple
 
-from flask import Flask, jsonify, render_template, request, url_for
+from flask import (
+    Flask,
+    jsonify,
+    render_template,
+    request,
+    send_from_directory,
+    url_for,
+)
 
 from .advertising import build_ad_context
 from .ai import GeminiService, GeminiUnavailableError
@@ -19,6 +28,8 @@ logging.basicConfig(level=logging.INFO)
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 DB_PATH = DATA_DIR / "mvp.sqlite3"
+UPLOAD_DIR = DATA_DIR / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
 app.config["JSON_AS_ASCII"] = False
@@ -39,11 +50,16 @@ def index() -> str:
 def upload_face():
     """Receive an image from the ESP32-CAM and return the member identifier."""
 
+    overall_start = perf_counter()
+
     try:
         image_bytes, mime_type = _extract_image_payload(request)
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
 
+    upload_duration = perf_counter() - overall_start
+
+    recognition_start = perf_counter()
     try:
         encoding = recognizer.encode(image_bytes, mime_type=mime_type)
     except ValueError as exc:
@@ -60,6 +76,43 @@ def upload_face():
         indexed_encoding = recognizer.register_face(image_bytes, member_id)
         if indexed_encoding is not None:
             database.update_member_encoding(member_id, indexed_encoding)
+
+    recognition_duration = perf_counter() - recognition_start
+
+    ad_generation_start = perf_counter()
+    purchases = database.get_purchase_history(member_id)
+    creative = None
+    if gemini.can_generate_ads:
+        try:
+            creative = gemini.generate_ad_copy(
+                member_id,
+                [
+                    {
+                        "item": purchase.item,
+                        "purchased_at": purchase.purchased_at,
+                        "unit_price": purchase.unit_price,
+                        "quantity": purchase.quantity,
+                        "total_price": purchase.total_price,
+                    }
+                    for purchase in purchases
+                ],
+            )
+        except GeminiUnavailableError as exc:
+            logging.warning("Gemini ad generation unavailable: %s", exc)
+    build_ad_context(member_id, purchases, creative=creative)
+    ad_generation_duration = perf_counter() - ad_generation_start
+
+    total_duration = perf_counter() - overall_start
+
+    image_filename = _persist_upload_image(member_id, image_bytes, mime_type)
+    database.record_upload_event(
+        member_id=member_id,
+        image_filename=image_filename,
+        upload_duration=upload_duration,
+        recognition_duration=recognition_duration,
+        ad_duration=ad_generation_duration,
+        total_duration=total_duration,
+    )
 
     payload = {
         "status": "ok",
@@ -148,6 +201,29 @@ def render_ad(member_id: str):
     return render_template("ad.html", context=context)
 
 
+@app.get("/latest_upload")
+def latest_upload_dashboard():
+    event = database.get_latest_upload_event()
+    if event is None:
+        return render_template("latest_upload.html", event=None)
+
+    image_url = None
+    if event.image_filename:
+        image_url = url_for("serve_upload_image", filename=event.image_filename)
+
+    return render_template(
+        "latest_upload.html",
+        event=event,
+        image_url=image_url,
+        ad_url=url_for("render_ad", member_id=event.member_id, _external=True),
+    )
+
+
+@app.get("/uploads/<path:filename>")
+def serve_upload_image(filename: str):
+    return send_from_directory(UPLOAD_DIR, filename)
+
+
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
@@ -180,6 +256,20 @@ def _create_welcome_purchase(member_id: str) -> None:
         quantity=1,
         total_price=880.0,
     )
+
+
+def _persist_upload_image(member_id: str, image_bytes: bytes, mime_type: str) -> str | None:
+    extension = mimetypes.guess_extension(mime_type or "") or ".jpg"
+    if extension == ".jpe":
+        extension = ".jpg"
+    filename = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{member_id}{extension}"
+    path = UPLOAD_DIR / filename
+    try:
+        path.write_bytes(image_bytes)
+    except OSError as exc:
+        logging.warning("Failed to persist uploaded image %s: %s", path, exc)
+        return None
+    return filename
 
 
 if __name__ == "__main__":

@@ -73,6 +73,7 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
 
    - `POST /upload_face`：接受 `image/jpeg` 或 `multipart/form-data` 影像。回傳 JSON，內含 `member_id`、`new_member` 旗標與廣告頁 URL。
    - `GET /ad/<member_id>`：根據 SQLite + Gemini Text 的輸出生成廣告頁，內建 `<meta http-equiv="refresh" content="5">`，適合放在電視棒上自動輪播。
+   - `GET /latest_upload`：顯示最新上傳影像、辨識結果、個人化廣告連結與各階段耗時分析，方便除錯與現場展示。
    - `GET /health`：基本健康檢查。
    - `POST /members/merge`：手動修正重複會員。請帶入 `{"source": "MEM001", "target": "MEM002"}`，系統會把來源會員的消費紀錄與 Rekognition 雲端索引合併到目標會員下。
 

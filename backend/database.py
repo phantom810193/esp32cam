@@ -24,6 +24,18 @@ class Purchase:
     total_price: float
 
 
+@dataclass
+class UploadEvent:
+    id: int
+    created_at: str
+    member_id: str
+    image_filename: str | None
+    upload_duration: float
+    recognition_duration: float
+    ad_duration: float
+    total_duration: float
+
+
 def _build_seed_purchases(
     start_timestamp: str, items: list[tuple[str, float, float]]
 ) -> list[dict[str, float | str]]:
@@ -96,6 +108,22 @@ class Database:
                     unit_price REAL NOT NULL,
                     quantity REAL NOT NULL,
                     total_price REAL NOT NULL,
+                    FOREIGN KEY(member_id) REFERENCES members(member_id)
+                );
+                """
+            )
+
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS upload_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TEXT NOT NULL,
+                    member_id TEXT NOT NULL,
+                    image_filename TEXT,
+                    upload_duration REAL NOT NULL,
+                    recognition_duration REAL NOT NULL,
+                    ad_duration REAL NOT NULL,
+                    total_duration REAL NOT NULL,
                     FOREIGN KEY(member_id) REFERENCES members(member_id)
                 );
                 """
@@ -273,6 +301,74 @@ class Database:
             )
             for row in rows
         ]
+
+    def record_upload_event(
+        self,
+        *,
+        member_id: str,
+        image_filename: str | None,
+        upload_duration: float,
+        recognition_duration: float,
+        ad_duration: float,
+        total_duration: float,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO upload_events (
+                    created_at,
+                    member_id,
+                    image_filename,
+                    upload_duration,
+                    recognition_duration,
+                    ad_duration,
+                    total_duration
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    datetime.now().isoformat(timespec="seconds"),
+                    member_id,
+                    image_filename,
+                    float(upload_duration),
+                    float(recognition_duration),
+                    float(ad_duration),
+                    float(total_duration),
+                ),
+            )
+            conn.commit()
+
+    def get_latest_upload_event(self) -> UploadEvent | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id,
+                       created_at,
+                       member_id,
+                       image_filename,
+                       upload_duration,
+                       recognition_duration,
+                       ad_duration,
+                       total_duration
+                FROM upload_events
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        return UploadEvent(
+            id=int(row["id"]),
+            created_at=str(row["created_at"]),
+            member_id=str(row["member_id"]),
+            image_filename=row["image_filename"],
+            upload_duration=float(row["upload_duration"]),
+            recognition_duration=float(row["recognition_duration"]),
+            ad_duration=float(row["ad_duration"]),
+            total_duration=float(row["total_duration"]),
+        )
 
     # ------------------------------------------------------------------
     def ensure_demo_data(self) -> None:
