@@ -129,18 +129,19 @@ def render_ad(member_id: str):
     creative = None
     if gemini.can_generate_ads:
         try:
-            creative = gemini.generate_ad_copy(
-                member_id,
-                [
-                    {
-                        "item": purchase.item,
-                        "last_purchase": purchase.last_purchase,
-                        "discount": purchase.discount,
-                        "recommendation": purchase.recommendation,
-                    }
-                    for purchase in purchases
-                ],
-            )
+                creative = gemini.generate_ad_copy(
+                    member_id,
+                    [
+                        {
+                            "item": purchase.item,
+                            "purchased_at": purchase.purchased_at,
+                            "unit_price": purchase.unit_price,
+                            "quantity": purchase.quantity,
+                            "total_price": purchase.total_price,
+                        }
+                        for purchase in purchases
+                    ],
+                )
         except GeminiUnavailableError as exc:
             logging.warning("Gemini ad generation unavailable: %s", exc)
     context = build_ad_context(member_id, purchases, creative=creative)
@@ -170,13 +171,14 @@ def _extract_image_payload(req) -> Tuple[bytes, str]:
 
 
 def _create_welcome_purchase(member_id: str) -> None:
-    now = datetime.now().strftime("%Y-%m-%d")
+    now = datetime.now().replace(second=0, microsecond=0)
     database.add_purchase(
         member_id,
-        "歡迎禮盒",
-        now,
-        0.2,
-        "AI 精選：咖啡豆 x 手工甜點組，今天下單享 8 折！",
+        item="歡迎禮盒",
+        purchased_at=now.strftime("%Y-%m-%d %H:%M"),
+        unit_price=880.0,
+        quantity=1,
+        total_price=880.0,
     )
 
 
