@@ -71,6 +71,8 @@ class Database:
         best_distance: float | None = None
         with self._connect() as conn:
             for row in conn.execute("SELECT member_id, encoding_json FROM members"):
+                if encoding.signature and encoding.signature == row["member_id"]:
+                    return row["member_id"], 0.0
                 stored = FaceEncoding.from_jsonable(json.loads(row["encoding_json"]))
                 if stored.signature and stored.signature == encoding.signature:
                     return row["member_id"], 0.0
@@ -91,6 +93,15 @@ class Database:
             conn.commit()
         _LOGGER.info("Created new member %s", member_id)
         return member_id
+
+    def update_member_encoding(self, member_id: str, encoding: FaceEncoding) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE members SET encoding_json = ? WHERE member_id = ?",
+                (json.dumps(encoding.to_jsonable(), ensure_ascii=False), member_id),
+            )
+            conn.commit()
+        _LOGGER.info("Updated Rekognition encoding for member %s", member_id)
 
     def _generate_member_id(self, encoding: FaceEncoding | None = None) -> str:
         if encoding and encoding.signature:

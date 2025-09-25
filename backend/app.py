@@ -10,6 +10,7 @@ from flask import Flask, jsonify, render_template, request, url_for
 
 from .advertising import build_ad_context
 from .ai import GeminiService, GeminiUnavailableError
+from .aws import RekognitionService
 from .database import Database
 from .recognizer import FaceRecognizer
 
@@ -23,7 +24,8 @@ app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
 app.config["JSON_AS_ASCII"] = False
 
 gemini = GeminiService()
-recognizer = FaceRecognizer(gemini)
+rekognition = RekognitionService()
+recognizer = FaceRecognizer(rekognition)
 database = Database(DB_PATH)
 database.ensure_demo_data()
 
@@ -53,6 +55,11 @@ def upload_face():
         member_id = database.create_member(encoding, recognizer.derive_member_id(encoding))
         _create_welcome_purchase(member_id)
         new_member = True
+
+    if new_member:
+        indexed_encoding = recognizer.register_face(image_bytes, member_id)
+        if indexed_encoding is not None:
+            database.update_member_encoding(member_id, indexed_encoding)
 
     payload = {
         "status": "ok",
