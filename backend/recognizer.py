@@ -130,6 +130,7 @@ class FaceRecognizer:
 
         best_member: str | None = None
         best_distance: float | None = None
+        closest_distance: float | None = None
 
         if (
             self._faiss is not None
@@ -156,10 +157,12 @@ class FaceRecognizer:
                         candidate_idx = faiss_mapping[pos]
                         member_id, encoding = candidates[candidate_idx]
                         distance = self.distance(encoding, target)
+                        if not np.isfinite(distance):
+                            continue
+                        if closest_distance is None or distance < closest_distance:
+                            closest_distance = distance
                         if self.is_match(encoding, target):
                             return member_id, distance
-                        if best_distance is None or distance < best_distance:
-                            best_member, best_distance = member_id, distance
                 except Exception as exc:
                     _LOGGER.warning("FAISS search failed, using linear scan: %s", exc)
 
@@ -167,11 +170,16 @@ class FaceRecognizer:
             distance = self.distance(encoding, target)
             if not np.isfinite(distance):
                 continue
+            if closest_distance is None or distance < closest_distance:
+                closest_distance = distance
             if self.is_match(encoding, target):
                 if best_distance is None or distance < best_distance:
                     best_member, best_distance = member_id, distance
 
-        return best_member, best_distance
+        if best_member is not None:
+            return best_member, best_distance
+
+        return None, closest_distance
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -196,4 +204,3 @@ class FaceRecognizer:
             except ImportError:  # pragma: no cover - optional dependency
                 continue
         return None
-

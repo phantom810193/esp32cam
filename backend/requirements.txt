@@ -1,4 +1,9 @@
 Flask>=2.3
-numpy>=1.24
+numpy>=2.2.2
 Pillow>=9.5
 google-generativeai>=0.5.0
+insightface
+onnxruntime
+git+https://github.com/xinntao/Real-ESRGAN.git
+git+https://github.com/TencentARC/GFPGAN.git
+faiss-cpu
