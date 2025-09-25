@@ -71,11 +71,11 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
 
 5. API 重點：
 
-   - `POST /upload_face`：接受 `image/jpeg` 或 `multipart/form-data` 影像。回傳 JSON，內含 `member_id`、`new_member` 旗標與廣告頁 URL。
-   - `GET /ad/<member_id>`：根據 SQLite + Gemini Text 的輸出生成廣告頁，內建 `<meta http-equiv="refresh" content="5">`，適合放在電視棒上自動輪播。
-   - `GET /latest_upload`：顯示最新上傳影像、辨識結果、個人化廣告連結與各階段耗時分析，方便除錯與現場展示。
-   - `GET /health`：基本健康檢查。
-   - `POST /members/merge`：手動修正重複會員。請帶入 `{"source": "MEM001", "target": "MEM002"}`，系統會把來源會員的消費紀錄與 Rekognition 雲端索引合併到目標會員下。
+    - `POST /upload_face`：接受 `image/jpeg` 或 `multipart/form-data` 影像。回傳 JSON，內含 `member_id`、`new_member` 旗標與廣告頁 URL。
+    - `GET /ad/<member_id>`：根據 SQLite + Gemini Text 的輸出生成廣告頁，內建 `<meta http-equiv="refresh" content="5">`，適合放在電視棒上自動輪播。
+    - `GET /latest_upload`：顯示最新上傳影像、辨識結果、個人化廣告連結與各階段耗時分析，方便除錯與現場展示。後端只會在磁碟上保留最新一張上傳影像，以避免長期佔用空間。
+    - `GET /health`：基本健康檢查。
+    - `POST /members/merge`：手動修正重複會員。請帶入 `{"source": "MEM001", "target": "MEM002"}`，系統會把來源會員的消費紀錄與 Rekognition 雲端索引合併到目標會員下。
 
 6. SQLite 會自動建立資料庫與 Demo 資料。辨識到新臉孔時，系統會先以 Rekognition 集合比對，若找不到則建立匿名
    `MEMxxxxxxxxxx` 會員，將影像訓練進集合後再寫入歡迎禮優惠，之後同一張臉會透過 `ExternalImageId` 直接命中既有會員。

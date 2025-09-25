@@ -6,7 +6,7 @@ from datetime import datetime
 import mimetypes
 from pathlib import Path
 from time import perf_counter
-from typing import Tuple
+from typing import Iterable, Tuple
 
 from flask import (
     Flask,
@@ -113,6 +113,8 @@ def upload_face():
         ad_duration=ad_generation_duration,
         total_duration=total_duration,
     )
+    stale_images = database.cleanup_upload_events(keep_latest=1)
+    _purge_upload_images(stale_images)
 
     payload = {
         "status": "ok",
@@ -270,6 +272,16 @@ def _persist_upload_image(member_id: str, image_bytes: bytes, mime_type: str) ->
         logging.warning("Failed to persist uploaded image %s: %s", path, exc)
         return None
     return filename
+
+
+def _purge_upload_images(filenames: Iterable[str]) -> None:
+    for filename in set(filter(None, filenames)):
+        path = UPLOAD_DIR / filename
+        try:
+            if path.exists():
+                path.unlink()
+        except OSError as exc:
+            logging.warning("Failed to delete old upload image %s: %s", path, exc)
 
 
 if __name__ == "__main__":

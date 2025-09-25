@@ -338,6 +338,55 @@ class Database:
             )
             conn.commit()
 
+    def cleanup_upload_events(self, keep_latest: int = 1) -> list[str]:
+        """Trim stored upload events and return filenames that should be deleted.
+
+        Only the ``keep_latest`` most recent entries are retained.  Any associated
+        image filenames for older events are returned so the caller can remove the
+        corresponding files from disk.
+        """
+
+        keep_latest = max(0, int(keep_latest))
+        with self._connect() as conn:
+            ids_to_keep: list[int] = []
+            if keep_latest:
+                rows = conn.execute(
+                    "SELECT id FROM upload_events ORDER BY id DESC LIMIT ?",
+                    (keep_latest,),
+                ).fetchall()
+                ids_to_keep = [int(row["id"]) for row in rows]
+
+            params: tuple[int, ...] | None
+            if ids_to_keep:
+                placeholders = ",".join("?" for _ in ids_to_keep)
+                params = tuple(ids_to_keep)
+                query = (
+                    "SELECT id, image_filename FROM upload_events "
+                    f"WHERE id NOT IN ({placeholders})"
+                )
+            else:
+                query = "SELECT id, image_filename FROM upload_events"
+                params = None
+
+            if params is None:
+                rows = conn.execute(query).fetchall()
+            else:
+                rows = conn.execute(query, params).fetchall()
+            if not rows:
+                return []
+
+            ids_to_delete = [int(row["id"]) for row in rows]
+            filenames = [row["image_filename"] for row in rows if row["image_filename"]]
+
+            delete_placeholders = ",".join("?" for _ in ids_to_delete)
+            conn.execute(
+                f"DELETE FROM upload_events WHERE id IN ({delete_placeholders})",
+                tuple(ids_to_delete),
+            )
+            conn.commit()
+
+        return filenames
+
     def get_latest_upload_event(self) -> UploadEvent | None:
         with self._connect() as conn:
             row = conn.execute(
