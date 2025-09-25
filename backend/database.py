@@ -103,6 +103,70 @@ class Database:
             conn.commit()
         _LOGGER.info("Updated Rekognition encoding for member %s", member_id)
 
+    def get_member_encoding(self, member_id: str) -> FaceEncoding | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT encoding_json FROM members WHERE member_id = ?",
+                (member_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return FaceEncoding.from_jsonable(json.loads(row["encoding_json"]))
+
+    def delete_member(self, member_id: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM members WHERE member_id = ?",
+                (member_id,),
+            )
+            conn.commit()
+        deleted = cursor.rowcount > 0
+        if deleted:
+            _LOGGER.info("Deleted member %s", member_id)
+        return deleted
+
+    def merge_members(self, source_id: str, target_id: str) -> tuple[FaceEncoding, FaceEncoding]:
+        """Merge ``source_id`` into ``target_id`` and return their encodings."""
+
+        if source_id == target_id:
+            raise ValueError("source_id 與 target_id 不可相同")
+
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            source_row = conn.execute(
+                "SELECT encoding_json FROM members WHERE member_id = ?",
+                (source_id,),
+            ).fetchone()
+            target_row = conn.execute(
+                "SELECT encoding_json FROM members WHERE member_id = ?",
+                (target_id,),
+            ).fetchone()
+
+            if source_row is None:
+                raise ValueError(f"找不到來源會員 {source_id}")
+            if target_row is None:
+                raise ValueError(f"找不到目標會員 {target_id}")
+
+            source_encoding = FaceEncoding.from_jsonable(
+                json.loads(source_row["encoding_json"])
+            )
+            target_encoding = FaceEncoding.from_jsonable(
+                json.loads(target_row["encoding_json"])
+            )
+
+            conn.execute(
+                "UPDATE purchases SET member_id = ? WHERE member_id = ?",
+                (target_id, source_id),
+            )
+            conn.execute(
+                "DELETE FROM members WHERE member_id = ?",
+                (source_id,),
+            )
+            conn.commit()
+
+        _LOGGER.info("Merged member %s into %s", source_id, target_id)
+        return source_encoding, target_encoding
+
     def _generate_member_id(self, encoding: FaceEncoding | None = None) -> str:
         if encoding and encoding.signature:
             hashed = hashlib.sha1(encoding.signature.encode("utf-8")).hexdigest().upper()

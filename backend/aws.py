@@ -5,7 +5,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator, Sequence
 
 try:  # pragma: no cover - optional dependency for local development
     import boto3  # type: ignore
@@ -308,6 +308,101 @@ class RekognitionService:
             ),
             confidence=float(face.get("Confidence", 0.0)),
         )
+
+    # ------------------------------------------------------------------
+    def remove_faces(self, face_ids: Sequence[str]) -> int:
+        """Delete the provided face IDs from the configured collection."""
+
+        if not face_ids:
+            return 0
+
+        if not self.can_index_faces and not self.ensure_collection():
+            raise RekognitionUnavailableError(
+                "Amazon Rekognition collection is not available for deletion"
+            )
+
+        assert self._client is not None
+        try:
+            response = self._client.delete_faces(
+                CollectionId=self.collection_id,
+                FaceIds=list(face_ids),
+            )
+        except ClientError as exc:  # pragma: no cover - API failure
+            code = exc.response.get("Error", {}).get("Code", "")
+            if code == "ResourceNotFoundException":
+                self._collection_ready = False
+                raise RekognitionUnavailableError(
+                    f"Amazon Rekognition collection {self.collection_id} was not found"
+                ) from exc
+            raise RekognitionUnavailableError(
+                f"Amazon Rekognition delete_faces failed: {exc}"
+            ) from exc
+        except BotoCoreError as exc:  # pragma: no cover - transport failure
+            raise RekognitionUnavailableError(
+                f"Amazon Rekognition delete_faces transport failure: {exc}"
+            ) from exc
+
+        deleted = response.get("DeletedFaces", [])
+        return len(deleted)
+
+    def remove_faces_by_external_ids(self, external_ids: Iterable[str]) -> int:
+        """Delete all faces whose ``ExternalImageId`` matches the provided IDs."""
+
+        ids = {external_id for external_id in external_ids if external_id}
+        if not ids:
+            return 0
+
+        matches: list[str] = []
+        for face in self._iter_collection_faces():
+            external_id = face.get("ExternalImageId")
+            if external_id and external_id in ids:
+                matches.append(str(face.get("FaceId", "")))
+
+        if not matches:
+            return 0
+
+        return self.remove_faces(matches)
+
+    def _iter_collection_faces(self) -> Iterator[dict[str, Any]]:
+        """Yield faces stored in the collection, handling pagination transparently."""
+
+        if not self.can_index_faces and not self.ensure_collection():
+            raise RekognitionUnavailableError(
+                "Amazon Rekognition collection is not available for listing"
+            )
+
+        assert self._client is not None
+        pagination_token: str | None = None
+        while True:
+            try:
+                params = {
+                    "CollectionId": self.collection_id,
+                    "MaxResults": 1000,
+                }
+                if pagination_token:
+                    params["NextToken"] = pagination_token
+                response = self._client.list_faces(**params)
+            except ClientError as exc:  # pragma: no cover - API failure
+                code = exc.response.get("Error", {}).get("Code", "")
+                if code == "ResourceNotFoundException":
+                    self._collection_ready = False
+                    raise RekognitionUnavailableError(
+                        f"Amazon Rekognition collection {self.collection_id} was not found"
+                    ) from exc
+                raise RekognitionUnavailableError(
+                    f"Amazon Rekognition list_faces failed: {exc}"
+                ) from exc
+            except BotoCoreError as exc:  # pragma: no cover - transport failure
+                raise RekognitionUnavailableError(
+                    f"Amazon Rekognition list_faces transport failure: {exc}"
+                ) from exc
+
+            for face in response.get("Faces", []) or []:
+                yield face
+
+            pagination_token = response.get("NextToken")
+            if not pagination_token:
+                break
 
     # ------------------------------------------------------------------
     @staticmethod

@@ -111,6 +111,18 @@ class FaceRecognizer:
         vector = self._vector_from_signature(signature)
         return FaceEncoding(vector=vector, signature=signature, source="rekognition-index")
 
+    def remove_member_faces(self, member_id: str) -> int:
+        """Remove any Rekognition faces associated with ``member_id``."""
+
+        if not self._rekognition:
+            return 0
+
+        try:
+            return self._rekognition.remove_faces_by_external_ids([member_id])
+        except RekognitionUnavailableError as exc:
+            _LOGGER.warning("Amazon Rekognition delete_faces failed: %s", exc)
+            return 0
+
     # ------------------------------------------------------------------
     def derive_member_id(self, encoding: FaceEncoding) -> str:
         base = encoding.signature or self._hash_signature(encoding.vector.tobytes())

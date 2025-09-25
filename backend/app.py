@@ -72,6 +72,57 @@ def upload_face():
     return jsonify(payload), 201 if new_member else 200
 
 
+@app.post("/members/merge")
+def merge_members():
+    """Merge two member identifiers when the same face was duplicated."""
+
+    payload = request.get_json(silent=True) or {}
+    source_id = str(payload.get("source") or "").strip()
+    target_id = str(payload.get("target") or "").strip()
+    prefer_source = bool(payload.get("prefer_source_encoding", False))
+
+    if not source_id or not target_id:
+        return (
+            jsonify({"status": "error", "message": "source 與 target 參數必須提供"}),
+            400,
+        )
+
+    try:
+        source_encoding, target_encoding = database.merge_members(source_id, target_id)
+    except ValueError as exc:
+        message = str(exc)
+        status = 400 if "不可相同" in message else 404
+        return jsonify({"status": "error", "message": message}), status
+
+    deleted_faces = recognizer.remove_member_faces(source_id)
+
+    encoding_updated = False
+    if (
+        prefer_source
+        or (not target_encoding.signature and source_encoding.signature)
+        or (
+            source_encoding.signature
+            and source_encoding.source.startswith("rekognition")
+            and not target_encoding.source.startswith("rekognition")
+        )
+    ):
+        database.update_member_encoding(target_id, source_encoding)
+        encoding_updated = True
+
+    return (
+        jsonify(
+            {
+                "status": "ok",
+                "merged_member": source_id,
+                "into": target_id,
+                "deleted_cloud_faces": deleted_faces,
+                "encoding_updated": encoding_updated,
+            }
+        ),
+        200,
+    )
+
+
 @app.get("/ad/<member_id>")
 def render_ad(member_id: str):
     purchases = database.get_purchase_history(member_id)
