@@ -161,7 +161,14 @@ class FaceRecognizer:
                             continue
                         if closest_distance is None or distance < closest_distance:
                             closest_distance = distance
-                        if self.is_match(encoding, target):
+                        match = self.is_match(encoding, target)
+                        _LOGGER.debug(
+                            "FAISS 比對 member=%s 距離=%.4f match=%s",
+                            member_id,
+                            distance,
+                            match,
+                        )
+                        if match:
                             return member_id, distance
                 except Exception as exc:
                     _LOGGER.warning("FAISS search failed, using linear scan: %s", exc)
@@ -172,13 +179,29 @@ class FaceRecognizer:
                 continue
             if closest_distance is None or distance < closest_distance:
                 closest_distance = distance
-            if self.is_match(encoding, target):
+            match = self.is_match(encoding, target)
+            _LOGGER.debug(
+                "線性掃描比對 member=%s 距離=%.4f match=%s",
+                member_id,
+                distance,
+                match,
+            )
+            if match:
                 if best_distance is None or distance < best_distance:
                     best_member, best_distance = member_id, distance
 
         if best_member is not None:
+            _LOGGER.debug(
+                "選定既有會員 %s (距離 %.4f)",
+                best_member,
+                best_distance if best_distance is not None else float("nan"),
+            )
             return best_member, best_distance
 
+        _LOGGER.debug(
+            "未找到符合門檻的會員，最近距離=%.4f",
+            closest_distance if closest_distance is not None else float("nan"),
+        )
         return None, closest_distance
 
     # ------------------------------------------------------------------

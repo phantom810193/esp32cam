@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Tuple
@@ -14,7 +15,18 @@ from .database import Database
 from .face_pipeline import AdvancedFacePipeline
 from .recognizer import FaceRecognizer
 
-logging.basicConfig(level=logging.INFO)
+_LOG_LEVELS = {
+    "CRITICAL": logging.CRITICAL,
+    "ERROR": logging.ERROR,
+    "WARNING": logging.WARNING,
+    "INFO": logging.INFO,
+    "DEBUG": logging.DEBUG,
+}
+
+_LOG_LEVEL_NAME = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=_LOG_LEVELS.get(_LOG_LEVEL_NAME, logging.INFO))
+if _LOG_LEVEL_NAME not in _LOG_LEVELS:
+    logging.warning("LOG_LEVEL=%r 非法，改用 INFO 等級", _LOG_LEVEL_NAME)
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -23,11 +35,39 @@ DB_PATH = DATA_DIR / "mvp.sqlite3"
 app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
 app.config["JSON_AS_ASCII"] = False
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        logging.warning("環境變數 %s=%r 無法轉成浮點數，改用預設值 %.3f", name, raw, default)
+        return default
+
+
 gemini = GeminiService()
 pipeline = AdvancedFacePipeline()
-if not pipeline.is_available and pipeline.last_error:
-    logging.info("Advanced face pipeline disabled: %s", pipeline.last_error)
-recognizer = FaceRecognizer(gemini, pipeline=pipeline)
+if pipeline.is_available:
+    logging.info("Advanced face pipeline 啟用，InsightFace 特徵可使用")
+elif pipeline.last_error:
+    logging.info("Advanced face pipeline 停用：%s", pipeline.last_error)
+else:
+    logging.info("Advanced face pipeline 未啟用 (未提供錯誤訊息)")
+
+tolerance = _env_float("RECOGNIZER_TOLERANCE", 0.38)
+arcface_tolerance = _env_float("RECOGNIZER_ARCFACE_TOLERANCE", 1.2)
+logging.info(
+    "FaceRecognizer 容差設定：tolerance=%.3f, arcface_tolerance=%.3f",
+    tolerance,
+    arcface_tolerance,
+)
+recognizer = FaceRecognizer(
+    gemini,
+    tolerance=tolerance,
+    arcface_tolerance=arcface_tolerance,
+    pipeline=pipeline,
+)
 database = Database(DB_PATH)
 database.ensure_demo_data()
 
@@ -66,6 +106,12 @@ def upload_face():
     }
     if distance is not None:
         payload["distance"] = distance
+    logging.info(
+        "辨識完成 member_id=%s new_member=%s distance=%s",
+        member_id,
+        new_member,
+        f"{distance:.4f}" if distance is not None else "n/a",
+    )
     return jsonify(payload), 201 if new_member else 200
 
 
@@ -128,4 +174,3 @@ def _create_welcome_purchase(member_id: str) -> None:
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
-

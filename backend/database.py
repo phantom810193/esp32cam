@@ -8,6 +8,8 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
+
 from .recognizer import FaceEncoding, FaceRecognizer
 
 _LOGGER = logging.getLogger(__name__)
@@ -76,9 +78,14 @@ class Database:
                     and encoding.signature
                     and stored.signature == encoding.signature
                 ):
+                    self._update_member_encoding(row["member_id"], stored, encoding)
                     return row["member_id"], 0.0
                 candidates.append((row["member_id"], stored))
-        return recognizer.find_best_match(candidates, encoding)
+        candidate_lookup = {member_id: stored for member_id, stored in candidates}
+        member_id, distance = recognizer.find_best_match(candidates, encoding)
+        if member_id is not None and member_id in candidate_lookup and distance is not None:
+            self._update_member_encoding(member_id, candidate_lookup[member_id], encoding)
+        return member_id, distance
 
     def create_member(self, encoding: FaceEncoding, member_id: str | None = None) -> str:
         member_id = member_id or self._generate_member_id(encoding)
@@ -99,6 +106,52 @@ class Database:
         with self._connect() as conn:
             total_members = conn.execute("SELECT COUNT(*) FROM members").fetchone()[0]
         return f"MEM{total_members + 1:03d}"
+
+    def _update_member_encoding(
+        self,
+        member_id: str,
+        existing: FaceEncoding,
+        new_encoding: FaceEncoding,
+        blend_weight: float = 0.6,
+    ) -> None:
+        try:
+            weight = float(np.clip(blend_weight, 0.0, 1.0))
+        except (TypeError, ValueError):
+            weight = 0.6
+
+        try:
+            if new_encoding.vector.size == 0:
+                return
+
+            if existing.vector.size > 0 and existing.vector.shape == new_encoding.vector.shape:
+                base = existing.vector.astype(np.float32, copy=False)
+                incoming = new_encoding.vector.astype(np.float32, copy=False)
+                blended_vector = base * (1.0 - weight) + incoming * weight
+            else:
+                blended_vector = new_encoding.vector.astype(np.float32, copy=False)
+
+            signature = existing.signature or new_encoding.signature
+            if not signature and blended_vector.size > 0:
+                signature = FaceRecognizer._hash_signature(blended_vector.tobytes())
+
+            sources = [existing.source, new_encoding.source]
+            merged_sources = "+".join(sorted({s for s in sources if s})) or "hash"
+
+            updated = FaceEncoding(
+                vector=blended_vector.astype(np.float32, copy=False),
+                signature=signature,
+                source=merged_sources,
+            )
+
+            with self._connect() as conn:
+                conn.execute(
+                    "UPDATE members SET encoding_json = ? WHERE member_id = ?",
+                    (json.dumps(updated.to_jsonable(), ensure_ascii=False), member_id),
+                )
+                conn.commit()
+            _LOGGER.info("更新會員 %s 的臉部向量 (來源=%s)", member_id, merged_sources)
+        except Exception as exc:  # pragma: no cover - 保護性記錄
+            _LOGGER.warning("更新會員 %s 向量失敗：%s", member_id, exc)
 
     # ------------------------------------------------------------------
     def add_purchase(
@@ -176,4 +229,3 @@ class Database:
                 "早餐搭配現磨咖啡可享第二杯半價。",
             )
             _LOGGER.info("Seeded demo purchase history for %s", demo_member)
-
