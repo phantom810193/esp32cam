@@ -11,6 +11,7 @@ import numpy as np
 from .aws import (
     FaceMatch,
     IndexedFace,
+    NoFaceDetectedError,
     RekognitionService,
     RekognitionUnavailableError,
 )
@@ -62,6 +63,7 @@ class FaceRecognizer:
         source = "hash"
         match: FaceMatch | None = None
         summary = None
+        no_face_detected = False
         if self._rekognition:
             try:
                 match = self._rekognition.search_face(image_bytes)
@@ -73,11 +75,17 @@ class FaceRecognizer:
             if match is None and self._rekognition.can_describe_faces:
                 try:
                     summary = self._rekognition.describe_face(image_bytes)
+                except NoFaceDetectedError as exc:
+                    no_face_detected = True
+                    _LOGGER.info("Amazon Rekognition 未在影像偵測到人臉: %s", exc)
                 except RekognitionUnavailableError as exc:
                     _LOGGER.warning(
                         "Amazon Rekognition detect_faces unavailable, falling back to hash: %s",
                         exc,
                     )
+
+        if match is None and summary is None and no_face_detected:
+            raise ValueError("影像中未偵測到人臉，請重新拍攝")
 
         if match is not None:
             signature = match.to_signature()

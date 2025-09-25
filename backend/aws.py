@@ -22,6 +22,10 @@ class RekognitionUnavailableError(RuntimeError):
     """Raised when the Rekognition client cannot be used."""
 
 
+class NoFaceDetectedError(RekognitionUnavailableError):
+    """Raised when Rekognition processes an image without detecting a face."""
+
+
 @dataclass
 class FaceSummary:
     """Structured attributes extracted from Amazon Rekognition."""
@@ -197,7 +201,7 @@ class RekognitionService:
 
         faces = response.get("FaceDetails", [])
         if not faces:
-            raise RekognitionUnavailableError("Amazon Rekognition 未在影像中偵測到人臉")
+            raise NoFaceDetectedError("Amazon Rekognition 未在影像中偵測到人臉")
 
         signature_payload = self._build_face_payload(faces[0])
         _LOGGER.debug("Amazon Rekognition signature payload: %s", signature_payload)
