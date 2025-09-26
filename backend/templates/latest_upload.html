@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>最新上傳影像儀表板</title>
+    <meta http-equiv="refresh" content="5">
+    <style>
+      body {
+        font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+        margin: 0;
+        background: #f5f5f5;
+        color: #222;
+      }
+      header {
+        background: #2c3e50;
+        color: #fff;
+        padding: 1.25rem 2rem;
+      }
+      main {
+        padding: 2rem;
+        max-width: 960px;
+        margin: 0 auto;
+      }
+      .card {
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+        padding: 1.5rem;
+      }
+      .image-wrapper {
+        text-align: center;
+        margin-bottom: 1.5rem;
+      }
+      .image-wrapper img {
+        max-width: 100%;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        transform: rotate(180deg);
+      }
+      dl {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        grid-row-gap: 0.5rem;
+        grid-column-gap: 1rem;
+        margin: 0 0 1.5rem;
+      }
+      dt {
+        font-weight: 600;
+      }
+      dd {
+        margin: 0;
+      }
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 1rem;
+      }
+      .metric {
+        background: #fafafa;
+        border-radius: 10px;
+        padding: 1rem;
+        text-align: center;
+        border: 1px solid #e3e3e3;
+      }
+      .metric strong {
+        display: block;
+        font-size: 1.4rem;
+        margin-bottom: 0.25rem;
+      }
+      .empty-state {
+        text-align: center;
+        padding: 4rem 2rem;
+        color: #666;
+      }
+      a.button {
+        display: inline-block;
+        padding: 0.75rem 1.5rem;
+        background: #3498db;
+        color: #fff;
+        border-radius: 999px;
+        text-decoration: none;
+        font-weight: 600;
+      }
+      a.button:hover {
+        background: #2d83bd;
+      }
+      a.button.secondary {
+        background: #6c757d;
+      }
+      a.button.secondary:hover {
+        background: #5b636c;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>最新上傳影像儀表板</h1>
+    </header>
+    <main>
+      {% if not event %}
+        <div class="card empty-state">
+          <p>目前尚未收到任何上傳影像，請先透過 /upload_face 上傳照片。</p>
+          <p><a class="button secondary" href="{{ members_url }}" target="_blank" rel="noopener">檢視會員資料與消費紀錄</a></p>
+        </div>
+      {% else %}
+        <div class="card">
+          {% if image_url %}
+          <div class="image-wrapper">
+            <img src="{{ image_url }}" alt="最新上傳影像">
+          </div>
+          {% endif %}
+          <dl>
+            <dt>辨識時間</dt>
+            <dd>{{ event.created_at }}</dd>
+            <dt>辨識結果</dt>
+            <dd>會員代號：{{ event.member_code }}（ID：{{ event.member_id }}）</dd>
+            <dt>廣告頁面</dt>
+            <dd><a class="button" href="{{ ad_url }}" target="_blank" rel="noopener">開啟個人化廣告頁</a></dd>
+            <dt>會員資料</dt>
+            <dd><a class="button secondary" href="{{ members_url }}" target="_blank" rel="noopener">檢視會員資料與消費紀錄</a></dd>
+          </dl>
+          <div class="metrics">
+            <div class="metric">
+              <strong>{{ '%.1f 秒'|format(event.upload_duration) }}</strong>
+              <span>上傳</span>
+            </div>
+            <div class="metric">
+              <strong>{{ '%.1f 秒'|format(event.recognition_duration) }}</strong>
+              <span>辨識</span>
+            </div>
+            <div class="metric">
+              <strong>{{ '%.1f 秒'|format(event.ad_duration) }}</strong>
+              <span>廣告生成</span>
+            </div>
+            <div class="metric">
+              <strong>{{ '%.1f 秒'|format(event.total_duration) }}</strong>
+              <span>總計</span>
+            </div>
+          </div>
+        </div>
+      {% endif %}
+    </main>
+  </body>
+</html>

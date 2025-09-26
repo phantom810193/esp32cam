@@ -3,13 +3,24 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+import mimetypes
 from pathlib import Path
-from typing import Tuple
+from time import perf_counter
+from typing import Iterable, Tuple
+from uuid import uuid4
 
-from flask import Flask, jsonify, render_template, request, url_for
+from flask import (
+    Flask,
+    jsonify,
+    render_template,
+    request,
+    send_from_directory,
+    url_for,
+)
 
 from .advertising import build_ad_context
 from .ai import GeminiService, GeminiUnavailableError
+from .aws import RekognitionService
 from .database import Database
 from .recognizer import FaceRecognizer
 
@@ -18,12 +29,22 @@ logging.basicConfig(level=logging.INFO)
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 DB_PATH = DATA_DIR / "mvp.sqlite3"
+UPLOAD_DIR = DATA_DIR / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
 app.config["JSON_AS_ASCII"] = False
 
 gemini = GeminiService()
-recognizer = FaceRecognizer(gemini)
+rekognition = RekognitionService()
+if rekognition.can_describe_faces:
+    if rekognition.reset_collection():
+        logging.info("Amazon Rekognition collection reset for a clean start")
+    else:
+        logging.warning(
+            "Amazon Rekognition collection reset failed; continuing with existing entries"
+        )
+recognizer = FaceRecognizer(rekognition)
 database = Database(DB_PATH)
 database.ensure_demo_data()
 
@@ -37,11 +58,16 @@ def index() -> str:
 def upload_face():
     """Receive an image from the ESP32-CAM and return the member identifier."""
 
+    overall_start = perf_counter()
+
     try:
         image_bytes, mime_type = _extract_image_payload(request)
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
 
+    upload_duration = perf_counter() - overall_start
+
+    recognition_start = perf_counter()
     try:
         encoding = recognizer.encode(image_bytes, mime_type=mime_type)
     except ValueError as exc:
@@ -54,19 +80,14 @@ def upload_face():
         _create_welcome_purchase(member_id)
         new_member = True
 
-    payload = {
-        "status": "ok",
-        "member_id": member_id,
-        "new_member": new_member,
-        "ad_url": url_for("render_ad", member_id=member_id, _external=True),
-    }
-    if distance is not None:
-        payload["distance"] = distance
-    return jsonify(payload), 201 if new_member else 200
+    if new_member:
+        indexed_encoding = recognizer.register_face(image_bytes, member_id)
+        if indexed_encoding is not None:
+            database.update_member_encoding(member_id, indexed_encoding)
 
+    recognition_duration = perf_counter() - recognition_start
 
-@app.get("/ad/<member_id>")
-def render_ad(member_id: str):
+    ad_generation_start = perf_counter()
     purchases = database.get_purchase_history(member_id)
     creative = None
     if gemini.can_generate_ads:
@@ -75,18 +96,165 @@ def render_ad(member_id: str):
                 member_id,
                 [
                     {
+                        "member_code": purchase.member_code,
                         "item": purchase.item,
-                        "last_purchase": purchase.last_purchase,
-                        "discount": purchase.discount,
-                        "recommendation": purchase.recommendation,
+                        "purchased_at": purchase.purchased_at,
+                        "unit_price": purchase.unit_price,
+                        "quantity": purchase.quantity,
+                        "total_price": purchase.total_price,
                     }
                     for purchase in purchases
                 ],
             )
         except GeminiUnavailableError as exc:
             logging.warning("Gemini ad generation unavailable: %s", exc)
+    build_ad_context(member_id, purchases, creative=creative)
+    ad_generation_duration = perf_counter() - ad_generation_start
+
+    total_duration = perf_counter() - overall_start
+
+    image_filename = _persist_upload_image(member_id, image_bytes, mime_type)
+    database.record_upload_event(
+        member_id=member_id,
+        image_filename=image_filename,
+        upload_duration=upload_duration,
+        recognition_duration=recognition_duration,
+        ad_duration=ad_generation_duration,
+        total_duration=total_duration,
+    )
+    stale_images = database.cleanup_upload_events(keep_latest=1)
+    _purge_upload_images(stale_images)
+
+    payload = {
+        "status": "ok",
+        "member_id": member_id,
+        "member_code": database.get_member_code(member_id),
+        "new_member": new_member,
+        "ad_url": url_for("render_ad", member_id=member_id, _external=True),
+    }
+    if distance is not None:
+        payload["distance"] = distance
+    return jsonify(payload), 201 if new_member else 200
+
+
+@app.post("/members/merge")
+def merge_members():
+    """Merge two member identifiers when the same face was duplicated."""
+
+    payload = request.get_json(silent=True) or {}
+    source_id = str(payload.get("source") or "").strip()
+    target_id = str(payload.get("target") or "").strip()
+    prefer_source = bool(payload.get("prefer_source_encoding", False))
+
+    if not source_id or not target_id:
+        return (
+            jsonify({"status": "error", "message": "source 與 target 參數必須提供"}),
+            400,
+        )
+
+    try:
+        source_encoding, target_encoding = database.merge_members(source_id, target_id)
+    except ValueError as exc:
+        message = str(exc)
+        status = 400 if "不可相同" in message else 404
+        return jsonify({"status": "error", "message": message}), status
+
+    deleted_faces = recognizer.remove_member_faces(source_id)
+
+    encoding_updated = False
+    if (
+        prefer_source
+        or (not target_encoding.signature and source_encoding.signature)
+        or (
+            source_encoding.signature
+            and source_encoding.source.startswith("rekognition")
+            and not target_encoding.source.startswith("rekognition")
+        )
+    ):
+        database.update_member_encoding(target_id, source_encoding)
+        encoding_updated = True
+
+    return (
+        jsonify(
+            {
+                "status": "ok",
+                "merged_member": source_id,
+                "into": target_id,
+                "deleted_cloud_faces": deleted_faces,
+                "encoding_updated": encoding_updated,
+            }
+        ),
+        200,
+    )
+
+
+@app.get("/ad/<member_id>")
+def render_ad(member_id: str):
+    purchases = database.get_purchase_history(member_id)
+    creative = None
+    if gemini.can_generate_ads:
+        try:
+                creative = gemini.generate_ad_copy(
+                    member_id,
+                    [
+                        {
+                            "member_code": purchase.member_code,
+                            "item": purchase.item,
+                            "purchased_at": purchase.purchased_at,
+                            "unit_price": purchase.unit_price,
+                            "quantity": purchase.quantity,
+                            "total_price": purchase.total_price,
+                        }
+                        for purchase in purchases
+                    ],
+                )
+        except GeminiUnavailableError as exc:
+            logging.warning("Gemini ad generation unavailable: %s", exc)
     context = build_ad_context(member_id, purchases, creative=creative)
     return render_template("ad.html", context=context)
+
+
+@app.get("/latest_upload")
+def latest_upload_dashboard():
+    event = database.get_latest_upload_event()
+    if event is None:
+        return render_template(
+            "latest_upload.html",
+            event=None,
+            members_url=url_for("member_directory"),
+        )
+
+    image_url = None
+    if event.image_filename:
+        image_url = url_for("serve_upload_image", filename=event.image_filename)
+
+    return render_template(
+        "latest_upload.html",
+        event=event,
+        image_url=image_url,
+        ad_url=url_for("render_ad", member_id=event.member_id, _external=True),
+        members_url=url_for("member_directory"),
+    )
+
+
+@app.get("/members")
+def member_directory():
+    profiles = database.list_member_profiles()
+    directory: list[dict[str, object]] = []
+
+    for profile in profiles:
+        purchases = []
+        if profile.member_id:
+            purchases = database.get_purchase_history(profile.member_id)
+
+        directory.append({"profile": profile, "purchases": purchases})
+
+    return render_template("members.html", members=directory)
+
+
+@app.get("/uploads/<path:filename>")
+def serve_upload_image(filename: str):
+    return send_from_directory(UPLOAD_DIR, filename)
 
 
 @app.get("/health")
@@ -112,14 +280,41 @@ def _extract_image_payload(req) -> Tuple[bytes, str]:
 
 
 def _create_welcome_purchase(member_id: str) -> None:
-    now = datetime.now().strftime("%Y-%m-%d")
+    now = datetime.now().replace(second=0, microsecond=0)
     database.add_purchase(
         member_id,
-        "歡迎禮盒",
-        now,
-        0.2,
-        "AI 精選：咖啡豆 x 手工甜點組，今天下單享 8 折！",
+        item="歡迎禮盒",
+        purchased_at=now.strftime("%Y-%m-%d %H:%M"),
+        unit_price=880.0,
+        quantity=1,
+        total_price=880.0,
     )
+
+
+def _persist_upload_image(member_id: str, image_bytes: bytes, mime_type: str) -> str | None:
+    extension = mimetypes.guess_extension(mime_type or "") or ".jpg"
+    if extension == ".jpe":
+        extension = ".jpg"
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    unique_suffix = uuid4().hex
+    filename = f"{timestamp}_{unique_suffix}_{member_id}{extension}"
+    path = UPLOAD_DIR / filename
+    try:
+        path.write_bytes(image_bytes)
+    except OSError as exc:
+        logging.warning("Failed to persist uploaded image %s: %s", path, exc)
+        return None
+    return filename
+
+
+def _purge_upload_images(filenames: Iterable[str]) -> None:
+    for filename in set(filter(None, filenames)):
+        path = UPLOAD_DIR / filename
+        try:
+            if path.exists():
+                path.unlink()
+        except OSError as exc:
+            logging.warning("Failed to delete old upload image %s: %s", path, exc)
 
 
 if __name__ == "__main__":

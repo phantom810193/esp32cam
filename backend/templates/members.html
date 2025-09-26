@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>會員資料一覽</title>
+    <style>
+      body {
+        font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+        margin: 0;
+        background: #f8f9fa;
+        color: #212529;
+      }
+      header {
+        background: #2c3e50;
+        color: #fff;
+        padding: 1.5rem 2rem;
+      }
+      header h1 {
+        margin: 0 0 0.5rem;
+        font-size: 1.75rem;
+      }
+      header .subtitle {
+        margin: 0;
+        font-size: 0.95rem;
+        opacity: 0.85;
+      }
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 2rem;
+        display: grid;
+        gap: 1.5rem;
+      }
+      .member-card {
+        background: #fff;
+        border-radius: 14px;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+        padding: 1.75rem;
+      }
+      .member-card h2 {
+        margin: 0 0 1rem;
+        font-size: 1.5rem;
+        color: #1f4e79;
+      }
+      .member-meta {
+        display: grid;
+        grid-template-columns: minmax(180px, 220px) 1fr;
+        gap: 1.5rem;
+        align-items: start;
+        margin-bottom: 1.5rem;
+      }
+      .member-photo {
+        background: #f1f3f5;
+        border-radius: 12px;
+        padding: 0.75rem;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        justify-content: center;
+      }
+      .member-photo img {
+        width: 100%;
+        border-radius: 10px;
+        display: block;
+      }
+      .member-photo .caption {
+        font-size: 0.85rem;
+        color: #6c757d;
+      }
+      .member-photo.placeholder {
+        min-height: 220px;
+        color: #6c757d;
+      }
+      .member-summary {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 1rem 1.5rem;
+        margin-bottom: 1.5rem;
+      }
+      .summary-item {
+        background: #f1f3f5;
+        border-radius: 10px;
+        padding: 0.85rem 1rem;
+      }
+      .summary-item span {
+        display: block;
+      }
+      .summary-item .label {
+        font-size: 0.85rem;
+        color: #6c757d;
+        margin-bottom: 0.35rem;
+      }
+      .summary-item .value {
+        font-weight: 600;
+        font-size: 1rem;
+      }
+      dl.profile-details {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 0.6rem 1rem;
+        margin: 0 0 1.5rem;
+      }
+      dl.profile-details dt {
+        font-weight: 600;
+      }
+      dl.profile-details dd {
+        margin: 0;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        overflow: hidden;
+        border-radius: 10px;
+      }
+      thead {
+        background: #e9ecef;
+      }
+      th, td {
+        padding: 0.75rem 0.9rem;
+        text-align: left;
+        border-bottom: 1px solid #dee2e6;
+      }
+      tbody tr:nth-child(even) {
+        background: #f8f9fa;
+      }
+      tbody tr:last-child td {
+        border-bottom: none;
+      }
+      .empty-message {
+        text-align: center;
+        padding: 1rem;
+        color: #6c757d;
+      }
+      .back-link {
+        display: inline-block;
+        margin-top: 1rem;
+        color: #a8c6ff;
+        text-decoration: none;
+        font-size: 0.95rem;
+      }
+      .back-link:hover {
+        text-decoration: underline;
+      }
+      @media (max-width: 768px) {
+        .member-meta {
+          grid-template-columns: 1fr;
+        }
+        .member-photo {
+          max-width: 320px;
+          margin: 0 auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>會員資料一覽</h1>
+      <p class="subtitle">檢視預寫會員的個人資料與 2025 年消費紀錄</p>
+      <a class="back-link" href="{{ url_for('latest_upload_dashboard') }}">← 返回最新上傳影像儀表板</a>
+    </header>
+    <main>
+      {% set label_map = {
+        'dessert-lover': '甜點收藏家',
+        'family-groceries': '幼兒園家長',
+        'fitness-enthusiast': '健身族',
+        'home-manager': '家庭主婦',
+        'wellness-gourmet': '健康食品愛好者'
+      } %}
+      {% if not members %}
+        <div class="member-card">
+          <p class="empty-message">目前沒有可顯示的會員資料。</p>
+        </div>
+      {% else %}
+        {% for entry in members %}
+          {% set profile = entry.profile %}
+          {% set purchases = entry.purchases %}
+          <section class="member-card">
+            {% set persona_name = label_map.get(profile.profile_label, profile.profile_label | replace('-', ' ') | title) %}
+            <h2>
+              {{ persona_name }}
+              {% if profile.mall_member_id %}
+                <small>（商場會員代號：{{ profile.mall_member_id }}）</small>
+              {% else %}
+                <small>（尚未綁定商場會員代號）</small>
+              {% endif %}
+            </h2>
+            <div class="member-meta">
+              <div class="member-photo {% if not profile.first_image_filename %}placeholder{% endif %}">
+                {% if profile.first_image_filename %}
+                  <img src="{{ url_for('serve_upload_image', filename=profile.first_image_filename) }}" alt="{{ profile.member_id or '尚未指派' }} 首次辨識影像">
+                  <span class="caption">首次辨識影像</span>
+                {% else %}
+                  <span>尚未留存首次辨識影像</span>
+                {% endif %}
+              </div>
+              <div>
+                <div class="member-summary">
+                  <div class="summary-item">
+                    <span class="label">會員 ID</span>
+                    <span class="value">{{ profile.member_id or '尚未指派' }}</span>
+                  </div>
+                  <div class="summary-item">
+                    <span class="label">會員狀態</span>
+                    <span class="value">{{ profile.member_status }}</span>
+                  </div>
+                  <div class="summary-item">
+                    <span class="label">入會日期</span>
+                    <span class="value">{{ profile.joined_at }}</span>
+                  </div>
+                  <div class="summary-item">
+                    <span class="label">點數餘額</span>
+                    <span class="value">{{ '%.0f'|format(profile.points_balance) }}</span>
+                  </div>
+                </div>
+                <dl class="profile-details">
+                  <dt>性別</dt>
+                  <dd>{{ profile.gender }}</dd>
+                  <dt>出生年月</dt>
+                  <dd>{{ profile.birth_date or '未填寫' }}</dd>
+                  <dt>連絡電話</dt>
+                  <dd>{{ profile.phone }}</dd>
+                  <dt>電子郵件</dt>
+                  <dd>{{ profile.email }}</dd>
+                  <dt>郵遞地址</dt>
+                  <dd>{{ profile.address or '未填寫' }}</dd>
+                  <dt>職業</dt>
+                  <dd>{{ profile.occupation or '未填寫' }}</dd>
+                </dl>
+              </div>
+            </div>
+            <h3>2025 年消費紀錄</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">消費日期時間</th>
+                  <th scope="col">項目</th>
+                  <th scope="col">單價</th>
+                  <th scope="col">數量</th>
+                  <th scope="col">總價</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% if purchases %}
+                  {% for purchase in purchases %}
+                    <tr>
+                      <td>{{ purchase.purchased_at }}</td>
+                      <td>{{ purchase.item }}</td>
+                      <td>${{ '%.0f'|format(purchase.unit_price) }}</td>
+                      {% set qty_text = ('%.2f'|format(purchase.quantity)).rstrip('0').rstrip('.') %}
+                      <td>{{ qty_text }}</td>
+                      <td>${{ '%.0f'|format(purchase.total_price) }}</td>
+                    </tr>
+                  {% endfor %}
+                {% else %}
+                  <tr>
+                    <td class="empty-message" colspan="5">尚未有消費紀錄。</td>
+                  </tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </section>
+        {% endfor %}
+      {% endif %}
+    </main>
+  </body>
+</html>

@@ -37,8 +37,8 @@ class GeminiService:
         self,
         api_key: str | None = None,
         *,
-        vision_model: str = "gemini-1.5-flash",
-        text_model: str = "gemini-1.5-flash",
+        vision_model: str = "gemini-2.5-flash",
+        text_model: str = "gemini-2.5-flash",
         timeout: float = 20.0,
     ) -> None:
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
@@ -125,7 +125,7 @@ class GeminiService:
         prompt = f"""
 你是一位零售行銷 AI，目標是根據歷史消費紀錄產生一段動態廣告文案。
 請閱讀以下 JSON 陣列描述的購買紀錄：{prompt_payload}
-每筆包含 item、last_purchase、discount、recommendation 等欄位，discount 以 0~1 表示。
+每筆包含 member_code、item、purchased_at、unit_price、quantity、total_price 等欄位，金額為新台幣。
 請輸出符合以下格式的 JSON（不要加任何額外說明）：
 {{
   "headline": "...主標...",
@@ -133,7 +133,7 @@ class GeminiService:
   "highlight": "...吸睛促購語..."
 }}
 文案語氣請友善、以繁體中文呈現，若沒有歷史紀錄，請推廣今日的主打商品。
-會員代號：{member_id}
+會員 ID：{member_id}
 """
         try:
             response = self._text_model.generate_content(
