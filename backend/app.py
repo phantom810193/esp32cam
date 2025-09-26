@@ -7,6 +7,7 @@ import mimetypes
 from pathlib import Path
 from time import perf_counter
 from typing import Iterable, Tuple
+from uuid import uuid4
 
 from flask import (
     Flask,
@@ -267,7 +268,9 @@ def _persist_upload_image(member_id: str, image_bytes: bytes, mime_type: str) ->
     extension = mimetypes.guess_extension(mime_type or "") or ".jpg"
     if extension == ".jpe":
         extension = ".jpg"
-    filename = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{member_id}{extension}"
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    unique_suffix = uuid4().hex
+    filename = f"{timestamp}_{unique_suffix}_{member_id}{extension}"
     path = UPLOAD_DIR / filename
     try:
         path.write_bytes(image_bytes)
