@@ -63,6 +63,7 @@ class MemberProfile:
     email: str
     address: str | None
     occupation: str | None
+    first_image_filename: str | None
 
 
 @dataclass
@@ -174,6 +175,7 @@ class Database:
                 "email",
                 "address",
                 "occupation",
+                "first_image_filename",
             ]
             if profile_columns and profile_columns != expected_profile_columns:
                 conn.execute("DROP TABLE IF EXISTS member_profiles")
@@ -194,6 +196,7 @@ class Database:
                     email TEXT NOT NULL,
                     address TEXT,
                     occupation TEXT,
+                    first_image_filename TEXT,
                     FOREIGN KEY(member_id) REFERENCES members(member_id)
                 );
                 """
@@ -330,6 +333,14 @@ class Database:
                 "SELECT encoding_json FROM members WHERE member_id = ?",
                 (target_id,),
             ).fetchone()
+            source_profile_row = conn.execute(
+                "SELECT first_image_filename FROM member_profiles WHERE member_id = ?",
+                (source_id,),
+            ).fetchone()
+            target_profile_row = conn.execute(
+                "SELECT first_image_filename FROM member_profiles WHERE member_id = ?",
+                (target_id,),
+            ).fetchone()
 
             if source_row is None:
                 raise ValueError(f"找不到來源會員 {source_id}")
@@ -351,6 +362,15 @@ class Database:
                 "UPDATE member_profiles SET member_id = ? WHERE member_id = ?",
                 (target_id, source_id),
             )
+            if (
+                source_profile_row
+                and source_profile_row["first_image_filename"]
+                and (not target_profile_row or not target_profile_row["first_image_filename"])
+            ):
+                conn.execute(
+                    "UPDATE member_profiles SET first_image_filename = ? WHERE member_id = ?",
+                    (source_profile_row["first_image_filename"], target_id),
+                )
             conn.execute(
                 "DELETE FROM members WHERE member_id = ?",
                 (source_id,),
@@ -454,7 +474,8 @@ class Database:
             conn.execute(
                 f"""
                 UPDATE member_profiles
-                SET member_id = NULL
+                SET member_id = NULL,
+                    first_image_filename = NULL
                 WHERE profile_label IN ({labels_placeholder})
                 """,
                 SEED_PROFILE_LABELS,
@@ -477,7 +498,8 @@ class Database:
                        phone,
                        email,
                        address,
-                       occupation
+                       occupation,
+                       first_image_filename
                 FROM member_profiles
                 WHERE member_id = ?
                 """,
@@ -501,6 +523,8 @@ class Database:
             email=str(row["email"]),
             address=str(row["address"]) if row["address"] else None,
             occupation=str(row["occupation"]) if row["occupation"] else None,
+            first_image_filename=
+                str(row["first_image_filename"]) if row["first_image_filename"] else None,
         )
 
     def list_member_profiles(self) -> list[MemberProfile]:
@@ -519,7 +543,8 @@ class Database:
                        phone,
                        email,
                        address,
-                       occupation
+                       occupation,
+                       first_image_filename
                 FROM member_profiles
                 ORDER BY profile_id
                 """
@@ -542,6 +567,8 @@ class Database:
                     email=str(row["email"]),
                     address=str(row["address"]) if row["address"] else None,
                     occupation=str(row["occupation"]) if row["occupation"] else None,
+                    first_image_filename=
+                        str(row["first_image_filename"]) if row["first_image_filename"] else None,
                 )
             )
 
@@ -666,6 +693,7 @@ class Database:
                     float(total_duration),
                 ),
             )
+            self._set_first_image_if_absent(conn, member_id, image_filename)
             conn.commit()
 
     def cleanup_upload_events(self, keep_latest: int = 1) -> list[str]:
@@ -706,7 +734,23 @@ class Database:
                 return []
 
             ids_to_delete = [int(row["id"]) for row in rows]
-            filenames = [row["image_filename"] for row in rows if row["image_filename"]]
+            reserved_rows = conn.execute(
+                """
+                SELECT first_image_filename
+                FROM member_profiles
+                WHERE first_image_filename IS NOT NULL
+                """
+            ).fetchall()
+            protected_filenames = {
+                str(row["first_image_filename"])
+                for row in reserved_rows
+                if row["first_image_filename"]
+            }
+            filenames = [
+                row["image_filename"]
+                for row in rows
+                if row["image_filename"] and row["image_filename"] not in protected_filenames
+            ]
 
             delete_placeholders = ",".join("?" for _ in ids_to_delete)
             conn.execute(
@@ -716,6 +760,28 @@ class Database:
             conn.commit()
 
         return filenames
+
+    def _set_first_image_if_absent(
+        self, conn: sqlite3.Connection, member_id: str, image_filename: str | None
+    ) -> None:
+        if not image_filename:
+            return
+        row = conn.execute(
+            """
+            SELECT first_image_filename
+            FROM member_profiles
+            WHERE member_id = ?
+            """,
+            (member_id,),
+        ).fetchone()
+        if row is None:
+            return
+        if row["first_image_filename"]:
+            return
+        conn.execute(
+            "UPDATE member_profiles SET first_image_filename = ? WHERE member_id = ?",
+            (image_filename, member_id),
+        )
 
     def get_latest_upload_event(self) -> UploadEvent | None:
         with self._connect() as conn:

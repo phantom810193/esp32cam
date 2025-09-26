@@ -43,6 +43,36 @@
         font-size: 1.5rem;
         color: #1f4e79;
       }
+      .member-meta {
+        display: grid;
+        grid-template-columns: minmax(180px, 220px) 1fr;
+        gap: 1.5rem;
+        align-items: start;
+        margin-bottom: 1.5rem;
+      }
+      .member-photo {
+        background: #f1f3f5;
+        border-radius: 12px;
+        padding: 0.75rem;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        justify-content: center;
+      }
+      .member-photo img {
+        width: 100%;
+        border-radius: 10px;
+        display: block;
+      }
+      .member-photo .caption {
+        font-size: 0.85rem;
+        color: #6c757d;
+      }
+      .member-photo.placeholder {
+        min-height: 220px;
+        color: #6c757d;
+      }
       .member-summary {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -113,6 +143,15 @@
       .back-link:hover {
         text-decoration: underline;
       }
+      @media (max-width: 768px) {
+        .member-meta {
+          grid-template-columns: 1fr;
+        }
+        .member-photo {
+          max-width: 320px;
+          margin: 0 auto;
+        }
+      }
     </style>
   </head>
   <body>
@@ -147,38 +186,50 @@
                 <small>（尚未綁定商場會員代號）</small>
               {% endif %}
             </h2>
-            <div class="member-summary">
-              <div class="summary-item">
-                <span class="label">會員 ID</span>
-                <span class="value">{{ profile.member_id or '尚未指派' }}</span>
+            <div class="member-meta">
+              <div class="member-photo {% if not profile.first_image_filename %}placeholder{% endif %}">
+                {% if profile.first_image_filename %}
+                  <img src="{{ url_for('serve_upload_image', filename=profile.first_image_filename) }}" alt="{{ profile.member_id or '尚未指派' }} 首次辨識影像">
+                  <span class="caption">首次辨識影像</span>
+                {% else %}
+                  <span>尚未留存首次辨識影像</span>
+                {% endif %}
               </div>
-              <div class="summary-item">
-                <span class="label">會員狀態</span>
-                <span class="value">{{ profile.member_status }}</span>
-              </div>
-              <div class="summary-item">
-                <span class="label">入會日期</span>
-                <span class="value">{{ profile.joined_at }}</span>
-              </div>
-              <div class="summary-item">
-                <span class="label">點數餘額</span>
-                <span class="value">{{ '%.0f'|format(profile.points_balance) }}</span>
+              <div>
+                <div class="member-summary">
+                  <div class="summary-item">
+                    <span class="label">會員 ID</span>
+                    <span class="value">{{ profile.member_id or '尚未指派' }}</span>
+                  </div>
+                  <div class="summary-item">
+                    <span class="label">會員狀態</span>
+                    <span class="value">{{ profile.member_status }}</span>
+                  </div>
+                  <div class="summary-item">
+                    <span class="label">入會日期</span>
+                    <span class="value">{{ profile.joined_at }}</span>
+                  </div>
+                  <div class="summary-item">
+                    <span class="label">點數餘額</span>
+                    <span class="value">{{ '%.0f'|format(profile.points_balance) }}</span>
+                  </div>
+                </div>
+                <dl class="profile-details">
+                  <dt>性別</dt>
+                  <dd>{{ profile.gender }}</dd>
+                  <dt>出生年月</dt>
+                  <dd>{{ profile.birth_date or '未填寫' }}</dd>
+                  <dt>連絡電話</dt>
+                  <dd>{{ profile.phone }}</dd>
+                  <dt>電子郵件</dt>
+                  <dd>{{ profile.email }}</dd>
+                  <dt>郵遞地址</dt>
+                  <dd>{{ profile.address or '未填寫' }}</dd>
+                  <dt>職業</dt>
+                  <dd>{{ profile.occupation or '未填寫' }}</dd>
+                </dl>
               </div>
             </div>
-            <dl class="profile-details">
-              <dt>性別</dt>
-              <dd>{{ profile.gender }}</dd>
-              <dt>出生年月</dt>
-              <dd>{{ profile.birth_date or '未填寫' }}</dd>
-              <dt>連絡電話</dt>
-              <dd>{{ profile.phone }}</dd>
-              <dt>電子郵件</dt>
-              <dd>{{ profile.email }}</dd>
-              <dt>郵遞地址</dt>
-              <dd>{{ profile.address or '未填寫' }}</dd>
-              <dt>職業</dt>
-              <dd>{{ profile.occupation or '未填寫' }}</dd>
-            </dl>
             <h3>2025 年消費紀錄</h3>
             <table>
               <thead>
