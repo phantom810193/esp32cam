@@ -14,9 +14,16 @@ from .recognizer import FaceEncoding, FaceRecognizer
 _LOGGER = logging.getLogger(__name__)
 
 
+MEMBER_CODE_OVERRIDES: dict[str, str] = {
+    "MEME0383FE3AA": "ME0001",
+    "MEM692FFD0824": "ME0002",
+}
+
+
 @dataclass
 class Purchase:
     member_id: str
+    member_code: str
     item: str
     purchased_at: str
     unit_price: float
@@ -29,6 +36,7 @@ class UploadEvent:
     id: int
     created_at: str
     member_id: str
+    member_code: str
     image_filename: str | None
     upload_duration: float
     recognition_duration: float
@@ -37,7 +45,9 @@ class UploadEvent:
 
 
 def _build_seed_purchases(
-    start_timestamp: str, items: list[tuple[str, float, float]]
+    start_timestamp: str,
+    member_code: str,
+    items: list[tuple[str, float, float]],
 ) -> list[dict[str, float | str]]:
     base = datetime.fromisoformat(start_timestamp)
     purchases: list[dict[str, float | str]] = []
@@ -45,6 +55,7 @@ def _build_seed_purchases(
         scheduled = base + timedelta(days=index * 3 + (index % 4), hours=index % 5, minutes=(index * 11) % 60)
         purchases.append(
             {
+                "member_code": member_code,
                 "item": name,
                 "purchased_at": scheduled.strftime("%Y-%m-%d %H:%M"),
                 "unit_price": float(unit_price),
@@ -89,6 +100,7 @@ class Database:
             expected_columns = [
                 "id",
                 "member_id",
+                "member_code",
                 "purchased_at",
                 "item",
                 "unit_price",
@@ -103,6 +115,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS purchases (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     member_id TEXT NOT NULL,
+                    member_code TEXT NOT NULL,
                     purchased_at TEXT NOT NULL,
                     item TEXT NOT NULL,
                     unit_price REAL NOT NULL,
@@ -227,8 +240,8 @@ class Database:
             )
 
             conn.execute(
-                "UPDATE purchases SET member_id = ? WHERE member_id = ?",
-                (target_id, source_id),
+                "UPDATE purchases SET member_id = ?, member_code = ? WHERE member_id = ?",
+                (target_id, self.get_member_code(target_id), source_id),
             )
             conn.execute(
                 "DELETE FROM members WHERE member_id = ?",
@@ -248,32 +261,53 @@ class Database:
             total_members = conn.execute("SELECT COUNT(*) FROM members").fetchone()[0]
         return f"MEM{total_members + 1:03d}"
 
+    def get_member_code(self, member_id: str) -> str:
+        override = MEMBER_CODE_OVERRIDES.get(member_id)
+        if override:
+            return override
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT member_code FROM purchases WHERE member_id = ? ORDER BY purchased_at DESC, id DESC LIMIT 1",
+                (member_id,),
+            ).fetchone()
+        if row and row["member_code"]:
+            return str(row["member_code"])
+        if member_id.startswith("MEM") and len(member_id) > 3:
+            suffix = member_id[3:]
+            if suffix:
+                return f"ME{suffix}"
+        return member_id
+
     # ------------------------------------------------------------------
     def add_purchase(
         self,
         member_id: str,
         *,
+        member_code: str | None = None,
         item: str,
         purchased_at: str,
         unit_price: float,
         quantity: float,
         total_price: float,
     ) -> None:
+        resolved_code = member_code or self.get_member_code(member_id)
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO purchases (
                     member_id,
+                    member_code,
                     purchased_at,
                     item,
                     unit_price,
                     quantity,
                     total_price
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     member_id,
+                    resolved_code,
                     purchased_at,
                     item,
                     float(unit_price),
@@ -286,13 +320,14 @@ class Database:
     def get_purchase_history(self, member_id: str) -> list[Purchase]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT member_id, purchased_at, item, unit_price, quantity, total_price"
+                "SELECT member_id, member_code, purchased_at, item, unit_price, quantity, total_price"
                 " FROM purchases WHERE member_id = ? ORDER BY purchased_at DESC, id DESC",
                 (member_id,),
             ).fetchall()
         return [
             Purchase(
                 member_id=row["member_id"],
+                member_code=row["member_code"],
                 item=row["item"],
                 purchased_at=row["purchased_at"],
                 unit_price=float(row["unit_price"]),
@@ -412,6 +447,7 @@ class Database:
             id=int(row["id"]),
             created_at=str(row["created_at"]),
             member_id=str(row["member_id"]),
+            member_code=self.get_member_code(str(row["member_id"])),
             image_filename=row["image_filename"],
             upload_duration=float(row["upload_duration"]),
             recognition_duration=float(row["recognition_duration"]),
@@ -452,7 +488,6 @@ class Database:
             ("餅乾奶油杯", 95.0, 3),
             ("草莓生乳酪塔", 260.0, 1),
             ("伯爵奶茶布丁", 110.0, 2),
-            ("椰香奶凍", 90.0, 3),
             ("楓糖肉桂捲", 85.0, 4),
             ("抹茶巴菲杯", 165.0, 2),
             ("焦糖堅果塔", 255.0, 1),
@@ -465,15 +500,16 @@ class Database:
             ("萊姆羅勒塔", 245.0, 1),
             ("開心果達克瓦茲", 95.0, 4),
             ("橙酒巧克力捲", 320.0, 1),
-            ("覆盆子雪白蛋糕", 340.0, 1),
-            ("蜂蜜奶香巴巴露娃", 260.0, 1),
-            ("伯爵茶冰淇淋三明治", 110.0, 3),
-            ("波蘭酥皮蘋果派", 280.0, 1),
-            ("馬斯卡彭提拉米蘇杯", 150.0, 2),
-            ("西西里檸檬塔", 230.0, 1),
-            ("焦糖布丁奶昔", 140.0, 2),
-            ("乳酪香草泡芙", 95.0, 4),
-            ("黑芝麻生乳捲", 295.0, 1),
+            ("精品手沖咖啡豆", 520.0, 1),
+            ("手作果醬三入組", 450.0, 1),
+            ("嚴選花草茶禮盒", 680.0, 1),
+            ("手沖咖啡濾杯組", 320.0, 1),
+            ("有機燕麥早餐罐", 180.0, 2),
+            ("冷萃咖啡瓶裝禮盒", 360.0, 1),
+            ("經典野餐籃套組", 880.0, 1),
+            ("香氛蠟燭禮盒", 780.0, 1),
+            ("精緻餐具拭布組", 260.0, 3),
+            ("玻璃蛋糕罩", 540.0, 1),
         ]
 
         kids_specs: list[tuple[str, float, float]] = [
@@ -517,20 +553,28 @@ class Database:
             ("幼兒足球體驗營", 1580.0, 1),
             ("幼兒園才藝發表DVD", 450.0, 1),
             ("親子探索農場門票", 660.0, 2),
-            ("幼兒園戶外教學車資", 350.0, 3),
-            ("幼兒園夏日水樂園日票", 880.0, 2),
-            ("親子烘焙材料包", 540.0, 1),
-            ("幼兒園畢典花束訂金", 320.0, 1),
-            ("幼兒園閱讀角落捐書", 280.0, 2),
-            ("親子晨跑活動補給", 150.0, 4),
-            ("幼兒園防疫清潔組", 380.0, 1),
-            ("幼兒園戲劇工作坊", 1680.0, 1),
-            ("親子創意美術課", 1250.0, 1),
-            ("幼兒園跨校交流活動券", 720.0, 1),
+            ("家庭健康維他命組", 850.0, 1),
+            ("週末市集有機蔬菜箱", 980.0, 1),
+            ("家用濾水壺替換濾芯", 450.0, 2),
+            ("智能體重計", 1650.0, 1),
+            ("無線吸塵器濾網組", 620.0, 1),
+            ("家庭常備洗衣精補充包", 320.0, 3),
+            ("旅行收納壓縮袋組", 560.0, 1),
+            ("全家早餐穀物禮盒", 420.0, 2),
+            ("季節鮮果禮盒", 880.0, 1),
+            ("家庭露營炊具套組", 1980.0, 1),
         ]
 
-        dessert_history = _build_seed_purchases("2025-01-04 10:30", dessert_specs)
-        kids_history = _build_seed_purchases("2025-01-05 09:20", kids_specs)
+        dessert_history = _build_seed_purchases(
+            "2025-01-04 10:30",
+            self.get_member_code("MEME0383FE3AA"),
+            dessert_specs,
+        )
+        kids_history = _build_seed_purchases(
+            "2025-01-05 09:20",
+            self.get_member_code("MEM692FFD0824"),
+            kids_specs,
+        )
 
         self._seed_member_history("MEME0383FE3AA", dessert_history)
         self._seed_member_history("MEM692FFD0824", kids_history)

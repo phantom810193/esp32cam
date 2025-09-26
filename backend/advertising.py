@@ -11,6 +11,7 @@ from .database import Purchase
 @dataclass
 class AdContext:
     member_id: str
+    member_code: str
     headline: str
     subheading: str
     highlight: str
@@ -21,23 +22,28 @@ def build_ad_context(
     member_id: str, purchases: Iterable[Purchase], creative: AdCreative | None = None
 ) -> AdContext:
     purchases = list(purchases)
+    member_code = purchases[0].member_code if purchases else _fallback_member_code(member_id)
     if creative:
-        headline = creative.headline or f"會員 {member_id}，歡迎回來！"
-        subheading = creative.subheading or "專屬優惠馬上開啟"
+        headline = creative.headline or f"會員 {member_code}，歡迎回來！"
+        subheading = creative.subheading or f"會員 ID：{member_id}｜專屬優惠馬上開啟"
         highlight = creative.highlight or "今日限定：全店指定品項 85 折"
     elif purchases:
         latest = purchases[0]
-        headline = f"會員 {member_id}，歡迎回來！"
+        headline = f"會員 {member_code}，歡迎回來！"
         subheading = (
-            f"上次消費 {latest.purchased_at}｜{latest.item}｜${latest.total_price:,.0f}（{_format_quantity(latest.quantity)} 件）"
+            "會員 ID："
+            f"{member_id}｜上次消費 {latest.purchased_at}｜{latest.item}｜${latest.total_price:,.0f}"
+            f"（{_format_quantity(latest.quantity)} 件）"
         )
         highlight = _derive_highlight(member_id, purchases)
     else:
-        headline = f"歡迎加入，會員 {member_id}!"
-        subheading = "首次消費享 95 折，再送咖啡一杯"
+        fallback_code = _fallback_member_code(member_id)
+        headline = f"歡迎加入，會員 {fallback_code}!"
+        subheading = f"會員 ID：{member_id}｜首次消費享 95 折，再送咖啡一杯"
         highlight = "快來體驗本週人氣商品：莊園咖啡豆 + 手工可頌組合"
     return AdContext(
         member_id=member_id,
+        member_code=member_code,
         headline=headline,
         subheading=subheading,
         highlight=highlight,
@@ -80,4 +86,12 @@ def _derive_highlight(member_id: str, purchases: list[Purchase]) -> str:
 
 def _matches_keywords(text: str, keywords: tuple[str, ...]) -> bool:
     return any(keyword in text for keyword in keywords)
+
+
+def _fallback_member_code(member_id: str) -> str:
+    if member_id.startswith("MEM") and len(member_id) > 3:
+        suffix = member_id[3:]
+        if suffix:
+            return f"ME{suffix}"
+    return member_id
 

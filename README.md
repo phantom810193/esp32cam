@@ -102,6 +102,7 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
    {
      "status": "ok",
      "member_id": "MEM6A9C2A41F2",
+     "member_code": "ME6A9C2A41F2",
      "new_member": false,
      "ad_url": "http://localhost:8000/ad/MEM6A9C2A41F2"
    }

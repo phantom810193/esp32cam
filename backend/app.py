@@ -88,6 +88,7 @@ def upload_face():
                 member_id,
                 [
                     {
+                        "member_code": purchase.member_code,
                         "item": purchase.item,
                         "purchased_at": purchase.purchased_at,
                         "unit_price": purchase.unit_price,
@@ -119,6 +120,7 @@ def upload_face():
     payload = {
         "status": "ok",
         "member_id": member_id,
+        "member_code": database.get_member_code(member_id),
         "new_member": new_member,
         "ad_url": url_for("render_ad", member_id=member_id, _external=True),
     }
@@ -188,6 +190,7 @@ def render_ad(member_id: str):
                     member_id,
                     [
                         {
+                            "member_code": purchase.member_code,
                             "item": purchase.item,
                             "purchased_at": purchase.purchased_at,
                             "unit_price": purchase.unit_price,
