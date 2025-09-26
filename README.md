@@ -72,7 +72,7 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
 
 5. API 重點：
 
-    - `POST /upload_face`：接受 `image/jpeg` 或 `multipart/form-data` 影像。回傳 JSON，內含 `member_id`、`new_member` 旗標與廣告頁 URL。
+    - `POST /upload_face`：接受 `image/jpeg` 或 `multipart/form-data` 影像。回傳 JSON，內含 `member_id`、`member_code`（僅在已有商場註冊代號時帶值）、`new_member` 旗標與廣告頁 URL。
     - `GET /ad/<member_id>`：根據 SQLite + Gemini Text 的輸出生成廣告頁，內建 `<meta http-equiv="refresh" content="5">`，適合放在電視棒上自動輪播。
     - `GET /latest_upload`：顯示最新上傳影像、辨識結果、個人化廣告連結與各階段耗時分析，方便除錯與現場展示。後端只會在磁碟上保留最新一張上傳影像，以避免長期佔用空間。
     - `GET /health`：基本健康檢查。
@@ -108,7 +108,7 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
    {
      "status": "ok",
      "member_id": "MEM6A9C2A41F2",
-     "member_code": "ME6A9C2A41F2",
+     "member_code": "",
      "new_member": false,
      "ad_url": "http://localhost:8000/ad/MEM6A9C2A41F2"
    }

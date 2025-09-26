@@ -22,24 +22,24 @@ def build_ad_context(
     member_id: str, purchases: Iterable[Purchase], creative: AdCreative | None = None
 ) -> AdContext:
     purchases = list(purchases)
-    member_code = purchases[0].member_code if purchases else _fallback_member_code(member_id)
+    member_code = purchases[0].member_code if purchases else ""
+    greeting = _member_salutation(member_code)
+    subheading_code = _subheading_prefix(member_code)
     if creative:
-        headline = creative.headline or f"會員 {member_code}，歡迎回來！"
-        subheading = creative.subheading or f"會員 ID：{member_id}｜專屬優惠馬上開啟"
+        headline = creative.headline or f"{greeting}，歡迎回來！"
+        subheading = creative.subheading or f"{subheading_code}專屬優惠馬上開啟"
         highlight = creative.highlight or "今日限定：全店指定品項 85 折"
     elif purchases:
         latest = purchases[0]
-        headline = f"會員 {member_code}，歡迎回來！"
+        headline = f"{greeting}，歡迎回來！"
         subheading = (
-            "會員 ID："
-            f"{member_id}｜上次消費 {latest.purchased_at}｜{latest.item}｜${latest.total_price:,.0f}"
+            f"{subheading_code}上次消費 {latest.purchased_at}｜{latest.item}｜${latest.total_price:,.0f}"
             f"（{_format_quantity(latest.quantity)} 件）"
         )
         highlight = _derive_highlight(member_id, purchases)
     else:
-        fallback_code = _fallback_member_code(member_id)
-        headline = f"歡迎加入，會員 {fallback_code}!"
-        subheading = f"會員 ID：{member_id}｜首次消費享 95 折，再送咖啡一杯"
+        headline = "歡迎加入！"
+        subheading = f"{subheading_code}首次消費享 95 折，再送咖啡一杯"
         highlight = "快來體驗本週人氣商品：莊園咖啡豆 + 手工可頌組合"
     return AdContext(
         member_id=member_id,
@@ -88,10 +88,14 @@ def _matches_keywords(text: str, keywords: tuple[str, ...]) -> bool:
     return any(keyword in text for keyword in keywords)
 
 
-def _fallback_member_code(member_id: str) -> str:
-    if member_id.startswith("MEM") and len(member_id) > 3:
-        suffix = member_id[3:]
-        if suffix:
-            return f"ME{suffix}"
-    return member_id
+def _member_salutation(member_code: str) -> str:
+    if member_code:
+        return f"會員 {member_code}"
+    return "親愛的貴賓"
+
+
+def _subheading_prefix(member_code: str) -> str:
+    if member_code:
+        return f"商場會員代號：{member_code}｜"
+    return "尚未綁定商場會員，立即至服務台完成綁定享專屬禮遇｜"
 

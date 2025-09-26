@@ -92,7 +92,13 @@
   <body>
     <div class="banner">
       <h1>{{ context.headline }}</h1>
-      <div class="member-code">會員代號：{{ context.member_code }}（ID：{{ context.member_id }}）</div>
+      <div class="member-code">
+        {% if context.member_code %}
+        商場會員代號：{{ context.member_code }}
+        {% else %}
+        尚未綁定商場會員代號，歡迎至服務台完成綁定
+        {% endif %}
+      </div>
       <div class="subheading">{{ context.subheading }}</div>
       <div class="highlight">{{ context.highlight }}</div>
       {% if context.purchases %}

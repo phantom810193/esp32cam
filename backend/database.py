@@ -406,13 +406,11 @@ class Database:
             ).fetchone()
         if row is not None:
             code = row["member_code"]
-            if code is not None:
+            if code:
                 return str(code)
-        if member_id.startswith("MEM") and len(member_id) > 3:
-            suffix = member_id[3:]
-            if suffix:
-                return f"ME{suffix}"
-        return member_id
+        # 新產生的匿名會員預設沒有商場註冊代號，因此這裡不再回傳內部
+        # ``MEM`` 編號的推導值，而是以空字串表示尚未綁定。
+        return ""
 
     # ------------------------------------------------------------------
     def add_purchase(
