@@ -275,16 +275,29 @@ class Database:
         return best_member, best_distance
 
     def create_member(self, encoding: FaceEncoding, member_id: str | None = None) -> str:
-        member_id = member_id or self._generate_member_id(encoding)
+        candidate = member_id or self._generate_member_id(encoding)
+        payload = json.dumps(encoding.to_jsonable(), ensure_ascii=False)
+
         with self._connect() as conn:
-            conn.execute(
-                "INSERT INTO members (member_id, encoding_json) VALUES (?, ?)",
-                (member_id, json.dumps(encoding.to_jsonable(), ensure_ascii=False)),
-            )
-            conn.commit()
-        _LOGGER.info("Created new member %s", member_id)
-        self._claim_unassigned_profile(member_id)
-        return member_id
+            while True:
+                try:
+                    conn.execute(
+                        "INSERT INTO members (member_id, encoding_json) VALUES (?, ?)",
+                        (candidate, payload),
+                    )
+                except sqlite3.IntegrityError:
+                    _LOGGER.warning(
+                        "Member id %s already exists, generating fallback id", candidate
+                    )
+                    candidate = self._generate_member_id()
+                    continue
+                else:
+                    conn.commit()
+                    break
+
+        _LOGGER.info("Created new member %s", candidate)
+        self._claim_unassigned_profile(candidate)
+        return candidate
 
     def update_member_encoding(self, member_id: str, encoding: FaceEncoding) -> None:
         with self._connect() as conn:
@@ -386,8 +399,15 @@ class Database:
             return f"MEM{hashed[:10]}"
 
         with self._connect() as conn:
-            total_members = conn.execute("SELECT COUNT(*) FROM members").fetchone()[0]
-        return f"MEM{total_members + 1:03d}"
+            next_index = conn.execute("SELECT COUNT(*) FROM members").fetchone()[0] + 1
+            while True:
+                candidate = f"MEM{next_index:03d}"
+                exists = conn.execute(
+                    "SELECT 1 FROM members WHERE member_id = ?", (candidate,)
+                ).fetchone()
+                if not exists:
+                    return candidate
+                next_index += 1
 
     # ------------------------------------------------------------------
     def _claim_unassigned_profile(self, member_id: str) -> None:
