@@ -90,6 +90,31 @@ def _build_seed_purchases(
     return purchases
 
 
+def _blend_persona_items(
+    persona_items: list[tuple[str, float, float]],
+    lifestyle_items: list[tuple[str, float, float]],
+) -> list[tuple[str, float, float]]:
+    """Interleave persona-specific and general lifestyle goods at a 60/40 ratio."""
+
+    blended: list[tuple[str, float, float]] = []
+    persona_index = 0
+    lifestyle_index = 0
+
+    while persona_index < len(persona_items) or lifestyle_index < len(lifestyle_items):
+        for _ in range(3):
+            if persona_index >= len(persona_items):
+                break
+            blended.append(persona_items[persona_index])
+            persona_index += 1
+        for _ in range(2):
+            if lifestyle_index >= len(lifestyle_items):
+                break
+            blended.append(lifestyle_items[lifestyle_index])
+            lifestyle_index += 1
+
+    return blended
+
+
 class Database:
     """Light-weight wrapper around SQLite used by the Flask backend."""
 
@@ -604,7 +629,7 @@ class Database:
     def ensure_demo_data(self) -> None:
         """Seed deterministic purchase histories for demo members."""
 
-        dessert_specs: list[tuple[str, float, float]] = [
+        dessert_persona_items: list[tuple[str, float, float]] = [
             ("草莓千層蛋糕", 320.0, 1),
             ("香草可麗露禮盒", 480.0, 1),
             ("抹茶生乳捲", 280.0, 1),
@@ -635,14 +660,8 @@ class Database:
             ("伯爵奶茶布丁", 110.0, 2),
             ("楓糖肉桂捲", 85.0, 4),
             ("抹茶巴菲杯", 165.0, 2),
-            ("焦糖堅果塔", 255.0, 1),
-            ("蜂蜜舒芙蕾", 210.0, 1),
-            ("綜合水果可麗餅", 190.0, 2),
-            ("紫薯乳酪派", 270.0, 1),
-            ("檸香優格凍", 105.0, 2),
-            ("黑森林慕斯杯", 175.0, 2),
-            ("藍莓乳酪可頌", 120.0, 3),
-            ("橙酒巧克力捲", 320.0, 1),
+        ]
+        dessert_lifestyle_items: list[tuple[str, float, float]] = [
             ("精品手沖咖啡豆", 520.0, 1),
             ("手作果醬三入組", 450.0, 1),
             ("嚴選花草茶禮盒", 680.0, 1),
@@ -655,9 +674,18 @@ class Database:
             ("冷凍鮭魚切片家庭包", 560.0, 1),
             ("家用環保洗碗精補充包", 150.0, 2),
             ("柔感棉質廚房紙巾組", 320.0, 1),
+            ("天然海鹽烹飪罐", 150.0, 1),
+            ("舒眠香氛蠟燭", 320.0, 1),
+            ("有機鮮乳家庭箱", 260.0, 1),
+            ("無糖優酪乳六入", 220.0, 1),
+            ("不沾煎鍋28CM", 880.0, 1),
+            ("家用濾水壺", 520.0, 1),
+            ("多功能香料罐組", 360.0, 1),
+            ("全麥吐司家庭包", 120.0, 2),
         ]
+        dessert_specs = _blend_persona_items(dessert_persona_items, dessert_lifestyle_items)
 
-        kids_specs: list[tuple[str, float, float]] = [
+        kids_persona_items: list[tuple[str, float, float]] = [
             ("幼兒律動課體驗券", 680.0, 1),
             ("親子烘焙下午茶套票", 1180.0, 1),
             ("益智積木組", 450.0, 1),
@@ -688,16 +716,8 @@ class Database:
             ("幼兒園節慶禮盒", 680.0, 1),
             ("幼兒園音樂會門票", 750.0, 2),
             ("親子共學木工課", 1450.0, 1),
-            ("幼兒感覺統合課程", 2380.0, 1),
-            ("親子野餐活動餐盒", 280.0, 3),
-            ("幼兒園游泳課程", 1980.0, 1),
-            ("幼兒節慶表演服裝", 620.0, 1),
-            ("幼兒園晨間活力課", 980.0, 1),
-            ("親子手作香氛課", 1320.0, 1),
-            ("幼兒園親師座談會餐點", 180.0, 6),
-            ("幼兒足球體驗營", 1580.0, 1),
-            ("幼兒園才藝發表DVD", 450.0, 1),
-            ("親子探索農場門票", 660.0, 2),
+        ]
+        kids_lifestyle_items: list[tuple[str, float, float]] = [
             ("家庭健康維他命組", 850.0, 1),
             ("週末市集有機蔬菜箱", 980.0, 1),
             ("家用濾水壺替換濾芯", 450.0, 2),
@@ -708,7 +728,18 @@ class Database:
             ("全家早餐穀物禮盒", 420.0, 2),
             ("季節鮮果禮盒", 880.0, 1),
             ("家庭露營炊具套組", 1980.0, 1),
+            ("家庭號沐浴乳三入組", 360.0, 1),
+            ("親子保溫水壺雙入", 520.0, 1),
+            ("多用途餐桌防水墊", 280.0, 1),
+            ("家庭常備繃帶組", 180.0, 1),
+            ("親子戶外防曬乳", 450.0, 1),
+            ("智慧家電延長線", 320.0, 1),
+            ("客廳香氛擴香瓶", 420.0, 1),
+            ("天然洗手乳補充包", 260.0, 2),
+            ("居家整理收納箱組", 580.0, 1),
+            ("家庭號即食玉米濃湯", 150.0, 3),
         ]
+        kids_specs = _blend_persona_items(kids_persona_items, kids_lifestyle_items)
 
         fitness_specs: list[tuple[str, float, float]] = [
             ("高蛋白乳清粉", 1280.0, 1),
