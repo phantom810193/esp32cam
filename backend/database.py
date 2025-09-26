@@ -8,6 +8,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from .recognizer import FaceEncoding, FaceRecognizer
 
@@ -18,6 +19,9 @@ MEMBER_CODE_OVERRIDES: dict[str, str] = {
     "MEME0383FE3AA": "ME0001",
     "MEM692FFD0824": "ME0002",
 }
+
+
+_TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
 
 @dataclass
@@ -362,7 +366,7 @@ class Database:
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    datetime.now().isoformat(timespec="seconds"),
+                    datetime.now(_TAIPEI_TZ).isoformat(timespec="seconds"),
                     member_id,
                     image_filename,
                     float(upload_duration),
@@ -443,9 +447,17 @@ class Database:
         if row is None:
             return None
 
+        created_at = str(row["created_at"])
+        try:
+            created_dt = datetime.fromisoformat(created_at)
+        except ValueError:
+            created_dt = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S")
+        if created_dt.tzinfo is None:
+            created_dt = created_dt.replace(tzinfo=_TAIPEI_TZ)
+
         return UploadEvent(
             id=int(row["id"]),
-            created_at=str(row["created_at"]),
+            created_at=created_dt.astimezone(_TAIPEI_TZ).strftime("%Y-%m-%d %H:%M:%S"),
             member_id=str(row["member_id"]),
             member_code=self.get_member_code(str(row["member_id"])),
             image_filename=row["image_filename"],
