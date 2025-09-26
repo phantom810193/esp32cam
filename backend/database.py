@@ -16,10 +16,9 @@ _LOGGER = logging.getLogger(__name__)
 
 
 MEMBER_CODE_OVERRIDES: dict[str, str] = {
-    "MEME0383FE3AA": "",
-    "MEM692FFD0824": "",
-    "MEMFITNESS2025": "",
-    "MEMWESTERN2025": "",
+    "MEME0383FE3AA": "ME0001",
+    "MEM692FFD0824": "ME0002",
+    "MEMFITNESS2025": "ME0003",
     "MEMHOMECARE2025": "",
     "MEMHEALTH2025": "",
 }
@@ -37,6 +36,23 @@ class Purchase:
     unit_price: float
     quantity: float
     total_price: float
+
+
+@dataclass
+class MemberProfile:
+    profile_id: int
+    profile_label: str
+    member_id: str | None
+    mall_member_id: str | None
+    member_status: str
+    joined_at: str
+    points_balance: float
+    gender: str
+    birth_date: str | None
+    phone: str
+    email: str
+    address: str | None
+    occupation: str | None
 
 
 @dataclass
@@ -100,6 +116,46 @@ class Database:
                 CREATE TABLE IF NOT EXISTS members (
                     member_id TEXT PRIMARY KEY,
                     encoding_json TEXT NOT NULL
+                );
+                """
+            )
+
+            profile_columns = self._get_table_columns(conn, "member_profiles")
+            expected_profile_columns = [
+                "profile_id",
+                "profile_label",
+                "member_id",
+                "mall_member_id",
+                "member_status",
+                "joined_at",
+                "points_balance",
+                "gender",
+                "birth_date",
+                "phone",
+                "email",
+                "address",
+                "occupation",
+            ]
+            if profile_columns and profile_columns != expected_profile_columns:
+                conn.execute("DROP TABLE IF EXISTS member_profiles")
+
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS member_profiles (
+                    profile_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_label TEXT NOT NULL UNIQUE,
+                    member_id TEXT UNIQUE,
+                    mall_member_id TEXT,
+                    member_status TEXT NOT NULL DEFAULT '有效',
+                    joined_at TEXT NOT NULL,
+                    points_balance REAL NOT NULL DEFAULT 0,
+                    gender TEXT NOT NULL,
+                    birth_date TEXT,
+                    phone TEXT NOT NULL,
+                    email TEXT NOT NULL,
+                    address TEXT,
+                    occupation TEXT,
+                    FOREIGN KEY(member_id) REFERENCES members(member_id)
                 );
                 """
             )
@@ -185,6 +241,7 @@ class Database:
             )
             conn.commit()
         _LOGGER.info("Created new member %s", member_id)
+        self._claim_unassigned_profile(member_id)
         return member_id
 
     def update_member_encoding(self, member_id: str, encoding: FaceEncoding) -> None:
@@ -252,6 +309,10 @@ class Database:
                 (target_id, self.get_member_code(target_id), source_id),
             )
             conn.execute(
+                "UPDATE member_profiles SET member_id = ? WHERE member_id = ?",
+                (target_id, source_id),
+            )
+            conn.execute(
                 "DELETE FROM members WHERE member_id = ?",
                 (source_id,),
             )
@@ -269,7 +330,72 @@ class Database:
             total_members = conn.execute("SELECT COUNT(*) FROM members").fetchone()[0]
         return f"MEM{total_members + 1:03d}"
 
+    # ------------------------------------------------------------------
+    def _claim_unassigned_profile(self, member_id: str) -> None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT profile_id FROM member_profiles WHERE member_id IS NULL ORDER BY profile_id LIMIT 1"
+            ).fetchone()
+            if row is None:
+                return
+
+            profile_id = int(row["profile_id"])
+            conn.execute(
+                "UPDATE member_profiles SET member_id = ? WHERE profile_id = ?",
+                (member_id, profile_id),
+            )
+            conn.commit()
+        _LOGGER.info("Assigned new member %s to pre-seeded profile %s", member_id, profile_id)
+
+    def get_member_profile(self, member_id: str) -> MemberProfile | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT profile_id,
+                       profile_label,
+                       member_id,
+                       mall_member_id,
+                       member_status,
+                       joined_at,
+                       points_balance,
+                       gender,
+                       birth_date,
+                       phone,
+                       email,
+                       address,
+                       occupation
+                FROM member_profiles
+                WHERE member_id = ?
+                """,
+                (member_id,),
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        return MemberProfile(
+            profile_id=int(row["profile_id"]),
+            profile_label=str(row["profile_label"]),
+            member_id=str(row["member_id"]) if row["member_id"] else None,
+            mall_member_id=str(row["mall_member_id"]) if row["mall_member_id"] else None,
+            member_status=str(row["member_status"]),
+            joined_at=str(row["joined_at"]),
+            points_balance=float(row["points_balance"]),
+            gender=str(row["gender"]),
+            birth_date=str(row["birth_date"]) if row["birth_date"] else None,
+            phone=str(row["phone"]),
+            email=str(row["email"]),
+            address=str(row["address"]) if row["address"] else None,
+            occupation=str(row["occupation"]) if row["occupation"] else None,
+        )
+
     def get_member_code(self, member_id: str) -> str:
+        profile = self.get_member_profile(member_id)
+        if profile:
+            if profile.mall_member_id:
+                return profile.mall_member_id
+            return ""
+
         override = MEMBER_CODE_OVERRIDES.get(member_id)
         if override is not None:
             return override
@@ -639,60 +765,6 @@ class Database:
             ("伸展瑜珈磚", 360.0, 1),
         ]
 
-        western_specs: list[tuple[str, float, float]] = [
-            ("經典義大利麵禮盒", 520.0, 1),
-            ("冷壓初榨橄欖油組", 980.0, 1),
-            ("帕瑪森起司塊", 420.0, 1),
-            ("手工拖鞋麵包", 180.0, 2),
-            ("西班牙海鮮燉飯套組", 1280.0, 1),
-            ("普羅旺斯香草罐", 260.0, 1),
-            ("紅酒醋雙入組", 360.0, 1),
-            ("法式奶油可頌", 220.0, 2),
-            ("鴨胸排組合", 960.0, 1),
-            ("爐烤牛排禮盒", 1580.0, 1),
-            ("義式濃縮咖啡豆", 680.0, 1),
-            ("奶油蘑菇濃湯包", 320.0, 2),
-            ("香煎鱸魚片", 780.0, 1),
-            ("地中海沙拉橄欖", 260.0, 2),
-            ("義式香腸薄餅", 480.0, 1),
-            ("進口番茄罐頭組", 350.0, 2),
-            ("迷迭香烤雞套餐", 880.0, 1),
-            ("松露鹽禮盒", 620.0, 1),
-            ("義式乳酪拼盤", 780.0, 1),
-            ("羅馬風提拉米蘇", 420.0, 1),
-            ("精品紅酒", 1380.0, 1),
-            ("義式冰淇淋組", 560.0, 1),
-            ("焦糖布丁燉蛋", 260.0, 2),
-            ("香烤波隆那香腸", 450.0, 1),
-            ("手工香料麵包棒", 220.0, 2),
-            ("義式起司火腿拼盤", 980.0, 1),
-            ("法式奶油燉菜", 420.0, 1),
-            ("義大利手工巧克力", 360.0, 1),
-            ("有機芝麻葉", 180.0, 2),
-            ("進口蘆筍束", 320.0, 1),
-            ("松露義大利麵醬", 560.0, 1),
-            ("帕尼尼三明治組", 320.0, 2),
-            ("義式甜菜沙拉", 260.0, 2),
-            ("義式燉牛膝", 1260.0, 1),
-            ("地中海無花果果醬", 260.0, 1),
-            ("精品氣泡水組", 420.0, 1),
-            ("義式濃縮咖啡機清潔片", 280.0, 1),
-            ("全麥佛卡夏麵包", 210.0, 2),
-            ("家庭用烤盤紙", 150.0, 2),
-            ("高級餐巾紙組", 180.0, 2),
-            ("進口橄欖油噴霧", 450.0, 1),
-            ("法式鑄鐵平底鍋", 2280.0, 1),
-            ("海鹽黑巧克力", 260.0, 2),
-            ("香檳氣泡酒", 1580.0, 1),
-            ("進口奶油乳酪", 320.0, 1),
-            ("義式蕃茄冷湯", 260.0, 2),
-            ("精緻餐桌布", 520.0, 1),
-            ("香氛蠟燭組", 680.0, 1),
-            ("橄欖木砧板", 780.0, 1),
-            ("義式奶油酥餅", 260.0, 2),
-            ("精品濾掛咖啡組", 420.0, 1),
-        ]
-
         homemaker_specs: list[tuple[str, float, float]] = [
             ("多功能電鍋", 1680.0, 1),
             ("家庭保鮮盒12件組", 520.0, 1),
@@ -819,11 +891,6 @@ class Database:
             self.get_member_code("MEMFITNESS2025"),
             fitness_specs,
         )
-        western_history = _build_seed_purchases(
-            "2025-01-07 12:15",
-            self.get_member_code("MEMWESTERN2025"),
-            western_specs,
-        )
         homemaker_history = _build_seed_purchases(
             "2025-01-08 08:45",
             self.get_member_code("MEMHOMECARE2025"),
@@ -838,9 +905,79 @@ class Database:
         self._seed_member_history("MEME0383FE3AA", dessert_history)
         self._seed_member_history("MEM692FFD0824", kids_history)
         self._seed_member_history("MEMFITNESS2025", fitness_history)
-        self._seed_member_history("MEMWESTERN2025", western_history)
         self._seed_member_history("MEMHOMECARE2025", homemaker_history)
         self._seed_member_history("MEMHEALTH2025", health_history)
+
+        self._seed_member_profile(
+            profile_label="dessert-lover",
+            member_id="MEME0383FE3AA",
+            mall_member_id="ME0001",
+            member_status="有效",
+            joined_at="2021-06-12",
+            points_balance=1520,
+            gender="女",
+            birth_date="1988-07-12",
+            phone="0912-345-678",
+            email="dessertlover@example.com",
+            address="台北市信義區松壽路10號",
+            occupation="甜點教室講師",
+        )
+        self._seed_member_profile(
+            profile_label="family-groceries",
+            member_id="MEM692FFD0824",
+            mall_member_id="ME0002",
+            member_status="有效",
+            joined_at="2020-09-01",
+            points_balance=980,
+            gender="女",
+            birth_date="1990-02-08",
+            phone="0923-556-789",
+            email="familybuyer@example.com",
+            address="新北市板橋區文化路100號",
+            occupation="幼兒園老師",
+        )
+        self._seed_member_profile(
+            profile_label="fitness-enthusiast",
+            member_id="MEMFITNESS2025",
+            mall_member_id="ME0003",
+            member_status="有效",
+            joined_at="2019-11-20",
+            points_balance=2040,
+            gender="男",
+            birth_date="1985-04-19",
+            phone="0955-112-233",
+            email="fitgoer@example.com",
+            address="台中市西屯區市政北二路88號",
+            occupation="企業健身顧問",
+        )
+        self._seed_member_profile(
+            profile_label="home-manager",
+            member_id="MEMHOMECARE2025",
+            mall_member_id="",
+            member_status="有效",
+            joined_at="2023-03-18",
+            points_balance=640,
+            gender="女",
+            birth_date=None,
+            phone="0977-334-556",
+            email="homemanager@example.com",
+            address="桃園市桃園區同德五街66號",
+            occupation=None,
+        )
+        self._seed_member_profile(
+            profile_label="wellness-gourmet",
+            member_id="MEMHEALTH2025",
+            mall_member_id="",
+            member_status="有效",
+            joined_at="2024-01-05",
+            points_balance=520,
+            gender="男",
+            birth_date="1992-10-02",
+            phone="0966-778-990",
+            email="healthbuyer@example.com",
+            address=None,
+            occupation="營養顧問",
+        )
 
         with self._connect() as conn:
             has_members = conn.execute("SELECT COUNT(*) FROM members").fetchone()[0] > 0
@@ -896,4 +1033,82 @@ class Database:
 
         for purchase in purchases:
             self.add_purchase(member_id, **purchase)
+
+    def _seed_member_profile(
+        self,
+        *,
+        profile_label: str,
+        member_id: str | None,
+        mall_member_id: str | None,
+        member_status: str,
+        joined_at: str,
+        points_balance: float,
+        gender: str,
+        birth_date: str | None,
+        phone: str,
+        email: str,
+        address: str | None,
+        occupation: str | None,
+    ) -> None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT profile_id FROM member_profiles WHERE profile_label = ?",
+                (profile_label,),
+            ).fetchone()
+
+            params = (
+                member_id,
+                mall_member_id,
+                member_status,
+                joined_at,
+                float(points_balance),
+                gender,
+                birth_date,
+                phone,
+                email,
+                address,
+                occupation,
+            )
+
+            if row is None:
+                conn.execute(
+                    """
+                    INSERT INTO member_profiles (
+                        profile_label,
+                        member_id,
+                        mall_member_id,
+                        member_status,
+                        joined_at,
+                        points_balance,
+                        gender,
+                        birth_date,
+                        phone,
+                        email,
+                        address,
+                        occupation
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (profile_label, *params),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE member_profiles
+                    SET member_id = ?,
+                        mall_member_id = ?,
+                        member_status = ?,
+                        joined_at = ?,
+                        points_balance = ?,
+                        gender = ?,
+                        birth_date = ?,
+                        phone = ?,
+                        email = ?,
+                        address = ?,
+                        occupation = ?
+                    WHERE profile_id = ?
+                    """,
+                    (*params, row["profile_id"]),
+                )
+            conn.commit()
 
