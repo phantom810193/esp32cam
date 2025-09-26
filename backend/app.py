@@ -211,7 +211,11 @@ def render_ad(member_id: str):
 def latest_upload_dashboard():
     event = database.get_latest_upload_event()
     if event is None:
-        return render_template("latest_upload.html", event=None)
+        return render_template(
+            "latest_upload.html",
+            event=None,
+            members_url=url_for("member_directory"),
+        )
 
     image_url = None
     if event.image_filename:
@@ -222,7 +226,23 @@ def latest_upload_dashboard():
         event=event,
         image_url=image_url,
         ad_url=url_for("render_ad", member_id=event.member_id, _external=True),
+        members_url=url_for("member_directory"),
     )
+
+
+@app.get("/members")
+def member_directory():
+    profiles = database.list_member_profiles()
+    directory: list[dict[str, object]] = []
+
+    for profile in profiles:
+        purchases = []
+        if profile.member_id:
+            purchases = database.get_purchase_history(profile.member_id)
+
+        directory.append({"profile": profile, "purchases": purchases})
+
+    return render_template("members.html", members=directory)
 
 
 @app.get("/uploads/<path:filename>")

@@ -414,6 +414,50 @@ class Database:
             occupation=str(row["occupation"]) if row["occupation"] else None,
         )
 
+    def list_member_profiles(self) -> list[MemberProfile]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT profile_id,
+                       profile_label,
+                       member_id,
+                       mall_member_id,
+                       member_status,
+                       joined_at,
+                       points_balance,
+                       gender,
+                       birth_date,
+                       phone,
+                       email,
+                       address,
+                       occupation
+                FROM member_profiles
+                ORDER BY profile_id
+                """
+            ).fetchall()
+
+        profiles: list[MemberProfile] = []
+        for row in rows:
+            profiles.append(
+                MemberProfile(
+                    profile_id=int(row["profile_id"]),
+                    profile_label=str(row["profile_label"]),
+                    member_id=str(row["member_id"]) if row["member_id"] else None,
+                    mall_member_id=str(row["mall_member_id"]) if row["mall_member_id"] else None,
+                    member_status=str(row["member_status"]),
+                    joined_at=str(row["joined_at"]),
+                    points_balance=float(row["points_balance"]),
+                    gender=str(row["gender"]),
+                    birth_date=str(row["birth_date"]) if row["birth_date"] else None,
+                    phone=str(row["phone"]),
+                    email=str(row["email"]),
+                    address=str(row["address"]) if row["address"] else None,
+                    occupation=str(row["occupation"]) if row["occupation"] else None,
+                )
+            )
+
+        return profiles
+
     def get_member_code(self, member_id: str) -> str:
         profile = self.get_member_profile(member_id)
         if profile:

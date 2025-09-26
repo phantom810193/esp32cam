@@ -85,6 +85,12 @@
       a.button:hover {
         background: #2d83bd;
       }
+      a.button.secondary {
+        background: #6c757d;
+      }
+      a.button.secondary:hover {
+        background: #5b636c;
+      }
     </style>
   </head>
   <body>
@@ -95,6 +101,7 @@
       {% if not event %}
         <div class="card empty-state">
           <p>目前尚未收到任何上傳影像，請先透過 /upload_face 上傳照片。</p>
+          <p><a class="button secondary" href="{{ members_url }}" target="_blank" rel="noopener">檢視會員資料與消費紀錄</a></p>
         </div>
       {% else %}
         <div class="card">
@@ -110,6 +117,8 @@
             <dd>會員代號：{{ event.member_code }}（ID：{{ event.member_id }}）</dd>
             <dt>廣告頁面</dt>
             <dd><a class="button" href="{{ ad_url }}" target="_blank" rel="noopener">開啟個人化廣告頁</a></dd>
+            <dt>會員資料</dt>
+            <dd><a class="button secondary" href="{{ members_url }}" target="_blank" rel="noopener">檢視會員資料與消費紀錄</a></dd>
           </dl>
           <div class="metrics">
             <div class="metric">
