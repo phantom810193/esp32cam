@@ -15,13 +15,23 @@ from .recognizer import FaceEncoding, FaceRecognizer
 _LOGGER = logging.getLogger(__name__)
 
 
-MEMBER_CODE_OVERRIDES: dict[str, str] = {
-    "MEME0383FE3AA": "ME0001",
-    "MEM692FFD0824": "ME0002",
-    "MEMFITNESS2025": "ME0003",
-    "MEMHOMECARE2025": "",
-    "MEMHEALTH2025": "",
-}
+MEMBER_CODE_OVERRIDES: dict[str, str] = {}
+
+SEED_MEMBER_IDS: tuple[str, ...] = (
+    "MEME0383FE3AA",
+    "MEM692FFD0824",
+    "MEMFITNESS2025",
+    "MEMHOMECARE2025",
+    "MEMHEALTH2025",
+)
+
+SEED_PROFILE_LABELS: tuple[str, ...] = (
+    "dessert-lover",
+    "family-groceries",
+    "fitness-enthusiast",
+    "home-manager",
+    "wellness-gourmet",
+)
 
 
 _TAIPEI_TZ = ZoneInfo("Asia/Taipei")
@@ -70,8 +80,8 @@ class UploadEvent:
 
 def _build_seed_purchases(
     start_timestamp: str,
-    member_code: str,
     items: list[tuple[str, float, float]],
+    member_code: str | None = None,
 ) -> list[dict[str, float | str]]:
     base = datetime.fromisoformat(start_timestamp)
     purchases: list[dict[str, float | str]] = []
@@ -121,6 +131,10 @@ class Database:
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._profile_purchase_templates: dict[
+            str, list[dict[str, float | str]]
+        ] = {}
+        self._profile_history_seeded: set[str] = set()
         self._ensure_schema()
 
     # ------------------------------------------------------------------
@@ -359,18 +373,93 @@ class Database:
     def _claim_unassigned_profile(self, member_id: str) -> None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT profile_id FROM member_profiles WHERE member_id IS NULL ORDER BY profile_id LIMIT 1"
+                """
+                SELECT profile_id, profile_label
+                FROM member_profiles
+                WHERE member_id IS NULL
+                ORDER BY profile_id
+                LIMIT 1
+                """
             ).fetchone()
             if row is None:
                 return
 
             profile_id = int(row["profile_id"])
+            profile_label = str(row["profile_label"])
             conn.execute(
                 "UPDATE member_profiles SET member_id = ? WHERE profile_id = ?",
                 (member_id, profile_id),
             )
             conn.commit()
-        _LOGGER.info("Assigned new member %s to pre-seeded profile %s", member_id, profile_id)
+        _LOGGER.info(
+            "Assigned new member %s to pre-seeded profile %s (%s)",
+            member_id,
+            profile_id,
+            profile_label,
+        )
+        self._populate_profile_history(profile_label, member_id)
+
+    def _populate_profile_history(self, profile_label: str, member_id: str) -> None:
+        template = self._profile_purchase_templates.get(profile_label)
+        if not template:
+            return
+        if profile_label in self._profile_history_seeded:
+            return
+
+        for purchase in template:
+            self.add_purchase(member_id, **purchase)
+
+        self._profile_history_seeded.add(profile_label)
+        _LOGGER.info(
+            "Seeded %d purchases for %s using %s persona",
+            len(template),
+            member_id,
+            profile_label,
+        )
+
+    def _reset_seed_profiles(self) -> None:
+        if not SEED_PROFILE_LABELS:
+            return
+
+        labels_placeholder = ",".join("?" for _ in SEED_PROFILE_LABELS)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT member_id
+                FROM member_profiles
+                WHERE profile_label IN ({labels_placeholder})
+                """,
+                SEED_PROFILE_LABELS,
+            ).fetchall()
+
+            purge_ids = {str(row["member_id"]) for row in rows if row["member_id"]}
+            purge_ids.update(SEED_MEMBER_IDS)
+
+            if purge_ids:
+                purge_list = sorted(purge_ids)
+                placeholders = ",".join("?" for _ in purge_list)
+                conn.execute(
+                    f"DELETE FROM purchases WHERE member_id IN ({placeholders})",
+                    purge_list,
+                )
+                conn.execute(
+                    f"DELETE FROM members WHERE member_id IN ({placeholders})",
+                    purge_list,
+                )
+                conn.execute(
+                    f"DELETE FROM upload_events WHERE member_id IN ({placeholders})",
+                    purge_list,
+                )
+
+            conn.execute(
+                f"""
+                UPDATE member_profiles
+                SET member_id = NULL
+                WHERE profile_label IN ({labels_placeholder})
+                """,
+                SEED_PROFILE_LABELS,
+            )
+            conn.commit()
 
     def get_member_profile(self, member_id: str) -> MemberProfile | None:
         with self._connect() as conn:
@@ -673,6 +762,9 @@ class Database:
     def ensure_demo_data(self) -> None:
         """Seed deterministic purchase histories for demo members."""
 
+        self._profile_purchase_templates = {}
+        self._profile_history_seeded.clear()
+
         dessert_persona_items: list[tuple[str, float, float]] = [
             ("草莓千層蛋糕", 320.0, 1),
             ("香草可麗露禮盒", 480.0, 1),
@@ -950,40 +1042,39 @@ class Database:
 
         dessert_history = _build_seed_purchases(
             "2025-01-04 10:30",
-            self.get_member_code("MEME0383FE3AA"),
             dessert_specs,
         )
         kids_history = _build_seed_purchases(
             "2025-01-05 09:20",
-            self.get_member_code("MEM692FFD0824"),
             kids_specs,
         )
 
         fitness_history = _build_seed_purchases(
             "2025-01-06 07:30",
-            self.get_member_code("MEMFITNESS2025"),
             fitness_specs,
         )
         homemaker_history = _build_seed_purchases(
             "2025-01-08 08:45",
-            self.get_member_code("MEMHOMECARE2025"),
             homemaker_specs,
         )
         health_history = _build_seed_purchases(
             "2025-01-09 09:10",
-            self.get_member_code("MEMHEALTH2025"),
             health_specs,
         )
 
-        self._seed_member_history("MEME0383FE3AA", dessert_history)
-        self._seed_member_history("MEM692FFD0824", kids_history)
-        self._seed_member_history("MEMFITNESS2025", fitness_history)
-        self._seed_member_history("MEMHOMECARE2025", homemaker_history)
-        self._seed_member_history("MEMHEALTH2025", health_history)
+        self._profile_purchase_templates = {
+            "dessert-lover": dessert_history,
+            "family-groceries": kids_history,
+            "fitness-enthusiast": fitness_history,
+            "home-manager": homemaker_history,
+            "wellness-gourmet": health_history,
+        }
+
+        self._reset_seed_profiles()
 
         self._seed_member_profile(
             profile_label="dessert-lover",
-            member_id="MEME0383FE3AA",
+            member_id=None,
             mall_member_id="ME0001",
             member_status="有效",
             joined_at="2021-06-12",
@@ -997,7 +1088,7 @@ class Database:
         )
         self._seed_member_profile(
             profile_label="family-groceries",
-            member_id="MEM692FFD0824",
+            member_id=None,
             mall_member_id="ME0002",
             member_status="有效",
             joined_at="2020-09-01",
@@ -1011,7 +1102,7 @@ class Database:
         )
         self._seed_member_profile(
             profile_label="fitness-enthusiast",
-            member_id="MEMFITNESS2025",
+            member_id=None,
             mall_member_id="ME0003",
             member_status="有效",
             joined_at="2019-11-20",
@@ -1025,7 +1116,7 @@ class Database:
         )
         self._seed_member_profile(
             profile_label="home-manager",
-            member_id="MEMHOMECARE2025",
+            member_id=None,
             mall_member_id="",
             member_status="有效",
             joined_at="2023-03-18",
@@ -1039,7 +1130,7 @@ class Database:
         )
         self._seed_member_profile(
             profile_label="wellness-gourmet",
-            member_id="MEMHEALTH2025",
+            member_id=None,
             mall_member_id="",
             member_status="有效",
             joined_at="2024-01-05",
@@ -1051,32 +1142,6 @@ class Database:
             address=None,
             occupation="營養顧問",
         )
-
-        with self._connect() as conn:
-            has_members = conn.execute("SELECT COUNT(*) FROM members").fetchone()[0] > 0
-            has_purchases = conn.execute("SELECT COUNT(*) FROM purchases").fetchone()[0] > 0
-
-        if not has_members:
-            import numpy as np
-
-            encoding = FaceEncoding(
-                np.zeros(128, dtype=np.float32),
-                signature="demo-member",
-                source="seed",
-            )
-            self.create_member(encoding, member_id="MEMDEMO001")
-
-        if not has_purchases:
-            now = datetime.now().replace(second=0, microsecond=0)
-            self.add_purchase(
-                "MEMDEMO001",
-                item="有機牛奶",
-                purchased_at=now.strftime("%Y-%m-%d %H:%M"),
-                unit_price=120.0,
-                quantity=1,
-                total_price=120.0,
-            )
-            _LOGGER.info("Seeded fallback purchase history for MEMDEMO001")
 
     def _seed_member_history(
         self, member_id: str, purchases: list[dict[str, float | str]]

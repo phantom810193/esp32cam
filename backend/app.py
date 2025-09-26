@@ -37,6 +37,13 @@ app.config["JSON_AS_ASCII"] = False
 
 gemini = GeminiService()
 rekognition = RekognitionService()
+if rekognition.can_describe_faces:
+    if rekognition.reset_collection():
+        logging.info("Amazon Rekognition collection reset for a clean start")
+    else:
+        logging.warning(
+            "Amazon Rekognition collection reset failed; continuing with existing entries"
+        )
 recognizer = FaceRecognizer(rekognition)
 database = Database(DB_PATH)
 database.ensure_demo_data()

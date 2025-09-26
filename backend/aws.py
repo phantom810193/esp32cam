@@ -183,6 +183,36 @@ class RekognitionService:
         self._collection_ready = False
         return False
 
+    def reset_collection(self) -> bool:
+        """Delete the current collection and recreate an empty one."""
+
+        if self._client is None or not self.collection_id:
+            return False
+
+        assert self._client is not None
+        try:
+            self._client.delete_collection(CollectionId=self.collection_id)
+            _LOGGER.info(
+                "Amazon Rekognition collection %s deleted", self.collection_id
+            )
+        except ClientError as exc:  # pragma: no cover - API failure
+            code = exc.response.get("Error", {}).get("Code", "")
+            if code != "ResourceNotFoundException":
+                _LOGGER.error(
+                    "Amazon Rekognition delete_collection %s failed: %s",
+                    self.collection_id,
+                    exc,
+                )
+                return False
+        except BotoCoreError as exc:  # pragma: no cover - transport failure
+            _LOGGER.error(
+                "Amazon Rekognition delete_collection transport failure: %s", exc
+            )
+            return False
+
+        self._collection_ready = False
+        return self.ensure_collection()
+
     # ------------------------------------------------------------------
     def describe_face(self, image_bytes: bytes) -> FaceSummary:
         """Detect a face and convert the response into a stable signature."""
