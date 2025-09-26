@@ -61,7 +61,8 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
    export GEMINI_API_KEY="<your_api_key>"
    ```
 
-   未設定時後端仍可運作，但不會呼叫 Gemini。部署到雲端（例如 Cloud Run）時，也可改放在環境變數或 Secret Manager。
+   未設定時後端仍可運作，但不會呼叫 Gemini。部署到雲端（例如 Cloud Run）時，也可改放在環境變數或 Secret Manager。預設會使用
+   `gemini-2.5-flash` 作為 Vision 與 Text 模型名稱，可視需求在程式或環境變數中覆寫。
 
 4. 啟動 Flask 伺服器（於專案根目錄執行）：
 

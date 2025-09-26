@@ -37,8 +37,8 @@ class GeminiService:
         self,
         api_key: str | None = None,
         *,
-        vision_model: str = "gemini-1.5-flash",
-        text_model: str = "gemini-1.5-flash",
+        vision_model: str = "gemini-2.5-flash",
+        text_model: str = "gemini-2.5-flash",
         timeout: float = 20.0,
     ) -> None:
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
