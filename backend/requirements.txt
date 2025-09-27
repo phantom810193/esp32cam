@@ -7,4 +7,5 @@ onnxruntime
 git+https://github.com/xinntao/Real-ESRGAN.git
 git+https://github.com/TencentARC/GFPGAN.git
 faiss-cpu
+opencv-python-headless
 pytest

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -189,56 +189,75 @@ class AdvancedFacePipeline:
             return None
 
     # ------------------------------------------------------------------
-    def process(self, image_bytes: bytes, mime_type: str | None = None) -> ProcessedFace:
+    @dataclass
+    class PipelineResult:
+        """Represents the outcome of a full pipeline invocation."""
+
+        faces: list[ProcessedFace]
+        frame: np.ndarray
+        annotated_frame: np.ndarray | None = None
+
+    def process_all(self, image_bytes: bytes, mime_type: str | None = None) -> "AdvancedFacePipeline.PipelineResult":
         if not self.is_available:
             raise AdvancedFacePipelineError(
                 self._last_error or "InsightFace pipeline is not available"
             )
 
-        try:
-            image = Image.open(BytesIO(image_bytes))
-        except Exception as exc:
-            raise AdvancedFacePipelineError(f"Unable to decode image: {exc}") from exc
-
-        image = image.convert("RGB")
-        frame = np.array(image)
-        if frame.ndim != 3:
-            raise AdvancedFacePipelineError("Expected a colour image with three channels")
-
+        frame = self._decode_frame(image_bytes)
         enhanced = self._apply_enhancers(frame)
         faces = self._extract_faces(enhanced)
         if not faces:
             raise AdvancedFacePipelineError("No face detected by InsightFace")
 
-        faces = sorted(
+        processed: list[ProcessedFace] = []
+        for face in sorted(
             faces,
-            key=lambda face: float(getattr(face, "det_score", 0.0)),
+            key=lambda item: float(getattr(item, "det_score", 0.0)),
             reverse=True,
+        ):
+            embedding = getattr(face, "normed_embedding", None) or getattr(face, "embedding", None)
+            if embedding is None:
+                _LOGGER.debug("Skipping face without embedding")
+                continue
+            vector = np.asarray(embedding, dtype=np.float32)
+            if vector.ndim != 1 or vector.size == 0:
+                _LOGGER.debug("Skipping face with unexpected embedding shape: %s", vector.shape)
+                continue
+
+            bbox = self._normalise_bbox(getattr(face, "bbox", None), enhanced.shape)
+            crop = self._crop_face(enhanced, bbox) if bbox is not None else enhanced
+
+            quality = getattr(face, "det_score", None)
+            if quality is not None:
+                try:
+                    quality = float(quality)
+                except (TypeError, ValueError):  # pragma: no cover - defensive
+                    quality = None
+
+            processed.append(
+                ProcessedFace(
+                    embedding=vector,
+                    image=crop,
+                    bbox=bbox,
+                    quality=quality,
+                )
+            )
+
+        if not processed:
+            raise AdvancedFacePipelineError("InsightFace detection returned no usable faces")
+
+        annotated = self._annotate_faces(enhanced, processed)
+        return AdvancedFacePipeline.PipelineResult(
+            faces=processed,
+            frame=enhanced,
+            annotated_frame=annotated,
         )
-        best = faces[0]
-        embedding = getattr(best, "normed_embedding", None) or getattr(best, "embedding", None)
-        if embedding is None:
-            raise AdvancedFacePipelineError("InsightFace did not return an embedding")
 
-        vector = np.asarray(embedding, dtype=np.float32)
-        if vector.ndim != 1 or vector.size == 0:
-            raise AdvancedFacePipelineError("InsightFace embedding has unexpected shape")
-
-        bbox = getattr(best, "bbox", None)
-        if bbox is not None:
-            try:
-                bbox = tuple(int(x) for x in np.asarray(bbox).tolist())
-            except Exception:  # pragma: no cover - defensive
-                bbox = None
-
-        quality = getattr(best, "det_score", None)
-        if quality is not None:
-            try:
-                quality = float(quality)
-            except (TypeError, ValueError):  # pragma: no cover - defensive
-                quality = None
-
-        return ProcessedFace(embedding=vector, image=enhanced, bbox=bbox, quality=quality)
+    def process(self, image_bytes: bytes, mime_type: str | None = None) -> ProcessedFace:
+        result = self.process_all(image_bytes, mime_type=mime_type)
+        if not result.faces:
+            raise AdvancedFacePipelineError("No face detected by InsightFace")
+        return result.faces[0]
 
     # ------------------------------------------------------------------
     def _apply_enhancers(self, frame: np.ndarray) -> np.ndarray:
@@ -271,3 +290,64 @@ class AdvancedFacePipeline:
         except Exception as exc:
             raise AdvancedFacePipelineError(f"InsightFace inference failed: {exc}") from exc
 
+    # ------------------------------------------------------------------
+    def _decode_frame(self, image_bytes: bytes) -> np.ndarray:
+        try:
+            image = Image.open(BytesIO(image_bytes))
+        except Exception as exc:
+            raise AdvancedFacePipelineError(f"Unable to decode image: {exc}") from exc
+
+        image = image.convert("RGB")
+        frame = np.array(image)
+        if frame.ndim != 3:
+            raise AdvancedFacePipelineError("Expected a colour image with three channels")
+        return frame
+
+    @staticmethod
+    def _normalise_bbox(raw_bbox: Sequence[float] | None, shape: Sequence[int]) -> tuple[int, int, int, int] | None:
+        if raw_bbox is None:
+            return None
+        try:
+            arr = np.asarray(raw_bbox, dtype=np.float32).tolist()
+        except Exception:  # pragma: no cover - defensive
+            return None
+        if len(arr) < 4:
+            return None
+        h, w = shape[:2]
+        x1, y1, x2, y2 = arr[:4]
+        x1 = int(np.clip(x1, 0, w))
+        x2 = int(np.clip(x2, 0, w))
+        y1 = int(np.clip(y1, 0, h))
+        y2 = int(np.clip(y2, 0, h))
+        if x2 <= x1 or y2 <= y1:
+            return None
+        return (x1, y1, x2, y2)
+
+    @staticmethod
+    def _crop_face(frame: np.ndarray, bbox: tuple[int, int, int, int], margin: float = 0.15) -> np.ndarray:
+        if bbox is None:
+            return frame
+        h, w = frame.shape[:2]
+        x1, y1, x2, y2 = bbox
+        width = x2 - x1
+        height = y2 - y1
+        expand_x = int(width * margin)
+        expand_y = int(height * margin)
+        x1 = max(0, x1 - expand_x)
+        y1 = max(0, y1 - expand_y)
+        x2 = min(w, x2 + expand_x)
+        y2 = min(h, y2 + expand_y)
+        cropped = frame[y1:y2, x1:x2]
+        if cropped.size == 0:
+            return frame
+        return cropped
+
+    @staticmethod
+    def _annotate_faces(frame: np.ndarray, faces: Sequence[ProcessedFace]) -> np.ndarray:
+        image = Image.fromarray(frame.astype(np.uint8, copy=False))
+        draw = ImageDraw.Draw(image)
+        for face in faces:
+            if not face.bbox:
+                continue
+            draw.rectangle(face.bbox, outline="#ef4444", width=6)
+        return np.array(image)

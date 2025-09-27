@@ -82,6 +82,95 @@
         font-size: 1.25rem;
         color: #1e293b;
       }
+      .recognition-card {
+        margin-top: 3rem;
+        background: white;
+        border-radius: 1.5rem;
+        padding: 2rem;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+        max-width: 70rem;
+        width: 100%;
+      }
+      .recognition-header {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        align-items: center;
+      }
+      .recognition-header h2 {
+        margin: 0;
+        font-size: 2rem;
+        color: #0f172a;
+      }
+      .recognition-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+        width: 100%;
+      }
+      @media (min-width: 960px) {
+        .recognition-meta {
+          flex-direction: row;
+        }
+      }
+      .recognition-image {
+        flex: 1 1 50%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+      .recognition-image img {
+        max-width: 100%;
+        border-radius: 1rem;
+        box-shadow: 0 10px 25px rgba(30, 64, 175, 0.15);
+      }
+      .recognition-details {
+        flex: 1 1 50%;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        font-size: 1.1rem;
+        color: #1e293b;
+      }
+      .recognition-faces {
+        margin-top: 1rem;
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+      }
+      .recognition-face {
+        width: 6rem;
+        text-align: center;
+        font-size: 0.9rem;
+        color: #475569;
+      }
+      .recognition-face img {
+        width: 100%;
+        border-radius: 0.75rem;
+        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15);
+      }
+      .recognition-metrics {
+        margin-top: 2rem;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+        gap: 1rem;
+      }
+      .recognition-metric {
+        background: #f8fafc;
+        border-radius: 1rem;
+        padding: 1.25rem 1rem;
+        box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.3);
+      }
+      .recognition-metric .value {
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: #1d4ed8;
+      }
+      .recognition-metric .label {
+        margin-top: 0.35rem;
+        font-size: 1rem;
+        color: #64748b;
+      }
     </style>
   </head>
   <body>
@@ -89,6 +178,54 @@
       <h1>{{ context.headline }}</h1>
       <div class="subheading">{{ context.subheading }}</div>
       <div class="highlight">{{ context.highlight }}</div>
+      {% if recognition %}
+      <div class="recognition-card">
+        <div class="recognition-header">
+          <h2>辨識紀錄</h2>
+        </div>
+        <div class="recognition-meta">
+          <div class="recognition-image">
+            {% if recognition.annotated_image %}
+            <img src="{{ recognition.annotated_image }}" alt="最新辨識結果" />
+            {% endif %}
+          </div>
+          <div class="recognition-details">
+            <div>辨識時間：{{ recognition.timestamp_display }}</div>
+            <div>辨識結果：會員代號 {{ recognition.member_id }}</div>
+            {% if recognition.distance_display %}
+            <div>比對距離：{{ recognition.distance_display }}</div>
+            {% endif %}
+            {% if recognition.new_member %}
+            <div>狀態：新會員已加入</div>
+            {% endif %}
+            {% if recognition.faces %}
+            <div class="recognition-faces">
+              {% for face in recognition.faces %}
+              <div class="recognition-face">
+                {% if face.preview %}
+                <img src="{{ face.preview }}" alt="臉部片段 {{ loop.index }}" />
+                {% endif %}
+                {% if face.quality_display %}
+                <div>信心 {{ face.quality_display }}</div>
+                {% endif %}
+              </div>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </div>
+        </div>
+        {% if recognition.metrics %}
+        <div class="recognition-metrics">
+          {% for metric in recognition.metrics %}
+          <div class="recognition-metric">
+            <div class="value">{{ metric.value }}</div>
+            <div class="label">{{ metric.label }}</div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
       {% if context.purchases %}
       <div class="history">
         <h2>歷史消費紀錄</h2>

@@ -50,7 +50,7 @@ class FaceRecognizer:
         self,
         gemini: GeminiService | None = None,
         tolerance: float = 0.32,
-        arcface_tolerance: float = 1.1,
+        arcface_tolerance: float = 0.35,
         pipeline: AdvancedFacePipeline | None = None,
     ) -> None:
         self._gemini = gemini
@@ -58,19 +58,24 @@ class FaceRecognizer:
         self.arcface_tolerance = arcface_tolerance
         self._pipeline = pipeline
         self._faiss = self._import_faiss()
+        self._last_pipeline_result: AdvancedFacePipeline.PipelineResult | None = None
 
     def encode(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> FaceEncoding:
         vector: np.ndarray | None = None
         signature = ""
         source = "hash"
 
+        self._last_pipeline_result = None
+
         if self._pipeline and self._pipeline.is_available:
             try:
-                processed = self._pipeline.process(image_bytes, mime_type=mime_type)
+                pipeline_result = self._pipeline.process_all(image_bytes, mime_type=mime_type)
             except AdvancedFacePipelineError as exc:
                 _LOGGER.warning("Advanced face pipeline unavailable, falling back: %s", exc)
             else:
-                vector = processed.embedding.astype(np.float32, copy=False)
+                self._last_pipeline_result = pipeline_result
+                best_face = pipeline_result.faces[0]
+                vector = best_face.embedding.astype(np.float32, copy=False)
                 signature = self._hash_signature(vector.tobytes())
                 source = "insightface"
 
@@ -98,6 +103,12 @@ class FaceRecognizer:
         return FaceEncoding(vector=vector.astype(np.float32, copy=False), signature=signature, source=source)
 
     # ------------------------------------------------------------------
+    def consume_last_pipeline_result(self) -> AdvancedFacePipeline.PipelineResult | None:
+        result = self._last_pipeline_result
+        self._last_pipeline_result = None
+        return result
+
+    # ------------------------------------------------------------------
     def derive_member_id(self, encoding: FaceEncoding) -> str:
         base = encoding.signature or self._hash_signature(encoding.vector.tobytes())
         digest = hashlib.sha1(base.encode("utf-8")).hexdigest().upper()
@@ -106,6 +117,8 @@ class FaceRecognizer:
     def distance(self, a: FaceEncoding, b: FaceEncoding) -> float:
         if a.vector.shape != b.vector.shape:
             return float("inf")
+        if a.vector.size >= 256:
+            return float(self._cosine_distance(a.vector, b.vector))
         return float(np.linalg.norm(a.vector - b.vector))
 
     def is_match(self, known: FaceEncoding, candidate: FaceEncoding) -> bool:
@@ -218,6 +231,17 @@ class FaceRecognizer:
         vector = np.frombuffer(repeated, dtype=np.uint8).astype(np.float32)
         vector /= 255.0
         return vector
+
+    @staticmethod
+    def _cosine_distance(a: np.ndarray, b: np.ndarray) -> float:
+        a = a.astype(np.float32, copy=False)
+        b = b.astype(np.float32, copy=False)
+        denom = float(np.linalg.norm(a) * np.linalg.norm(b))
+        if denom == 0.0:
+            return float("inf")
+        similarity = float(np.dot(a, b) / denom)
+        similarity = max(min(similarity, 1.0), -1.0)
+        return 1.0 - similarity
 
     @staticmethod
     def _import_faiss():
