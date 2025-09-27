@@ -122,8 +122,8 @@ class FaceRecognizer:
         return float(np.linalg.norm(a.vector - b.vector))
 
     def is_match(self, known: FaceEncoding, candidate: FaceEncoding) -> bool:
-        if known.signature and candidate.signature:
-            return known.signature == candidate.signature
+        if known.signature and candidate.signature and known.signature == candidate.signature:
+            return True
         if known.vector.size == 0 or candidate.vector.size == 0:
             return False
         if known.vector.shape != candidate.vector.shape:
