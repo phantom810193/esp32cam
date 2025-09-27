@@ -13,7 +13,7 @@ from time import perf_counter
 from typing import Any, Tuple
 
 import numpy as np
-from flask import Flask, jsonify, render_template, request, url_for
+from flask import Flask, jsonify, render_template, request, redirect, url_for
 from PIL import Image
 
 from .advertising import build_ad_context
@@ -64,7 +64,7 @@ else:
     logging.info("Advanced face pipeline 未啟用 (未提供錯誤訊息)")
 
 tolerance = _env_float("RECOGNIZER_TOLERANCE", 0.38)
-arcface_tolerance = _env_float("RECOGNIZER_ARCFACE_TOLERANCE", 0.35)
+arcface_tolerance = _env_float("RECOGNIZER_ARCFACE_TOLERANCE", 0.40)
 logging.info(
     "FaceRecognizer 容差設定：tolerance=%.3f, arcface_tolerance=%.3f",
     tolerance,
@@ -184,6 +184,39 @@ def render_ad(member_id: str):
     recognition_display = _prepare_recognition_for_template(recognition)
 
     return render_template("ad.html", context=context, recognition=recognition_display)
+
+
+@app.get("/members")
+def manage_members():
+    members = database.list_members()
+    status = request.args.get("status")
+    error = request.args.get("error")
+    return render_template("members.html", members=members, status=status, error=error)
+
+
+@app.post("/members/merge")
+def merge_members():
+    source = (request.form.get("source_member") or "").strip()
+    target = (request.form.get("target_member") or "").strip()
+    weight_raw = request.form.get("blend_weight")
+    try:
+        weight = float(weight_raw) if weight_raw not in (None, "") else 0.6
+    except ValueError:
+        weight = 0.6
+    weight = float(min(max(weight, 0.0), 1.0))
+
+    if not source or not target:
+        return redirect(url_for("manage_members", error="請選擇來源會員與目標會員"))
+    if source == target:
+        return redirect(url_for("manage_members", error="來源與目標會員不可相同"))
+
+    try:
+        database.merge_members(source, target, blend_weight=weight)
+    except ValueError as exc:
+        return redirect(url_for("manage_members", error=str(exc)))
+
+    message = f"已將 {source} 合併至 {target} (權重 {weight:.2f})"
+    return redirect(url_for("manage_members", status=message))
 
 
 @app.get("/health")

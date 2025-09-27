@@ -24,6 +24,15 @@ class Purchase:
     recommendation: str
 
 
+@dataclass
+class MemberSummary:
+    member_id: str
+    vector_length: int
+    has_signature: bool
+    source: str
+    purchase_count: int
+
+
 class Database:
     """Light-weight wrapper around SQLite used by the Flask backend."""
 
@@ -152,6 +161,94 @@ class Database:
             _LOGGER.info("更新會員 %s 的臉部向量 (來源=%s)", member_id, merged_sources)
         except Exception as exc:  # pragma: no cover - 保護性記錄
             _LOGGER.warning("更新會員 %s 向量失敗：%s", member_id, exc)
+
+    # ------------------------------------------------------------------
+    def list_members(self) -> list[MemberSummary]:
+        members: list[MemberSummary] = []
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    m.member_id,
+                    m.encoding_json,
+                    (
+                        SELECT COUNT(*) FROM purchases p WHERE p.member_id = m.member_id
+                    ) AS purchase_count
+                FROM members m
+                ORDER BY m.member_id COLLATE NOCASE
+                """
+            ).fetchall()
+
+        for row in rows:
+            try:
+                payload = json.loads(row["encoding_json"])
+                encoding = FaceEncoding.from_jsonable(payload)
+                vector_length = int(encoding.vector.size)
+                has_signature = bool(encoding.signature)
+                source = encoding.source
+            except Exception as exc:  # pragma: no cover - defensive
+                _LOGGER.warning("無法讀取會員 %s 的向量：%s", row["member_id"], exc)
+                vector_length = 0
+                has_signature = False
+                source = "unknown"
+
+            members.append(
+                MemberSummary(
+                    member_id=row["member_id"],
+                    vector_length=vector_length,
+                    has_signature=has_signature,
+                    source=source,
+                    purchase_count=int(row["purchase_count"] or 0),
+                )
+            )
+        return members
+
+    def merge_members(
+        self,
+        source_member: str,
+        target_member: str,
+        *,
+        blend_weight: float = 0.6,
+    ) -> None:
+        if source_member == target_member:
+            raise ValueError("來源與目標會員不可相同")
+
+        with self._connect() as conn:
+            source_row = conn.execute(
+                "SELECT encoding_json FROM members WHERE member_id = ?",
+                (source_member,),
+            ).fetchone()
+            target_row = conn.execute(
+                "SELECT encoding_json FROM members WHERE member_id = ?",
+                (target_member,),
+            ).fetchone()
+
+        if source_row is None:
+            raise ValueError(f"找不到來源會員 {source_member}")
+        if target_row is None:
+            raise ValueError(f"找不到目標會員 {target_member}")
+
+        source_encoding = FaceEncoding.from_jsonable(json.loads(source_row[0]))
+        target_encoding = FaceEncoding.from_jsonable(json.loads(target_row[0]))
+
+        self._update_member_encoding(
+            target_member,
+            target_encoding,
+            source_encoding,
+            blend_weight=blend_weight,
+        )
+
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE purchases SET member_id = ? WHERE member_id = ?",
+                (target_member, source_member),
+            )
+            conn.execute(
+                "DELETE FROM members WHERE member_id = ?",
+                (source_member,),
+            )
+            conn.commit()
+        _LOGGER.info("已將會員 %s 合併至 %s", source_member, target_member)
 
     # ------------------------------------------------------------------
     def add_purchase(
