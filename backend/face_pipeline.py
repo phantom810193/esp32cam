@@ -205,8 +205,9 @@ class AdvancedFacePipeline:
 
         frame = self._decode_frame(image_bytes)
         enhanced = self._apply_enhancers(frame)
-        faces = self._extract_faces(enhanced)
-        if not faces:
+        raw_faces = self._extract_faces(enhanced)
+        faces = list(raw_faces) if raw_faces is not None else []
+        if len(faces) == 0:
             raise AdvancedFacePipelineError("No face detected by InsightFace")
 
         processed: list[ProcessedFace] = []
@@ -215,7 +216,9 @@ class AdvancedFacePipeline:
             key=lambda item: float(getattr(item, "det_score", 0.0)),
             reverse=True,
         ):
-            embedding = getattr(face, "normed_embedding", None) or getattr(face, "embedding", None)
+            embedding = getattr(face, "normed_embedding", None)
+            if embedding is None:
+                embedding = getattr(face, "embedding", None)
             if embedding is None:
                 _LOGGER.debug("Skipping face without embedding")
                 continue
