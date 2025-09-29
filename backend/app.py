@@ -94,6 +94,26 @@ class _LatestAdHub:
 
 _latest_ad_hub = _LatestAdHub()
 
+
+def _serialize_ad_context(context: AdContext) -> dict[str, object]:
+    return {
+        "member_id": context.member_id,
+        "member_code": context.member_code,
+        "headline": context.headline,
+        "subheading": context.subheading,
+        "highlight": context.highlight,
+        "purchases": [
+            {
+                "item": purchase.item,
+                "purchased_at": purchase.purchased_at,
+                "unit_price": purchase.unit_price,
+                "quantity": purchase.quantity,
+                "total_price": purchase.total_price,
+            }
+            for purchase in context.purchases
+        ],
+    }
+
 _existing_event = database.get_latest_upload_event()
 if _existing_event is not None:
     _existing_purchases = database.get_purchase_history(_existing_event.member_id)
@@ -375,26 +395,6 @@ def _create_welcome_purchase(member_id: str) -> None:
         quantity=1,
         total_price=880.0,
     )
-
-
-def _serialize_ad_context(context: AdContext) -> dict[str, object]:
-    return {
-        "member_id": context.member_id,
-        "member_code": context.member_code,
-        "headline": context.headline,
-        "subheading": context.subheading,
-        "highlight": context.highlight,
-        "purchases": [
-            {
-                "item": purchase.item,
-                "purchased_at": purchase.purchased_at,
-                "unit_price": purchase.unit_price,
-                "quantity": purchase.quantity,
-                "total_price": purchase.total_price,
-            }
-            for purchase in context.purchases
-        ],
-    }
 
 
 def _persist_upload_image(member_id: str, image_bytes: bytes, mime_type: str) -> str | None:
