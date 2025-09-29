@@ -31,6 +31,11 @@
         color: #334155;
         white-space: pre-line;
       }
+      .member-code {
+        font-size: 1.1rem;
+        margin: 0.5rem 0 1.25rem;
+        color: #0f172a;
+      }
       .highlight {
         background: #ef4444;
         color: white;
@@ -73,7 +78,7 @@
         margin-bottom: 0.5rem;
       }
       .history .date,
-      .history .discount {
+      .history .meta {
         display: block;
         color: #475569;
       }
@@ -87,6 +92,13 @@
   <body>
     <div class="banner">
       <h1>{{ context.headline }}</h1>
+      <div class="member-code">
+        {% if context.member_code %}
+        商場會員代號：{{ context.member_code }}
+        {% else %}
+        尚未綁定商場會員代號，歡迎至服務台完成綁定
+        {% endif %}
+      </div>
       <div class="subheading">{{ context.subheading }}</div>
       <div class="highlight">{{ context.highlight }}</div>
       {% if context.purchases %}
@@ -96,11 +108,11 @@
           {% for purchase in context.purchases %}
           <li>
             <span class="item">{{ purchase.item }}</span>
-            <span class="date">{{ purchase.last_purchase }}</span>
-            {% if purchase.discount %}
-            <span class="discount">專屬折扣：{{ (purchase.discount * 100) | round(0, 'floor') }}%</span>
-            {% endif %}
-            <span class="discount">{{ purchase.recommendation }}</span>
+            <span class="date">{{ purchase.purchased_at }}</span>
+            {% set qty = '{:g}'.format(purchase.quantity) %}
+            <span class="meta">
+              單價：${{ '%.0f'|format(purchase.unit_price) }}｜數量：{{ qty }}｜總價：${{ '%.0f'|format(purchase.total_price) }}
+            </span>
           </li>
           {% endfor %}
         </ul>

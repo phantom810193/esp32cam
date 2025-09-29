@@ -1,4 +1,4 @@
-"""Face recognition utilities that leverage Gemini Vision for cloud IDs."""
+"""Face recognition utilities that leverage Amazon Rekognition for cloud IDs."""
 from __future__ import annotations
 
 import hashlib
@@ -8,7 +8,13 @@ from typing import Any
 
 import numpy as np
 
-from .ai import GeminiService, GeminiUnavailableError
+from .aws import (
+    FaceMatch,
+    IndexedFace,
+    NoFaceDetectedError,
+    RekognitionService,
+    RekognitionUnavailableError,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,19 +50,49 @@ class FaceEncoding:
 class FaceRecognizer:
     """Encapsulates the logic used to anonymise and match members."""
 
-    def __init__(self, gemini: GeminiService | None = None, tolerance: float = 0.32) -> None:
-        self._gemini = gemini
+    def __init__(
+        self,
+        rekognition: RekognitionService | None = None,
+        tolerance: float = 0.32,
+    ) -> None:
+        self._rekognition = rekognition
         self.tolerance = tolerance
 
     def encode(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> FaceEncoding:
         signature = ""
         source = "hash"
-        if self._gemini and self._gemini.can_describe_faces:
+        match: FaceMatch | None = None
+        summary = None
+        no_face_detected = False
+        if self._rekognition:
             try:
-                signature = self._gemini.describe_face(image_bytes, mime_type)
-                source = "gemini"
-            except GeminiUnavailableError as exc:
-                _LOGGER.warning("Gemini Vision unavailable, falling back to hash: %s", exc)
+                match = self._rekognition.search_face(image_bytes)
+            except RekognitionUnavailableError as exc:
+                _LOGGER.info(
+                    "Amazon Rekognition search unavailable, will fall back to detection: %s",
+                    exc,
+                )
+            if match is None and self._rekognition.can_describe_faces:
+                try:
+                    summary = self._rekognition.describe_face(image_bytes)
+                except NoFaceDetectedError as exc:
+                    no_face_detected = True
+                    _LOGGER.info("Amazon Rekognition 未在影像偵測到人臉: %s", exc)
+                except RekognitionUnavailableError as exc:
+                    _LOGGER.warning(
+                        "Amazon Rekognition detect_faces unavailable, falling back to hash: %s",
+                        exc,
+                    )
+
+        if match is None and summary is None and no_face_detected:
+            raise ValueError("影像中未偵測到人臉，請重新拍攝")
+
+        if match is not None:
+            signature = match.to_signature()
+            source = "rekognition-search"
+        elif summary is not None:
+            signature = summary.to_signature()
+            source = "rekognition-detect"
 
         if not signature:
             signature = self._hash_signature(image_bytes)
@@ -64,6 +100,36 @@ class FaceRecognizer:
 
         vector = self._vector_from_signature(signature)
         return FaceEncoding(vector=vector, signature=signature, source=source)
+
+    def register_face(self, image_bytes: bytes, member_id: str) -> FaceEncoding | None:
+        """Index a member face into Rekognition and return the cloud-backed encoding."""
+
+        if not self._rekognition:
+            return None
+
+        try:
+            indexed: IndexedFace = self._rekognition.index_face(
+                image_bytes, external_image_id=member_id
+            )
+        except RekognitionUnavailableError as exc:
+            _LOGGER.warning("Amazon Rekognition index_faces failed: %s", exc)
+            return None
+
+        signature = indexed.to_signature()
+        vector = self._vector_from_signature(signature)
+        return FaceEncoding(vector=vector, signature=signature, source="rekognition-index")
+
+    def remove_member_faces(self, member_id: str) -> int:
+        """Remove any Rekognition faces associated with ``member_id``."""
+
+        if not self._rekognition:
+            return 0
+
+        try:
+            return self._rekognition.remove_faces_by_external_ids([member_id])
+        except RekognitionUnavailableError as exc:
+            _LOGGER.warning("Amazon Rekognition delete_faces failed: %s", exc)
+            return 0
 
     # ------------------------------------------------------------------
     def derive_member_id(self, encoding: FaceEncoding) -> str:
@@ -95,4 +161,3 @@ class FaceRecognizer:
         vector = np.frombuffer(repeated, dtype=np.uint8).astype(np.float32)
         vector /= 255.0
         return vector
-
