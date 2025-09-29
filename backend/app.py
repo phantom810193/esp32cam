@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 import json
 import mimetypes
+from io import BytesIO
 from pathlib import Path
 from time import perf_counter
 from typing import Iterable, Tuple
@@ -22,6 +23,8 @@ from flask import (
     stream_with_context,
     url_for,
 )
+
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from .advertising import AdContext, build_ad_context
 from .ai import GeminiService, GeminiUnavailableError
@@ -403,10 +406,22 @@ def _persist_upload_image(member_id: str, image_bytes: bytes, mime_type: str) ->
     filename = f"{timestamp}_{unique_suffix}_{member_id}{extension}"
     path = UPLOAD_DIR / filename
     try:
-        path.write_bytes(image_bytes)
-    except OSError as exc:
-        logging.warning("Failed to persist uploaded image %s: %s", path, exc)
-        return None
+        with Image.open(BytesIO(image_bytes)) as image:
+            normalized = ImageOps.exif_transpose(image)
+            save_kwargs: dict[str, object] = {}
+            image_format = (image.format or normalized.format or "").upper()
+            if image_format == "JPEG" or extension.lower() in {".jpg", ".jpeg"}:
+                save_kwargs.update(quality=95, optimize=True)
+            normalized.save(path, **save_kwargs)
+    except (UnidentifiedImageError, OSError) as exc:
+        logging.warning(
+            "Failed to normalise uploaded image %s via Pillow: %s", filename, exc
+        )
+        try:
+            path.write_bytes(image_bytes)
+        except OSError as write_exc:
+            logging.warning("Failed to persist uploaded image %s: %s", path, write_exc)
+            return None
     return filename
 
 
