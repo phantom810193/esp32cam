@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import io
 import logging
-import mimetypes
 import os
-import time
+import mimetypes
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
@@ -21,6 +20,7 @@ from flask import (
     redirect,
     render_template,
     request,
+    send_file,
     send_from_directory,
     url_for,
 )
@@ -38,16 +38,13 @@ from .database import Database
 from .prediction import predict_next_purchases
 from .recognizer import FaceRecognizer
 
-logging.basicConfig(level=logging.INFO)
-
-# --- Optional: Pillow for drawing copy onto image ---
+# --- PIL for drawing ad copy ---
 try:
     from PIL import Image, ImageDraw, ImageFont
+except Exception:  # pragma: no cover
+    Image = ImageDraw = ImageFont = None  # Pillow 未安裝時避免匯入期就爆
 
-    PIL_AVAILABLE = True
-except Exception as exc:  # Pillow not installed yet
-    logging.warning("Pillow not available (image compose fallback to plain image): %s", exc)
-    PIL_AVAILABLE = False
+logging.basicConfig(level=logging.INFO)
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -84,24 +81,115 @@ if rekognition.can_describe_faces:
     if rekognition.reset_collection():
         logging.info("Amazon Rekognition collection reset for a clean start")
     else:
-        logging.warning(
-            "Amazon Rekognition collection reset failed; continuing with existing entries"
-        )
+        logging.warning("Amazon Rekognition collection reset failed; continuing with existing entries")
 recognizer = FaceRecognizer(rekognition)
 database = Database(DB_PATH)
 database.ensure_demo_data()
 
+# ---------------------------------------------------------------------------
+# Pages
+# ---------------------------------------------------------------------------
 
 @app.get("/")
 def index() -> str:
     return render_template("index.html")
 
+# 固定網址管理後台：GET 顯示、POST 上傳照片辨識後導回
+@app.route("/manager", methods=["GET", "POST"])
+def manager_dashboard_view():
+    if request.method == "POST":
+        # 允許直接在 /manager 上傳圖片 → 找出 member_id → 導回 GET
+        try:
+            image_bytes, mime_type = _extract_image_payload(request)
+            encoding = recognizer.encode(image_bytes, mime_type=mime_type)
+        except Exception as exc:
+            return render_template(
+                "manager.html",
+                context=None,
+                members=_selectable_members(),
+                error=f"上傳/辨識失敗：{exc}",
+            ), 400
 
-# ========== Core: Upload & recognize ==========
-def _recognize_or_create_member(image_bytes: bytes, mime_type: str) -> tuple[str, bool]:
-    """回傳 (member_id, new_member)"""
-    encoding = recognizer.encode(image_bytes, mime_type=mime_type)
-    member_id, _ = database.find_member_by_encoding(encoding, recognizer)
+        member_id, _ = database.find_member_by_encoding(encoding, recognizer)
+        if member_id is None:
+            # 新客：建立、給歡迎禮、索引 Rekognition
+            member_id = database.create_member(encoding, recognizer.derive_member_id(encoding))
+            _create_welcome_purchase(member_id)
+            indexed = recognizer.register_face(image_bytes, member_id)
+            if indexed is not None:
+                database.update_member_encoding(member_id, indexed)
+
+            # 存上傳圖（讓 hero 能顯示）
+            _persist_upload_image(member_id, image_bytes, mime_type)
+
+        return redirect(url_for("manager_dashboard_view", member_id=member_id))
+
+    # --- GET：載入畫面 ---
+    member_id = (request.args.get("member_id") or "").strip()
+    selectable_members = _selectable_members()
+
+    # 沒給 member_id → 用最近一次上傳事件的 member，或第一筆
+    if not member_id:
+        last = database.get_latest_upload_event()
+        if last:
+            member_id = last.member_id
+        elif selectable_members:
+            member_id = selectable_members[0].member_id
+
+    context: dict[str, object] | None = None
+    error: str | None = None
+
+    if member_id:
+        purchases = database.get_purchase_history(member_id)
+        profile = database.get_member_profile(member_id)
+        insights = analyse_purchase_intent(purchases)
+        scenario_key = derive_scenario_key(insights, profile=profile)
+        hero_image_url = _manager_hero_image(profile, scenario_key)
+        prediction = predict_next_purchases(
+            purchases, profile=profile, insights=insights, limit=7
+        )
+
+        context = {
+            "member_id": member_id,
+            "member": profile,
+            "analysis": insights,
+            "scenario_key": scenario_key,
+            "hero_image_url": hero_image_url,
+            "prediction": prediction,
+            "ad_url": url_for("render_ad", member_id=member_id, v2=1, _external=False),
+        }
+    else:
+        error = "尚未建立任何會員資料"
+
+    return render_template("manager.html", context=context, members=selectable_members, error=error)
+
+def _selectable_members():
+    profiles = database.list_member_profiles()
+    return [p for p in profiles if p.member_id]
+
+# ---------------------------------------------------------------------------
+# 顧客端：上傳臉部 → 產生廣告 URL
+# ---------------------------------------------------------------------------
+
+@app.post("/upload_face")
+def upload_face():
+    """Receive an image and return the member identifier + ad url."""
+    overall_start = perf_counter()
+
+    try:
+        image_bytes, mime_type = _extract_image_payload(request)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    upload_duration = perf_counter() - overall_start
+
+    recognition_start = perf_counter()
+    try:
+        encoding = recognizer.encode(image_bytes, mime_type=mime_type)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 422
+
+    member_id, distance = database.find_member_by_encoding(encoding, recognizer)
     new_member = False
     if member_id is None:
         member_id = database.create_member(encoding, recognizer.derive_member_id(encoding))
@@ -112,25 +200,7 @@ def _recognize_or_create_member(image_bytes: bytes, mime_type: str) -> tuple[str
         indexed_encoding = recognizer.register_face(image_bytes, member_id)
         if indexed_encoding is not None:
             database.update_member_encoding(member_id, indexed_encoding)
-    return member_id, new_member
 
-
-@app.post("/upload_face")
-def upload_face():
-    """Receive an image from the ESP32-CAM and return the member identifier."""
-    overall_start = perf_counter()
-    try:
-        image_bytes, mime_type = _extract_image_payload(request)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
-
-    upload_duration = perf_counter() - overall_start
-
-    recognition_start = perf_counter()
-    try:
-        member_id, new_member = _recognize_or_create_member(image_bytes, mime_type)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 422
     recognition_duration = perf_counter() - recognition_start
 
     ad_generation_start = perf_counter()
@@ -138,7 +208,6 @@ def upload_face():
     insights = analyse_purchase_intent(purchases, new_member=new_member)
     profile = database.get_member_profile(member_id)
 
-    # 只有非 brand_new 才呼叫 LLM 產生文案
     creative = None
     if gemini.can_generate_ads and insights.scenario != "brand_new":
         try:
@@ -146,14 +215,14 @@ def upload_face():
                 member_id,
                 [
                     {
-                        "member_code": p.member_code,
-                        "item": p.item,
-                        "purchased_at": p.purchased_at,
-                        "unit_price": p.unit_price,
-                        "quantity": p.quantity,
-                        "total_price": p.total_price,
+                        "member_code": x.member_code,
+                        "item": x.item,
+                        "purchased_at": x.purchased_at,
+                        "unit_price": x.unit_price,
+                        "quantity": x.quantity,
+                        "total_price": x.total_price,
                     }
-                    for p in purchases
+                    for x in purchases
                 ],
                 insights=insights,
             )
@@ -176,6 +245,7 @@ def upload_face():
     _purge_upload_images(stale_images)
 
     scenario_key = derive_scenario_key(insights, profile=profile)
+    hero_image_url = _resolve_hero_image_url(scenario_key)
 
     payload = {
         "status": "ok",
@@ -184,56 +254,16 @@ def upload_face():
         "new_member": new_member,
         "ad_url": url_for("render_ad", member_id=member_id, _external=True),
         "scenario_key": scenario_key,
-        "hero_image_url": url_for("ad_composed_image", member_id=member_id, _external=True, ts=int(time.time())),
+        "hero_image_url": hero_image_url,
     }
+    if distance is not None:
+        payload["distance"] = distance
     return jsonify(payload), 201 if new_member else 200
 
+# ---------------------------------------------------------------------------
+# 廣告頁（HTML）與動態合成廣告圖（JPG）
+# ---------------------------------------------------------------------------
 
-@app.post("/members/merge")
-def merge_members():
-    """Merge two member identifiers when the same face was duplicated."""
-    payload = request.get_json(silent=True) or {}
-    source_id = str(payload.get("source") or "").strip()
-    target_id = str(payload.get("target") or "").strip()
-    prefer_source = bool(payload.get("prefer_source_encoding", False))
-
-    if not source_id or not target_id:
-        return jsonify({"status": "error", "message": "source 與 target 參數必須提供"}), 400
-
-    try:
-        source_encoding, target_encoding = database.merge_members(source_id, target_id)
-    except ValueError as exc:
-        message = str(exc)
-        status = 400 if "不可相同" in message else 404
-        return jsonify({"status": "error", "message": message}), status
-
-    deleted_faces = recognizer.remove_member_faces(source_id)
-
-    encoding_updated = False
-    if (
-        prefer_source
-        or (not target_encoding.signature and source_encoding.signature)
-        or (
-            source_encoding.signature
-            and source_encoding.source.startswith("rekognition")
-            and not target_encoding.source.startswith("rekognition")
-        )
-    ):
-        database.update_member_encoding(target_id, source_encoding)
-        encoding_updated = True
-
-    return jsonify(
-        {
-            "status": "ok",
-            "merged_member": source_id,
-            "into": target_id,
-            "deleted_cloud_faces": deleted_faces,
-            "encoding_updated": encoding_updated,
-        }
-    ), 200
-
-
-# ========== 顧客廣告（自動改用「已畫字的合成圖」） ==========
 @app.get("/ad/<member_id>")
 def render_ad(member_id: str):
     purchases = database.get_purchase_history(member_id)
@@ -247,78 +277,103 @@ def render_ad(member_id: str):
                 member_id,
                 [
                     {
-                        "member_code": p.member_code,
-                        "item": p.item,
-                        "purchased_at": p.purchased_at,
-                        "unit_price": p.unit_price,
-                        "quantity": p.quantity,
-                        "total_price": p.total_price,
+                        "member_code": x.member_code,
+                        "item": x.item,
+                        "purchased_at": x.purchased_at,
+                        "unit_price": x.unit_price,
+                        "quantity": x.quantity,
+                        "total_price": x.total_price,
                     }
-                    for p in purchases
+                    for x in purchases
                 ],
                 insights=insights,
             )
         except GeminiUnavailableError as exc:
             logging.warning("Gemini ad generation unavailable: %s", exc)
 
-    context = build_ad_context(
-        member_id,
-        purchases,
-        insights=insights,
-        profile=profile,
-        creative=creative,
-    )
-    # 重要：讓 ad.html 使用「動態合成圖」
-    hero_image_url = url_for("ad_composed_image", member_id=member_id, ts=int(time.time()))
+    context = build_ad_context(member_id, purchases, insights=insights, profile=profile, creative=creative)
+    hero_image_url = _resolve_hero_image_url(context.scenario_key)
 
-    return render_template(
-        "ad.html",
-        context=context,
-        hero_image_url=hero_image_url,
-        scenario_key=context.scenario_key,
-    )
+    return render_template("ad.html", context=context, hero_image_url=hero_image_url, scenario_key=context.scenario_key)
 
-
-# ========== 動態合成圖（把文案畫到圖片上） ==========
 @app.get("/ad-image/<member_id>")
-def ad_composed_image(member_id: str):
+def ad_image(member_id: str):
+    """回傳一張已將短文案畫到 hero 圖上的 JPG。"""
     purchases = database.get_purchase_history(member_id)
     insights = analyse_purchase_intent(purchases)
     profile = database.get_member_profile(member_id)
     scenario_key = derive_scenario_key(insights, profile=profile)
 
-    # 20 字內的活潑中文文案（沒有 Gemini 也會有）
-    copy_text = _generate_creative_text(insights=insights, profile=profile, purchases=purchases)
-
-    base_path = _ad_base_image_path(scenario_key)
-    if not base_path or not base_path.exists():
+    # 取得圖檔「實際路徑」
+    image_path = _resolve_hero_image_path(scenario_key)
+    if image_path is None or not image_path.is_file() or Image is None:
         abort(404)
 
-    if not PIL_AVAILABLE:
-        # Pillow 不存在就回傳純圖（不畫字）
-        return send_from_directory(base_path.parent, base_path.name, conditional=True)
+    # 文案：優先用 LLM，否則本地生成 20 字內短句
+    copy_text = None
+    if gemini.can_generate_ads and insights.scenario != "brand_new":
+        try:
+            copy_text = gemini.generate_short_headline(member_id, insights=insights, max_chars=20)
+        except Exception:
+            copy_text = None
+    if not copy_text:
+        item = getattr(insights, "recommended_item", None) or "本月嚴選好物"
+        templates = [
+            f"今天就來 {item}",
+            f"{item} 限時優惠！",
+            f"{item} 熱銷補貨到店",
+            f"回饋加碼：{item}",
+            f"會員私享：{item}",
+        ]
+        copy_text = templates[hash(member_id) % len(templates)]
+        if len(copy_text) > 20:
+            copy_text = copy_text[:20]
 
-    try:
-        image = _compose_ad_bitmap(str(base_path), copy_text)
-        buf = io.BytesIO()
-        image.save(buf, format="JPEG", quality=90, optimize=True)
-        buf.seek(0)
-        return current_app.response_class(buf.getvalue(), mimetype="image/jpeg")
-    except Exception as exc:
-        logging.warning("compose ad image failed: %s", exc)
-        # 失敗回退純圖
-        return send_from_directory(base_path.parent, base_path.name, conditional=True)
+    # 開圖與繪製
+    im = Image.open(image_path).convert("RGB")
+    w, h = im.size
+    draw = ImageDraw.Draw(im)
 
+    # 找字型（Noto CJK 最佳）
+    font_paths = [
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansTC-Regular.otf",
+        "/usr/share/fonts/truetype/noto/NotoSansTC-Regular.ttf",
+    ]
+    font = None
+    for fp in font_paths:
+        if os.path.isfile(fp):
+            try:
+                font = ImageFont.truetype(fp, size=max(24, int(h * 0.035)))
+                break
+            except Exception:
+                pass
+    if font is None:
+        font = ImageFont.load_default()
+
+    # 底部半透明黑條 + 白字
+    margin = int(h * 0.03)
+    pad = int(h * 0.018)
+    text_w, text_h = draw.textbbox((0, 0), copy_text, font=font)[2:]
+    box_h = text_h + pad * 2
+    draw.rectangle([(0, h - box_h - margin), (w, h)], fill=(0, 0, 0, 180))
+    draw.text((margin, h - box_h - margin + pad), copy_text, fill=(255, 255, 255), font=font)
+
+    buf = io.BytesIO()
+    im.save(buf, format="JPEG", quality=90)
+    buf.seek(0)
+    return send_file(buf, mimetype="image/jpeg", download_name=f"{member_id}.jpg")
+
+# ---------------------------------------------------------------------------
+# 成員清單、最新上傳、靜態資源
+# ---------------------------------------------------------------------------
 
 @app.get("/latest_upload")
 def latest_upload_dashboard():
     event = database.get_latest_upload_event()
     if event is None:
-        return render_template(
-            "latest_upload.html",
-            event=None,
-            members_url=url_for("member_directory"),
-        )
+        return render_template("latest_upload.html", event=None, members_url=url_for("member_directory"))
 
     image_url = None
     if event.image_filename:
@@ -332,81 +387,20 @@ def latest_upload_dashboard():
         members_url=url_for("member_directory"),
     )
 
-
 @app.get("/members")
 def member_directory():
     profiles = database.list_member_profiles()
     directory: list[dict[str, object]] = []
     for profile in profiles:
-        purchases = []
-        if profile.member_id:
-            purchases = database.get_purchase_history(profile.member_id)
+        purchases = database.get_purchase_history(profile.member_id) if profile.member_id else []
         directory.append({"profile": profile, "purchases": purchases})
     return render_template("members.html", members=directory)
 
-
-# ========== 經理後台：固定網址 /manager（支援 GET/POST 上傳辨識） ==========
-@app.route("/manager", methods=["GET", "POST"])
-def manager_dashboard_view():
-    # 若 POST 圖片，就先辨識→redirect 到該 member_id
-    if request.method == "POST":
-        try:
-            image_bytes, mime_type = _extract_image_payload(request)
-            member_id, _ = _recognize_or_create_member(image_bytes, mime_type)
-            return redirect(url_for("manager_dashboard_view", member_id=member_id))
-        except Exception as exc:
-            logging.exception("manager upload failed: %s", exc)
-            # 帶錯誤訊息回頁面
-            return render_template("manager.html", context=None, member_id="", members=[], error=str(exc))
-
-    member_id = (request.args.get("member_id") or "").strip()
-    profiles = database.list_member_profiles()
-    selectable_members = [profile for profile in profiles if profile.member_id]
-
-    selected_id = member_id or (selectable_members[0].member_id if selectable_members else "")
-    context: dict[str, object] | None = None
-    error: str | None = None
-
-    if selected_id:
-        purchases = database.get_purchase_history(selected_id)
-        profile = database.get_member_profile(selected_id)
-        insights = analyse_purchase_intent(purchases)
-        scenario_key = derive_scenario_key(insights, profile=profile)
-        hero_image_url = _manager_hero_image(profile, scenario_key)
-        prediction = predict_next_purchases(
-            purchases,
-            profile=profile,
-            insights=insights,
-            limit=7,
-        )
-
-        context = {
-            "member_id": selected_id,
-            "member": profile,
-            "analysis": insights,
-            "scenario_key": scenario_key,
-            "hero_image_url": hero_image_url,
-            "prediction": prediction,
-            "ad_url": url_for("render_ad", member_id=selected_id, v2=1, _external=False),
-        }
-    else:
-        error = "尚未建立任何會員資料"
-
-    return render_template(
-        "manager.html",
-        context=context,
-        member_id=member_id,
-        members=selectable_members,
-        error=error,
-    )
-
-
-# ========== 靜態與資產 ==========
 @app.get("/uploads/<path:filename>")
 def serve_upload_image(filename: str):
     return send_from_directory(UPLOAD_DIR, filename, conditional=True)
 
-
+# VM 圖庫對外供圖（/ad-assets/<filename>）
 @app.get("/ad-assets/<path:filename>")
 def serve_ad_asset(filename: str):
     ads_dir = current_app.config.get("ADS_DIR") or ""
@@ -421,20 +415,16 @@ def serve_ad_asset(filename: str):
         abort(404)
     return send_from_directory(ads_dir, os.path.basename(full), conditional=True)
 
-
+# 新樣式預覽（不影響 /ad/<member_id>）
 @app.get("/ad-preview/<path:filename>")
 def ad_preview(filename: str):
     hero_image_url = url_for("serve_ad_asset", filename=filename)
-    return render_template(
-        "ad.html",
-        hero_image_url=hero_image_url,
-        scenario_key=request.args.get("scenario_key", "brand_new"),
-    )
-
+    return render_template("ad.html", hero_image_url=hero_image_url, scenario_key=request.args.get("scenario_key", "brand_new"))
 
 # ---------------------------------------------------------------------------
 # Health checks
 # ---------------------------------------------------------------------------
+
 def _health_payload() -> dict:
     ads_dir = current_app.config.get("ADS_DIR") or ""
     ads_path = Path(ads_dir)
@@ -453,49 +443,45 @@ def _health_payload() -> dict:
         "static_example": "/static/hello.txt",
     }
 
-
 @app.get("/health")
 def health_check():
     return jsonify(_health_payload())
-
 
 @app.get("/healthz")
 def healthz_check():
     return jsonify(_health_payload())
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 def _manager_hero_image(profile, scenario_key: str) -> str | None:
     if profile and profile.first_image_filename:
         return url_for("serve_upload_image", filename=profile.first_image_filename)
     return _resolve_hero_image_url(scenario_key)
 
-
 def _resolve_hero_image_url(scenario_key: str) -> str | None:
+    """回傳 URL。優先 VM ADS_DIR，缺檔時回退 /static/images/ads。"""
     filename = AD_IMAGE_BY_SCENARIO.get(scenario_key) or AD_IMAGE_BY_SCENARIO.get("brand_new")
     if not filename:
         return None
     ads_dir = current_app.config.get("ADS_DIR") or ""
-    if ads_dir:
-        candidate = Path(ads_dir) / filename
-        if candidate.is_file():
-            return url_for("serve_ad_asset", filename=filename)
+    if ads_dir and (Path(ads_dir) / filename).is_file():
+        return url_for("serve_ad_asset", filename=filename)
     return url_for("static", filename=f"images/ads/{filename}")
 
-
-def _ad_base_image_path(scenario_key: str) -> Path | None:
-    """找出實體檔案路徑（優先 ADS_DIR，否則走 repo 靜態）"""
+def _resolve_hero_image_path(scenario_key: str) -> Path | None:
+    """回傳實際檔案 Path，給 Pillow 開檔用。"""
     filename = AD_IMAGE_BY_SCENARIO.get(scenario_key) or AD_IMAGE_BY_SCENARIO.get("brand_new")
     if not filename:
         return None
-    ads_dir = Path(current_app.config.get("ADS_DIR") or "")
-    if ads_dir and (ads_dir / filename).is_file():
-        return ads_dir / filename
-    fallback = STATIC_DIR / "images" / "ads" / filename
-    return fallback if fallback.is_file() else None
-
+    ads_dir = current_app.config.get("ADS_DIR") or ""
+    cand = Path(ads_dir) / filename
+    if ads_dir and cand.is_file():
+        return cand
+    # fallback 到 repo 內的靜態圖
+    cand = STATIC_DIR / "images" / "ads" / filename
+    return cand if cand.is_file() else None
 
 def _extract_image_payload(req) -> Tuple[bytes, str]:
     if req.files:
@@ -510,7 +496,6 @@ def _extract_image_payload(req) -> Tuple[bytes, str]:
         raise ValueError("No image data found in request")
     return data, req.mimetype or "image/jpeg"
 
-
 def _create_welcome_purchase(member_id: str) -> None:
     now = datetime.now().replace(second=0, microsecond=0)
     database.add_purchase(
@@ -521,7 +506,6 @@ def _create_welcome_purchase(member_id: str) -> None:
         quantity=1,
         total_price=880.0,
     )
-
 
 def _persist_upload_image(member_id: str, image_bytes: bytes, mime_type: str) -> str | None:
     extension = mimetypes.guess_extension(mime_type or "") or ".jpg"
@@ -538,7 +522,6 @@ def _persist_upload_image(member_id: str, image_bytes: bytes, mime_type: str) ->
         return None
     return filename
 
-
 def _purge_upload_images(filenames: Iterable[str]) -> None:
     for filename in set(filter(None, filenames)):
         path = UPLOAD_DIR / filename
@@ -548,79 +531,5 @@ def _purge_upload_images(filenames: Iterable[str]) -> None:
         except OSError as exc:
             logging.warning("Failed to delete old upload image %s: %s", path, exc)
 
-
-# --- 文案產生（無 Gemini 也會有 20 字內中文 copy） ---
-def _generate_creative_text(insights, profile, purchases) -> str:
-    """
-    產生短文案（<=20字）。策略：
-    1) 以 insights.recommended_item 或預測第一名為主
-    2) 針對常見類型給一句活潑標語
-    """
-    item = getattr(insights, "recommended_item", None) or ""
-    if not item:
-        # 嘗試從歷史推一個熱門
-        top = None
-        try:
-            preds = predict_next_purchases(purchases, profile=profile, insights=insights, limit=1)
-            if preds and isinstance(preds, list):
-                top = getattr(preds[0], "product_name", None) or getattr(preds[0], "item", None)
-        except Exception:
-            top = None
-        item = top or "本月精選"
-
-    # 超短句模板（20 字內）
-    templates = [
-        f"{item}熱銷回歸，限時搶！",
-        f"{item}精選推薦，錯過可惜！",
-        f"{item}人氣王，現在下單！",
-        f"今天就來一份 {item}！",
-        f"{item}新客加碼，快收藏！",
-        f"{item}專屬優惠，立即享有！",
-    ]
-    # 用 item 長度決定挑哪句，以免超過 20 字
-    for s in templates:
-        if len(s) <= 20:
-            return s
-    # 保底截斷
-    return (templates[0])[:20]
-
-
-def _load_font(pt: int):
-    """盡力載入支援中文的字型，最後退回 PIL 內建。"""
-    candidates = [
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/opentype/noto/NotoSansCJKtc-Regular.otf",
-        "/usr/share/fonts/truetype/noto/NotoSansTC-Regular.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    ]
-    for path in candidates:
-        if os.path.exists(path):
-            try:
-                return ImageFont.truetype(path, pt)
-            except Exception:
-                continue
-    return ImageFont.load_default()
-
-
-def _compose_ad_bitmap(base_image_path: str, text: str):
-    """把文案畫到圖片下方（半透明黑帶 + 白字）。"""
-    image = Image.open(base_image_path).convert("RGB")
-    W, H = image.size
-
-    # 半透明黑帶
-    band_h = int(H * 0.18)
-    overlay = Image.new("RGBA", (W, band_h), (0, 0, 0, 150))
-    image.paste(overlay, (0, H - band_h), overlay)
-
-    # 文字
-    font = _load_font(max(int(H * 0.06), 28))
-    draw = ImageDraw.Draw(image)
-    padding = int(0.04 * W)
-    draw.text((padding, H - band_h + int(0.2 * band_h)), text, fill=(255, 255, 255), font=font)
-
-    return image
-
-
 if __name__ == "__main__":
-    # 開發模式直接啟動；部署請用 gunicorn / systemd 並確保帶入 ADS_DIR
     app.run(host="0.0.0.0", port=8000, debug=True)
