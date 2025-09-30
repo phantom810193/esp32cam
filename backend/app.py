@@ -1,9 +1,12 @@
+# backend/app.py
 """Flask backend for the ESP32-CAM retail advertising MVP."""
 from __future__ import annotations
 
+import io
 import logging
-import os
 import mimetypes
+import os
+import time
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
@@ -15,6 +18,7 @@ from flask import (
     abort,
     current_app,
     jsonify,
+    redirect,
     render_template,
     request,
     send_from_directory,
@@ -35,6 +39,15 @@ from .prediction import predict_next_purchases
 from .recognizer import FaceRecognizer
 
 logging.basicConfig(level=logging.INFO)
+
+# --- Optional: Pillow for drawing copy onto image ---
+try:
+    from PIL import Image, ImageDraw, ImageFont
+
+    PIL_AVAILABLE = True
+except Exception as exc:  # Pillow not installed yet
+    logging.warning("Pillow not available (image compose fallback to plain image): %s", exc)
+    PIL_AVAILABLE = False
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -84,25 +97,11 @@ def index() -> str:
     return render_template("index.html")
 
 
-@app.post("/upload_face")
-def upload_face():
-    """Receive an image from the ESP32-CAM and return the member identifier."""
-    overall_start = perf_counter()
-
-    try:
-        image_bytes, mime_type = _extract_image_payload(request)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
-
-    upload_duration = perf_counter() - overall_start
-
-    recognition_start = perf_counter()
-    try:
-        encoding = recognizer.encode(image_bytes, mime_type=mime_type)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 422
-
-    member_id, distance = database.find_member_by_encoding(encoding, recognizer)
+# ========== Core: Upload & recognize ==========
+def _recognize_or_create_member(image_bytes: bytes, mime_type: str) -> tuple[str, bool]:
+    """回傳 (member_id, new_member)"""
+    encoding = recognizer.encode(image_bytes, mime_type=mime_type)
+    member_id, _ = database.find_member_by_encoding(encoding, recognizer)
     new_member = False
     if member_id is None:
         member_id = database.create_member(encoding, recognizer.derive_member_id(encoding))
@@ -113,7 +112,25 @@ def upload_face():
         indexed_encoding = recognizer.register_face(image_bytes, member_id)
         if indexed_encoding is not None:
             database.update_member_encoding(member_id, indexed_encoding)
+    return member_id, new_member
 
+
+@app.post("/upload_face")
+def upload_face():
+    """Receive an image from the ESP32-CAM and return the member identifier."""
+    overall_start = perf_counter()
+    try:
+        image_bytes, mime_type = _extract_image_payload(request)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    upload_duration = perf_counter() - overall_start
+
+    recognition_start = perf_counter()
+    try:
+        member_id, new_member = _recognize_or_create_member(image_bytes, mime_type)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 422
     recognition_duration = perf_counter() - recognition_start
 
     ad_generation_start = perf_counter()
@@ -129,14 +146,14 @@ def upload_face():
                 member_id,
                 [
                     {
-                        "member_code": purchase.member_code,
-                        "item": purchase.item,
-                        "purchased_at": purchase.purchased_at,
-                        "unit_price": purchase.unit_price,
-                        "quantity": purchase.quantity,
-                        "total_price": purchase.total_price,
+                        "member_code": p.member_code,
+                        "item": p.item,
+                        "purchased_at": p.purchased_at,
+                        "unit_price": p.unit_price,
+                        "quantity": p.quantity,
+                        "total_price": p.total_price,
                     }
-                    for purchase in purchases
+                    for p in purchases
                 ],
                 insights=insights,
             )
@@ -159,7 +176,6 @@ def upload_face():
     _purge_upload_images(stale_images)
 
     scenario_key = derive_scenario_key(insights, profile=profile)
-    hero_image_url = _resolve_hero_image_url(scenario_key)
 
     payload = {
         "status": "ok",
@@ -168,10 +184,8 @@ def upload_face():
         "new_member": new_member,
         "ad_url": url_for("render_ad", member_id=member_id, _external=True),
         "scenario_key": scenario_key,
-        "hero_image_url": hero_image_url,
+        "hero_image_url": url_for("ad_composed_image", member_id=member_id, _external=True, ts=int(time.time())),
     }
-    if distance is not None:
-        payload["distance"] = distance
     return jsonify(payload), 201 if new_member else 200
 
 
@@ -219,6 +233,7 @@ def merge_members():
     ), 200
 
 
+# ========== 顧客廣告（自動改用「已畫字的合成圖」） ==========
 @app.get("/ad/<member_id>")
 def render_ad(member_id: str):
     purchases = database.get_purchase_history(member_id)
@@ -232,14 +247,14 @@ def render_ad(member_id: str):
                 member_id,
                 [
                     {
-                        "member_code": purchase.member_code,
-                        "item": purchase.item,
-                        "purchased_at": purchase.purchased_at,
-                        "unit_price": purchase.unit_price,
-                        "quantity": purchase.quantity,
-                        "total_price": purchase.total_price,
+                        "member_code": p.member_code,
+                        "item": p.item,
+                        "purchased_at": p.purchased_at,
+                        "unit_price": p.unit_price,
+                        "quantity": p.quantity,
+                        "total_price": p.total_price,
                     }
-                    for purchase in purchases
+                    for p in purchases
                 ],
                 insights=insights,
             )
@@ -253,7 +268,8 @@ def render_ad(member_id: str):
         profile=profile,
         creative=creative,
     )
-    hero_image_url = _resolve_hero_image_url(context.scenario_key)
+    # 重要：讓 ad.html 使用「動態合成圖」
+    hero_image_url = url_for("ad_composed_image", member_id=member_id, ts=int(time.time()))
 
     return render_template(
         "ad.html",
@@ -261,6 +277,37 @@ def render_ad(member_id: str):
         hero_image_url=hero_image_url,
         scenario_key=context.scenario_key,
     )
+
+
+# ========== 動態合成圖（把文案畫到圖片上） ==========
+@app.get("/ad-image/<member_id>")
+def ad_composed_image(member_id: str):
+    purchases = database.get_purchase_history(member_id)
+    insights = analyse_purchase_intent(purchases)
+    profile = database.get_member_profile(member_id)
+    scenario_key = derive_scenario_key(insights, profile=profile)
+
+    # 20 字內的活潑中文文案（沒有 Gemini 也會有）
+    copy_text = _generate_creative_text(insights=insights, profile=profile, purchases=purchases)
+
+    base_path = _ad_base_image_path(scenario_key)
+    if not base_path or not base_path.exists():
+        abort(404)
+
+    if not PIL_AVAILABLE:
+        # Pillow 不存在就回傳純圖（不畫字）
+        return send_from_directory(base_path.parent, base_path.name, conditional=True)
+
+    try:
+        image = _compose_ad_bitmap(str(base_path), copy_text)
+        buf = io.BytesIO()
+        image.save(buf, format="JPEG", quality=90, optimize=True)
+        buf.seek(0)
+        return current_app.response_class(buf.getvalue(), mimetype="image/jpeg")
+    except Exception as exc:
+        logging.warning("compose ad image failed: %s", exc)
+        # 失敗回退純圖
+        return send_from_directory(base_path.parent, base_path.name, conditional=True)
 
 
 @app.get("/latest_upload")
@@ -290,18 +337,28 @@ def latest_upload_dashboard():
 def member_directory():
     profiles = database.list_member_profiles()
     directory: list[dict[str, object]] = []
-
     for profile in profiles:
         purchases = []
         if profile.member_id:
             purchases = database.get_purchase_history(profile.member_id)
         directory.append({"profile": profile, "purchases": purchases})
-
     return render_template("members.html", members=directory)
 
 
-@app.get("/manager")
+# ========== 經理後台：固定網址 /manager（支援 GET/POST 上傳辨識） ==========
+@app.route("/manager", methods=["GET", "POST"])
 def manager_dashboard_view():
+    # 若 POST 圖片，就先辨識→redirect 到該 member_id
+    if request.method == "POST":
+        try:
+            image_bytes, mime_type = _extract_image_payload(request)
+            member_id, _ = _recognize_or_create_member(image_bytes, mime_type)
+            return redirect(url_for("manager_dashboard_view", member_id=member_id))
+        except Exception as exc:
+            logging.exception("manager upload failed: %s", exc)
+            # 帶錯誤訊息回頁面
+            return render_template("manager.html", context=None, member_id="", members=[], error=str(exc))
+
     member_id = (request.args.get("member_id") or "").strip()
     profiles = database.list_member_profiles()
     selectable_members = [profile for profile in profiles if profile.member_id]
@@ -344,32 +401,27 @@ def manager_dashboard_view():
     )
 
 
+# ========== 靜態與資產 ==========
 @app.get("/uploads/<path:filename>")
 def serve_upload_image(filename: str):
     return send_from_directory(UPLOAD_DIR, filename, conditional=True)
 
 
-# === VM 圖庫對外供圖（/ad-assets/<filename>） ===
 @app.get("/ad-assets/<path:filename>")
 def serve_ad_asset(filename: str):
     ads_dir = current_app.config.get("ADS_DIR") or ""
     if not ads_dir:
         abort(404)
-
-    # 安全拼接與邊界檢查
     safe_path = safe_join(ads_dir, filename)
     if not safe_path:
         abort(404)
-
     base = os.path.realpath(ads_dir)
     full = os.path.realpath(safe_path)
     if (not full.startswith(base)) or (not os.path.isfile(full)):
         abort(404)
-
     return send_from_directory(ads_dir, os.path.basename(full), conditional=True)
 
 
-# === 新樣式預覽（不影響 /ad/<member_id>）===
 @app.get("/ad-preview/<path:filename>")
 def ad_preview(filename: str):
     hero_image_url = url_for("serve_ad_asset", filename=filename)
@@ -383,7 +435,6 @@ def ad_preview(filename: str):
 # ---------------------------------------------------------------------------
 # Health checks
 # ---------------------------------------------------------------------------
-
 def _health_payload() -> dict:
     ads_dir = current_app.config.get("ADS_DIR") or ""
     ads_path = Path(ads_dir)
@@ -399,7 +450,7 @@ def _health_payload() -> dict:
         "ads_dir": ads_dir,
         "ads_dir_exists": exists,
         "ads_dir_sample": sample,
-        "static_example": "/static/hello.txt",  # 給 HEAD 測試用
+        "static_example": "/static/hello.txt",
     }
 
 
@@ -410,14 +461,12 @@ def health_check():
 
 @app.get("/healthz")
 def healthz_check():
-    # 與 /health 同內容，便於腳本/CI 復用
     return jsonify(_health_payload())
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
 def _manager_hero_image(profile, scenario_key: str) -> str | None:
     if profile and profile.first_image_filename:
         return url_for("serve_upload_image", filename=profile.first_image_filename)
@@ -425,19 +474,27 @@ def _manager_hero_image(profile, scenario_key: str) -> str | None:
 
 
 def _resolve_hero_image_url(scenario_key: str) -> str | None:
-    """優先使用 VM 圖庫（/ad-assets），缺檔時回退到 repo 內的 /static/images/ads。"""
     filename = AD_IMAGE_BY_SCENARIO.get(scenario_key) or AD_IMAGE_BY_SCENARIO.get("brand_new")
     if not filename:
         return None
-
     ads_dir = current_app.config.get("ADS_DIR") or ""
     if ads_dir:
         candidate = Path(ads_dir) / filename
         if candidate.is_file():
             return url_for("serve_ad_asset", filename=filename)
-
-    # fallback：讓畫面至少有圖（走 Flask static）
     return url_for("static", filename=f"images/ads/{filename}")
+
+
+def _ad_base_image_path(scenario_key: str) -> Path | None:
+    """找出實體檔案路徑（優先 ADS_DIR，否則走 repo 靜態）"""
+    filename = AD_IMAGE_BY_SCENARIO.get(scenario_key) or AD_IMAGE_BY_SCENARIO.get("brand_new")
+    if not filename:
+        return None
+    ads_dir = Path(current_app.config.get("ADS_DIR") or "")
+    if ads_dir and (ads_dir / filename).is_file():
+        return ads_dir / filename
+    fallback = STATIC_DIR / "images" / "ads" / filename
+    return fallback if fallback.is_file() else None
 
 
 def _extract_image_payload(req) -> Tuple[bytes, str]:
@@ -490,6 +547,78 @@ def _purge_upload_images(filenames: Iterable[str]) -> None:
                 path.unlink()
         except OSError as exc:
             logging.warning("Failed to delete old upload image %s: %s", path, exc)
+
+
+# --- 文案產生（無 Gemini 也會有 20 字內中文 copy） ---
+def _generate_creative_text(insights, profile, purchases) -> str:
+    """
+    產生短文案（<=20字）。策略：
+    1) 以 insights.recommended_item 或預測第一名為主
+    2) 針對常見類型給一句活潑標語
+    """
+    item = getattr(insights, "recommended_item", None) or ""
+    if not item:
+        # 嘗試從歷史推一個熱門
+        top = None
+        try:
+            preds = predict_next_purchases(purchases, profile=profile, insights=insights, limit=1)
+            if preds and isinstance(preds, list):
+                top = getattr(preds[0], "product_name", None) or getattr(preds[0], "item", None)
+        except Exception:
+            top = None
+        item = top or "本月精選"
+
+    # 超短句模板（20 字內）
+    templates = [
+        f"{item}熱銷回歸，限時搶！",
+        f"{item}精選推薦，錯過可惜！",
+        f"{item}人氣王，現在下單！",
+        f"今天就來一份 {item}！",
+        f"{item}新客加碼，快收藏！",
+        f"{item}專屬優惠，立即享有！",
+    ]
+    # 用 item 長度決定挑哪句，以免超過 20 字
+    for s in templates:
+        if len(s) <= 20:
+            return s
+    # 保底截斷
+    return (templates[0])[:20]
+
+
+def _load_font(pt: int):
+    """盡力載入支援中文的字型，最後退回 PIL 內建。"""
+    candidates = [
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJKtc-Regular.otf",
+        "/usr/share/fonts/truetype/noto/NotoSansTC-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            try:
+                return ImageFont.truetype(path, pt)
+            except Exception:
+                continue
+    return ImageFont.load_default()
+
+
+def _compose_ad_bitmap(base_image_path: str, text: str):
+    """把文案畫到圖片下方（半透明黑帶 + 白字）。"""
+    image = Image.open(base_image_path).convert("RGB")
+    W, H = image.size
+
+    # 半透明黑帶
+    band_h = int(H * 0.18)
+    overlay = Image.new("RGBA", (W, band_h), (0, 0, 0, 150))
+    image.paste(overlay, (0, H - band_h), overlay)
+
+    # 文字
+    font = _load_font(max(int(H * 0.06), 28))
+    draw = ImageDraw.Draw(image)
+    padding = int(0.04 * W)
+    draw.text((padding, H - band_h + int(0.2 * band_h)), text, fill=(255, 255, 255), font=font)
+
+    return image
 
 
 if __name__ == "__main__":
