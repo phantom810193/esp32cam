@@ -25,19 +25,19 @@
     <article id="customer-information">
       <h2 class="hide">顧客資料</h2>
 
-      <!-- 顧客照片 + 測試用上傳/正式用 ESP32-CAM 兩個按鈕 -->
+      <!-- 顧客照片：優先最新上傳；否則預設 -->
       <figure class="customer-photo">
         {% set photo_src = (context.hero_image_url if context and context.hero_image_url else url_for('static', filename='images/face.jpg')) %}
         <img src="{{ photo_src }}" alt="Customer Photo">
 
-        <!-- 測試階段：本地上傳圖片立即辨識 -->
+        <!-- 測試：本地上傳圖片立即辨識（POST 到 /manager） -->
         <form class="photo-upload" method="post" enctype="multipart/form-data" style="position:absolute;left:12px;top:12px;">
           <input id="image" name="image" type="file" accept="image/*" onchange="this.form.submit()" style="display:none">
           <label for="image" class="btn a" title="上傳圖片辨識"
                  style="display:inline-block;background:#1B6F15;color:#fff;padding:8px 14px;border-radius:12px;cursor:pointer;">上傳辨識</label>
         </form>
 
-        <!-- 正式階段：ESP32-CAM 拍照上傳 VM（你既有的 flow 就是打 /upload_face） -->
+        <!-- 正式：ESP32-CAM 導覽（可改為你的前台上傳流程） -->
         <a href="{{ url_for('index') }}" title="ESP32-CAM"
            style="position:absolute;left:110px;top:12px;background:#fff;color:#1B6F15;padding:8px 14px;border-radius:12px;text-decoration:none;border:1px solid #1B6F15;">ESP32-CAM</a>
       </figure>
@@ -50,7 +50,7 @@
           <li>會員編號：{{ context.member.mall_member_id if context and context.member and context.member.mall_member_id else "MEME0383FE3AA" }}</li>
           <li>會員狀態：{{ context.member.member_status if context and context.member and context.member.member_status else "有效" }}</li>
           <li>入會日期：{{ context.member.joined_at if context and context.member and context.member.joined_at else "2021-06-12" }}</li>
-          <li>點數餘額：{{ "%.0f"|format(context.member.points_balance) if context and context.member and context.member.points_balance is not none else "1,2840" }} 點</li>
+          <li>點數餘額：{{ "%.0f"|format(context.member.points_balance) if context and context.member and context.member.points_balance is not none else "12840" }} 點</li>
         </ul>
 
         <ul class="customer-contact-info">
@@ -82,7 +82,7 @@
         <h2 class="hide">顧客偏好</h2>
         <ul class="customer-preferencelist">
           <li><span>偏好商品類別</span>穀物 / 早餐、健康飲品</li>
-          <li><span>最近消費時間</span><i>{{ (context.prediction.window_label if context and context.prediction else "2天前") }}</i> 2025/09/25</li>
+          <li><span>最近消費時間</span><i>{{ (context.prediction.window_label if context and context.prediction else "—") }}</i></li>
           <li><span>本季消費頻率</span>每月 <i>4</i>次</li>
           <li><span>平均消費金額</span>NT$ <i>8,320</i></li>
         </ul>
@@ -103,7 +103,7 @@
             <li><a href="#tab-4" title="參與活動紀錄">參與活動紀錄</a></li>
           </ul>
 
-          <!-- Tab 1：感興趣商品推估（表格） -->
+          <!-- Tab 1：感興趣商品推估 -->
           <div class="tab-content-1">
             <h3 class="hide">感興趣商品推估</h3>
             <ul class="tool">
@@ -129,21 +129,15 @@
                     <td>{{ it.product_code }}</td>
                     <td>{{ it.product_name }}</td>
                     <td>{{ it.category_label }}</td>
-                    <td>${{ '%.0f'|format(it.price) }}</td>
+                    <td>NT$ {{ '%.0f'|format(it.price) }}</td>
                     <td>{{ '%.0f'|format(it.view_rate_percent or 0) }}%</td>
                     {% set prob = (it.probability_percent or 0) %}
                     <td><span class="{{ 'hight' if prob >= 80 else 'medium' }}">{{ '%.0f'|format(prob) }}%</span></td>
                   </tr>
                 {% endfor %}
               {% else %}
-                <!-- Demo 靜態列，沒資料時顯示 -->
-                <tr><td>100234</td><td>桂花牌有機澳洲燕麥片 500g</td><td>穀物 / 早餐</td><td>$250</td><td>85%</td><td><span class="hight">96%</span></td></tr>
-                <tr><td>204233</td><td>Light 能量蛋白棒 | 醇濃巧克力</td><td>健康飲品</td><td>$260</td><td>80%</td><td><span class="hight">92%</span></td></tr>
-                <tr><td>401022</td><td>冷壓綜合果汁 350ml</td><td>健康飲品</td><td>$95</td><td>75%</td><td><span class="hight">80%</span></td></tr>
-                <tr><td>305120</td><td>瑜伽墊止滑清潔噴霧</td><td>運動配件</td><td>$240</td><td>75%</td><td><span class="medium">70%</span></td></tr>
-                <tr><td>401022</td><td>無糖優格 200ml</td><td>健康飲品</td><td>$250</td><td>75%</td><td><span class="medium">68%</span></td></tr>
-                <tr><td>823144</td><td>冷壓蘋果果汁 350ml</td><td>健康飲品</td><td>$95</td><td>75%</td><td><span class="medium">67%</span></td></tr>
-                <tr><td>621412</td><td>橡膠啞鈴 14kg</td><td>運動配件</td><td>$395</td><td>72%</td><td><span class="medium">66%</span></td></tr>
+                <tr><td>100234</td><td>桂花牌有機澳洲燕麥片 500g</td><td>穀物 / 早餐</td><td>NT$250</td><td>85%</td><td><span class="hight">96%</span></td></tr>
+                <tr><td>204233</td><td>Light 能量蛋白棒 | 醇濃巧克力</td><td>健康飲品</td><td>NT$260</td><td>80%</td><td><span class="hight">92%</span></td></tr>
               {% endif %}
               </tbody>
             </table>
@@ -152,9 +146,10 @@
               <ul class="advertising_info">
                 <li class="btn">
                   {% if context and context.member_id %}
-                    <a href="{{ url_for('render_ad', member_id=context.member_id) }}" title="檢視生成廣告">檢視生成廣告</a>
+                    <!-- 直接開 /ad/<member_id>（若 Gemini 正常，會帶 AI 文案；否則本地 fallback） -->
+                    <a href="{{ url_for('render_ad', member_id=context.member_id) }}" title="檢視生成廣告" target="_blank" rel="noopener">檢視生成廣告</a>
                   {% else %}
-                    <a href="#" title="請先辨識或選擇顧客">檢視生成廣告</a>
+                    <a href="#" title="請先辨識或選擇顧客" onclick="alert('請先上傳照片或選擇顧客');return false;">檢視生成廣告</a>
                   {% endif %}
                 </li>
               </ul>
@@ -167,13 +162,38 @@
             </ul>
           </div>
 
+          <!-- Tab 2：歷史消費紀錄（這段原本是空的，補上渲染） -->
           <div class="tab-content-2">
             <h3 class="hide">歷史消費紀錄</h3>
             <ul class="tool">
               <li><a href="#" class="search">搜尋</a></li>
               <li><a href="#" class="filter">篩選</a></li>
             </ul>
-            <p>內容-2</p>
+
+            {% if context and context.prediction and context.prediction.history %}
+              <table>
+                <thead>
+                  <tr>
+                    <th>品項</th>
+                    <th>數量</th>
+                    <th>單價</th>
+                    <th>消費日期</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for p in context.prediction.history %}
+                    <tr>
+                      <td style="text-align:left">{{ p.item }}</td>
+                      <td>{{ '%.0f'|format(p.quantity) }}</td>
+                      <td>NT$ {{ '%.0f'|format(p.unit_price) }}</td>
+                      <td>{{ p.purchased_at }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% else %}
+              <p class="empty">尚無上一個月的消費資料</p>
+            {% endif %}
           </div>
 
           <div class="tab-content-3"><p>內容-3</p></div>
