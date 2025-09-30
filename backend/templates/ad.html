@@ -1,125 +1,65 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-Hant">
-  <head>
-    <meta charset="utf-8" />
-    <title>智慧零售廣告看板</title>
-    <meta http-equiv="refresh" content="5" />
-    <style>
-      body {
-        margin: 0;
-        font-family: "Noto Sans TC", "PingFang TC", sans-serif;
-        background: radial-gradient(circle at top, #fef3c7, #f8fafc);
-        color: #111827;
-      }
-      .banner {
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        min-height: 100vh;
-        text-align: center;
-        padding: 3rem 2rem;
-      }
-      h1 {
-        font-size: 3rem;
-        margin-bottom: 0.75rem;
-        color: #1d4ed8;
-      }
-      .subheading {
-        font-size: 1.5rem;
-        margin-bottom: 2rem;
-        color: #334155;
-        white-space: pre-line;
-      }
-      .member-code {
-        font-size: 1.1rem;
-        margin: 0.5rem 0 1.25rem;
-        color: #0f172a;
-      }
-      .highlight {
-        background: #ef4444;
-        color: white;
-        padding: 1.25rem 2rem;
-        border-radius: 1.5rem;
-        font-size: 1.75rem;
-        font-weight: 600;
-        box-shadow: 0 10px 30px rgba(239, 68, 68, 0.35);
-        max-width: 60rem;
-        white-space: pre-line;
-      }
-      .history {
-        margin-top: 3rem;
-        max-width: 70rem;
-        width: 100%;
-      }
-      .history h2 {
-        margin-bottom: 1rem;
-        font-size: 1.75rem;
-        color: #0f172a;
-      }
-      .history ul {
-        list-style: none;
-        padding: 0;
-        margin: 0;
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
-        gap: 1rem;
-      }
-      .history li {
-        background: white;
-        border-radius: 1rem;
-        padding: 1.25rem;
-        box-shadow: 0 10px 25px rgba(15, 23, 42, 0.08);
-      }
-      .history .item {
-        display: block;
-        font-size: 1.3rem;
-        font-weight: 600;
-        margin-bottom: 0.5rem;
-      }
-      .history .date,
-      .history .meta {
-        display: block;
-        color: #475569;
-      }
-      .history-empty {
-        margin-top: 2rem;
-        font-size: 1.25rem;
-        color: #1e293b;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="banner">
-      <h1>{{ context.headline }}</h1>
-      <div class="member-code">
-        {% if context.member_code %}
-        商場會員代號：{{ context.member_code }}
-        {% else %}
-        尚未綁定商場會員代號，歡迎至服務台完成綁定
-        {% endif %}
-      </div>
-      <div class="subheading">{{ context.subheading }}</div>
-      <div class="highlight">{{ context.highlight }}</div>
-      {% if context.purchases %}
-      <div class="history">
-        <h2>歷史消費紀錄</h2>
-        <ul>
-          {% for purchase in context.purchases %}
-          <li>
-            <span class="item">{{ purchase.item }}</span>
-            <span class="date">{{ purchase.purchased_at }}</span>
-            {% set qty = '{:g}'.format(purchase.quantity) %}
-            <span class="meta">
-              單價：${{ '%.0f'|format(purchase.unit_price) }}｜數量：{{ qty }}｜總價：${{ '%.0f'|format(purchase.total_price) }}
-            </span>
-          </li>
-          {% endfor %}
+<head>
+  <meta charset="utf-8">
+  <title>{{ page_title|default("智慧推播廣告") }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- 每 5 秒刷新；可用 refresh_sec 覆蓋 -->
+  <meta http-equiv="refresh" content="{{ refresh_sec|default(5) }}">
+
+  {# v2 才載入新版樣式 #}
+  {% if request.args.get('v2') %}
+    <link rel="preload" as="image" href="{{ hero_image_url|default('/images/ads/000.jpg') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/ads.css') }}">
+  {% endif %}
+
+  <style>
+    /* 簡易 fallback（當未啟用 v2 時顯示）；不干擾你其他全站樣式 */
+    :root{--fg:#111;--bg:#fff}
+    html,body{margin:0;background:var(--bg);color:var(--fg);
+      font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif}
+    .legacy-wrap{max-width:1080px;margin:0 auto;padding:20px}
+    .legacy-hero{display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap}
+    .legacy-hero img{max-width:56vw;max-height:70vh;height:auto;border-radius:12px}
+    .legacy-copy h1{margin:.25rem 0 0 0;font-size:1.8rem}
+    .legacy-copy p{margin:.25rem 0 .75rem}
+    .legacy-bullets{margin:0 0 .75rem 1rem}
+    .legacy-cta a{display:inline-block;padding:.6rem .9rem;border-radius:10px;background:#0ea5e9;color:#fff;text-decoration:none;font-weight:700}
+    .legacy-note{margin-top:.75rem;color:#666;font-size:.9rem}
+  </style>
+</head>
+<body>
+
+{% if request.args.get('v2') %}
+  {# 啟用新版區塊（partial + debug 開關） #}
+  {% set debug = (request.args.get('debug') == '1') %}
+  {% include "partials/ad_hero.html" %}
+
+{% else %}
+  {# 未啟用 v2：顯示簡易舊版視覺 fallback（安全預設，不需相依原版片段） #}
+  <div id="legacy-ad-root" class="legacy-wrap">
+    <div class="legacy-hero">
+      <img src="{{ hero_image_url|default('/images/ads/000.jpg') }}" alt="ad-hero">
+      <div class="legacy-copy">
+        <h1>{{ copy.title|default("智慧推播廣告") }}</h1>
+        <p>{{ copy.subtitle|default("依據歷史偏好或現場狀態，為顧客顯示更 relevant 的內容") }}</p>
+        {% set bullets = copy.bullets if copy and copy.bullets is defined and copy.bullets else ["入會好禮","生日禮金","點數回饋"] %}
+        <ul class="legacy-bullets">
+          {% for b in bullets %}<li>{{ b }}</li>{% endfor %}
         </ul>
+        {% if cta and cta.type == "join" %}
+          <div class="legacy-cta"><a href="{{ cta.href|default('#') }}">{{ cta.label|default("立即加入會員") }}</a></div>
+        {% elif cta and cta.type == "shop" %}
+          <div class="legacy-cta"><a href="{{ cta.href|default('#') }}">{{ cta.label|default("前往選購") }}</a></div>
+        {% endif %}
+        <div class="legacy-note">
+          <small>提示：在網址加上 <code>?v2=1</code> 可切換至新版樣式；
+          <code>?v2=1&debug=1</code> 顯示偵錯資訊。</small>
+        </div>
       </div>
-      {% else %}
-      <div class="history-empty">尚無歷史紀錄，立即開啟您的專屬優惠！</div>
-      {% endif %}
     </div>
-  </body>
+  </div>
+{% endif %}
+
+</body>
 </html>
