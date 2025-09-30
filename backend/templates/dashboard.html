@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>你的專屬折扣</title>
-    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <header>
@@ -23,7 +23,7 @@
         <article id="customer-information">
             <h2 class="hide">顧客資料</h2>
             <figure class="customer-photo">
-                <img src="images/face.jpg" alt="Customer Photo">
+                <img src="{{ url_for('static', filename='images/face.jpg') }}" alt="Customer Photo">
                 <!-- <figcaption>2025-09-26T07:53:51</figcaption> -->
             </figure>
             <section class="customer-infolist">

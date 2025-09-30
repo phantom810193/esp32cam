@@ -132,6 +132,11 @@ if _existing_event is not None:
 def index() -> str:
     return render_template("index.html")
 
+@app.get("/dashboard")
+def dashboard() -> str:
+    """Render the customer dashboard demo page."""
+    return render_template("dashboard.html")
+
 
 @app.post("/upload_face")
 def upload_face():
