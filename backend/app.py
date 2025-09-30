@@ -45,7 +45,12 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 ADS_DIR = os.environ.get("ADS_DIR", "/srv/esp32-ads")
 Path(ADS_DIR).mkdir(parents=True, exist_ok=True)
 
-app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
+app = Flask(
+    __name__,
+    template_folder=str(BASE_DIR / "templates"),
+    static_folder=str(BASE_DIR / "static"),
+    static_url_path="/static",
+)
 app.config["JSON_AS_ASCII"] = False
 app.config["ADS_DIR"] = ADS_DIR  # 儲存為字串路徑
 
@@ -324,15 +329,21 @@ def ad_preview(filename: str):
 def health_check():
     # 強化健康檢查，方便遠端排錯
     ads_dir = current_app.config.get("ADS_DIR") or ""
-    exists = os.path.isdir(ads_dir)
-    sample = []
-    try:
-        if exists:
-            sample = sorted(os.listdir(ads_dir))[:10]
-    except Exception:
-        sample = []
+    ads_path = Path(ads_dir)
+    exists = ads_path.is_dir()
+    sample: list[str] = []
+    if exists:
+        try:
+            sample = [entry.name for entry in sorted(ads_path.iterdir())[:10]]
+        except OSError:
+            sample = []
     return jsonify(
-        {"status": "ok", "ads_dir": ads_dir, "ads_dir_exists": exists, "ads_dir_sample": sample}
+        {
+            "status": "ok",
+            "ads_dir": ads_dir,
+            "ads_dir_exists": exists,
+            "ads_dir_sample": sample,
+        }
     )
 
 
@@ -346,10 +357,10 @@ def _resolve_hero_image_url(scenario_key: str) -> str | None:
         return None
 
     ads_dir = current_app.config.get("ADS_DIR") or ""
-    candidate = os.path.join(ads_dir, filename) if ads_dir else None
-
-    if candidate and os.path.isfile(candidate):
-        return url_for("serve_ad_asset", filename=filename)
+    if ads_dir:
+        candidate = Path(ads_dir) / filename
+        if candidate.is_file():
+            return url_for("serve_ad_asset", filename=filename)
 
     # fallback：讓畫面至少有圖（走 Flask static）
     return url_for("static", filename=f"images/ads/{filename}")
