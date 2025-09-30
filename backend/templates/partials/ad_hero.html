@@ -1,0 +1,38 @@
+<!-- backend/templates/partials/ad_hero.html -->
+<section class="ad-hero">
+  {% if debug|default(false) %}
+  <div class="debug-bar">
+    <strong>DEBUG</strong>
+    <span>scenario_key: {{ scenario_key|default("brand_new") }}</span>
+    <span>hero_image_url: {{ hero_image_url|default("/images/ads/000.jpg") }}</span>
+  </div>
+  {% endif %}
+
+  <div class="hero">
+    <img
+      src="{{ hero_image_url|default('/images/ads/000.jpg') }}"
+      alt="ad-hero"
+      class="hero-img"
+      loading="eager"
+      decoding="async"
+    />
+    <div class="hero-overlay"></div>
+
+    <div class="copy">
+      <h1 class="title">{{ copy.title|default("歡迎光臨！加入會員賺好禮") }}</h1>
+      <p class="subtitle">{{ copy.subtitle|default("新朋友限定，立即入會享專屬優惠") }}</p>
+
+      {% set bullets = copy.bullets if copy and copy.bullets is defined and copy.bullets else ["入會禮","生日禮","點數回饋"] %}
+      <ul class="bullets">
+        {% for b in bullets %}<li>• {{ b }}</li>{% endfor %}
+      </ul>
+
+      {% set cta_type = cta.type if cta and cta.type is defined else ("join" if scenario_key|default("brand_new") in ["brand_new","unregistered:fitness","unregistered:homemaker"] else "none") %}
+      {% if cta_type == "join" %}
+        <a class="btn btn-primary" href="{{ cta.href|default('#') }}">{{ cta.label|default("立即加入會員") }}</a>
+      {% elif cta_type == "shop" %}
+        <a class="btn" href="{{ cta.href|default('#') }}">{{ cta.label|default("前往選購") }}</a>
+      {% endif %}
+    </div>
+  </div>
+</section>
