@@ -31,6 +31,7 @@ from .advertising import (
 from .ai import GeminiService, GeminiUnavailableError
 from .aws import RekognitionService
 from .database import Database
+from .prediction import predict_next_purchases
 from .recognizer import FaceRecognizer
 
 logging.basicConfig(level=logging.INFO)
@@ -289,6 +290,50 @@ def member_directory():
     return render_template("members.html", members=directory)
 
 
+@app.get("/manager")
+def manager_dashboard_view():
+    member_id = (request.args.get("member_id") or "").strip()
+    profiles = database.list_member_profiles()
+    selectable_members = [profile for profile in profiles if profile.member_id]
+
+    selected_id = member_id or (selectable_members[0].member_id if selectable_members else "")
+    context: dict[str, object] | None = None
+    error: str | None = None
+
+    if selected_id:
+        purchases = database.get_purchase_history(selected_id)
+        profile = database.get_member_profile(selected_id)
+        insights = analyse_purchase_intent(purchases)
+        scenario_key = derive_scenario_key(insights, profile=profile)
+        hero_image_url = _manager_hero_image(profile, scenario_key)
+        prediction = predict_next_purchases(
+            purchases,
+            profile=profile,
+            insights=insights,
+            limit=7,
+        )
+
+        context = {
+            "member_id": selected_id,
+            "member": profile,
+            "analysis": insights,
+            "scenario_key": scenario_key,
+            "hero_image_url": hero_image_url,
+            "prediction": prediction,
+            "ad_url": url_for("render_ad", member_id=selected_id, v2=1, _external=False),
+        }
+    else:
+        error = "尚未建立任何會員資料"
+
+    return render_template(
+        "manager.html",
+        context=context,
+        member_id=member_id,
+        members=selectable_members,
+        error=error,
+    )
+
+
 @app.get("/uploads/<path:filename>")
 def serve_upload_image(filename: str):
     return send_from_directory(UPLOAD_DIR, filename, conditional=True)
@@ -350,6 +395,14 @@ def health_check():
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _manager_hero_image(profile, scenario_key: str) -> str | None:
+    if profile and profile.first_image_filename:
+        return url_for("serve_upload_image", filename=profile.first_image_filename)
+    return _resolve_hero_image_url(scenario_key)
+
+
 def _resolve_hero_image_url(scenario_key: str) -> str | None:
     """優先使用 VM 圖庫（/ad-assets），缺檔時回退到 repo 內的 /static/images/ads。"""
     filename = AD_IMAGE_BY_SCENARIO.get(scenario_key) or AD_IMAGE_BY_SCENARIO.get("brand_new")
