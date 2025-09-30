@@ -28,7 +28,7 @@ AD_IMAGE_BY_SCENARIO: dict[str, str] = {
     "registered:kindergarten": "ME0002.jpg",
     "registered:fitness": "ME0003.jpg",
 
-    # （保險）如果其它流程產生 repeat_purchase:<cat> 也能對應到相同圖
+    # （保險）如果流程產生 repeat_purchase:<cat> 也能對到相同圖
     "repeat_purchase:dessert": "ME0001.jpg",
     "repeat_purchase:kindergarten": "ME0002.jpg",
     "repeat_purchase:fitness": "ME0003.jpg",
@@ -140,7 +140,6 @@ def derive_scenario_key(
 
     # 若 persona 無法對到既有分群，嘗試用回購情境附加類別（若上層有實作）
     if insights.scenario.startswith("repeat_purchase"):
-        # 允許外部把 insights.recommended_item 轉成類別後放進 profile_label
         rp_key = f"repeat_purchase:{segment}"
         if rp_key in AD_IMAGE_BY_SCENARIO:
             return rp_key
@@ -224,7 +223,7 @@ def _fallback_copy(
     headline = f"{greeting}，預留了你的 {item}"
     subheading = f"{subheading_code}系統預測你對 {item} 的購買機率高達 {probability_text}"
     if latest_summary:
-        subheading += f"｜上次 {latest_summary}"
+        subheading += f"｜上次 {最新_summary}"
     highlight = f"{item} 今日限量再享會員專屬 88 折，結帳輸入 MEMBER95 加贈點數！"
     return headline, subheading, highlight
 
@@ -244,4 +243,12 @@ def _format_probability(probability: float) -> str:
     percentage = max(45, min(96, percentage))
     return f"{percentage}%"
 
-def _member_sal
+def _member_salutation(member_code: str) -> str:
+    if member_code:
+        return f"會員 {member_code}"
+    return "親愛的貴賓"
+
+def _subheading_prefix(member_code: str) -> str:
+    if member_code:
+        return f"商場會員代號：{member_code}｜"
+    return "尚未綁定商場會員，立即至服務台完成綁定享專屬禮遇｜"

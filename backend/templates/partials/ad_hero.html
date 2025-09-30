@@ -4,13 +4,13 @@
   <div class="debug-bar">
     <strong>DEBUG</strong>
     <span>scenario_key: {{ scenario_key|default("brand_new") }}</span>
-    <span>hero_image_url: {{ hero_image_url|default("/images/ads/000.jpg") }}</span>
+    <span>hero_image_url: {{ hero_image_url|default(url_for('static', filename='images/ads/ME0000.jpg')) }}</span>
   </div>
   {% endif %}
 
   <div class="hero">
     <img
-      src="{{ hero_image_url|default('/images/ads/000.jpg') }}"
+      src="{{ hero_image_url|default(url_for('static', filename='images/ads/ME0000.jpg')) }}"
       alt="ad-hero"
       class="hero-img"
       loading="eager"
