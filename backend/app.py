@@ -3,13 +3,16 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+
 import json
 import mimetypes
 from io import BytesIO
+
 from pathlib import Path
 from time import perf_counter
 from typing import Iterable, Tuple
 from uuid import uuid4
+
 from queue import Queue
 from threading import Lock
 
@@ -291,6 +294,7 @@ def render_ad(member_id: str):
     return render_template("ad.html", context=context)
 
 
+
 @app.get("/ad/latest")
 def render_latest_ad():
     context = _latest_ad_hub.snapshot()
@@ -406,6 +410,7 @@ def _persist_upload_image(member_id: str, image_bytes: bytes, mime_type: str) ->
     filename = f"{timestamp}_{unique_suffix}_{member_id}{extension}"
     path = UPLOAD_DIR / filename
     try:
+
         with Image.open(BytesIO(image_bytes)) as image:
             normalized = ImageOps.exif_transpose(image)
             save_kwargs: dict[str, object] = {}
@@ -422,6 +427,7 @@ def _persist_upload_image(member_id: str, image_bytes: bytes, mime_type: str) ->
         except OSError as write_exc:
             logging.warning("Failed to persist uploaded image %s: %s", path, write_exc)
             return None
+
     return filename
 
 

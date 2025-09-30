@@ -177,6 +177,7 @@ class Database:
                 "occupation",
                 "first_image_filename",
             ]
+
             if profile_columns:
                 if profile_columns != expected_profile_columns:
                     conn.execute("DROP TABLE IF EXISTS member_profiles")
@@ -554,6 +555,7 @@ class Database:
             birth_date=str(row["birth_date"]) if row["birth_date"] else None,
             phone=str(row["phone"]) if row["phone"] else None,
             email=str(row["email"]) if row["email"] else None,
+
             address=str(row["address"]) if row["address"] else None,
             occupation=str(row["occupation"]) if row["occupation"] else None,
             first_image_filename=
@@ -598,6 +600,7 @@ class Database:
                     birth_date=str(row["birth_date"]) if row["birth_date"] else None,
                     phone=str(row["phone"]) if row["phone"] else None,
                     email=str(row["email"]) if row["email"] else None,
+
                     address=str(row["address"]) if row["address"] else None,
                     occupation=str(row["occupation"]) if row["occupation"] else None,
                     first_image_filename=
@@ -1240,6 +1243,7 @@ class Database:
             email=None,
             address=None,
             occupation=None,
+
         )
 
     def _seed_member_history(
@@ -1284,6 +1288,7 @@ class Database:
         birth_date: str | None,
         phone: str | None,
         email: str | None,
+
         address: str | None,
         occupation: str | None,
     ) -> None:
