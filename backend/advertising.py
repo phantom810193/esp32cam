@@ -8,7 +8,6 @@ from typing import Iterable, Literal
 from .ai import AdCreative
 from .database import MemberProfile, Purchase
 
-
 # Persona → 商品/情境「細分鍵」對應
 # （把 home-manager 對到 homemaker；wellness-gourmet 併到 fitness，確保有對應圖片）
 PROFILE_SEGMENT_BY_LABEL: dict[str, str] = {
@@ -40,11 +39,9 @@ AD_IMAGE_BY_SCENARIO: dict[str, str] = {
     "unregistered:homemaker": "AD0001.jpg",
 }
 
-
 @dataclass
 class PurchaseInsights:
     """Summarised shopping intent derived from historical purchases."""
-
     scenario: Literal["brand_new", "repeat_purchase", "returning_member"]
     recommended_item: str | None
     probability: float
@@ -58,7 +55,6 @@ class PurchaseInsights:
             return 62
         return max(45, min(96, round(self.probability * 100)))
 
-
 @dataclass
 class AdContext:
     member_id: str
@@ -69,7 +65,6 @@ class AdContext:
     purchases: list[Purchase]
     insights: PurchaseInsights
     scenario_key: str
-
 
 def analyse_purchase_intent(
     purchases: Iterable[Purchase], *, new_member: bool = False
@@ -126,7 +121,6 @@ def analyse_purchase_intent(
         total_purchases=total_orders,
     )
 
-
 def derive_scenario_key(
     insights: PurchaseInsights, *, profile: MemberProfile | None = None
 ) -> str:
@@ -155,7 +149,6 @@ def derive_scenario_key(
 
     # 最終退回新客圖，避免空白
     return "brand_new"
-
 
 def build_ad_context(
     member_id: str,
@@ -196,12 +189,10 @@ def build_ad_context(
         scenario_key=scenario_key,
     )
 
-
 def _format_quantity(quantity: float) -> str:
     if quantity.is_integer():
         return str(int(quantity))
     return f"{quantity:.1f}"
-
 
 def _fallback_copy(
     greeting: str,
@@ -237,7 +228,6 @@ def _fallback_copy(
     highlight = f"{item} 今日限量再享會員專屬 88 折，結帳輸入 MEMBER95 加贈點數！"
     return headline, subheading, highlight
 
-
 def _recent_purchase_summary(purchases: list[Purchase]) -> str | None:
     if not purchases:
         return None
@@ -247,7 +237,6 @@ def _recent_purchase_summary(purchases: list[Purchase]) -> str | None:
         f"（{_format_quantity(latest.quantity)} 件）"
     )
 
-
 def _format_probability(probability: float) -> str:
     if probability <= 0:
         return "62%"
@@ -255,14 +244,4 @@ def _format_probability(probability: float) -> str:
     percentage = max(45, min(96, percentage))
     return f"{percentage}%"
 
-
-def _member_salutation(member_code: str) -> str:
-    if member_code:
-        return f"會員 {member_code}"
-    return "親愛的貴賓"
-
-
-def _subheading_prefix(member_code: str) -> str:
-    if member_code:
-        return f"商場會員代號：{member_code}｜"
-    return "尚未綁定商場會員，立即至服務台完成綁定享專屬禮遇｜"
+def _member_sal
