@@ -47,7 +47,7 @@ Path(ADS_DIR).mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
 app.config["JSON_AS_ASCII"] = False
-app.config["ADS_DIR"] = ADS_DIR  # 儲存為字串路徑，降低相容性問題
+app.config["ADS_DIR"] = ADS_DIR  # 儲存為字串路徑
 
 gemini = GeminiService()
 rekognition = RekognitionService()
@@ -168,10 +168,7 @@ def merge_members():
     prefer_source = bool(payload.get("prefer_source_encoding", False))
 
     if not source_id or not target_id:
-        return (
-            jsonify({"status": "error", "message": "source 與 target 參數必須提供"}),
-            400,
-        )
+        return jsonify({"status": "error", "message": "source 與 target 參數必須提供"}), 400
 
     try:
         source_encoding, target_encoding = database.merge_members(source_id, target_id)
@@ -195,18 +192,15 @@ def merge_members():
         database.update_member_encoding(target_id, source_encoding)
         encoding_updated = True
 
-    return (
-        jsonify(
-            {
-                "status": "ok",
-                "merged_member": source_id,
-                "into": target_id,
-                "deleted_cloud_faces": deleted_faces,
-                "encoding_updated": encoding_updated,
-            }
-        ),
-        200,
-    )
+    return jsonify(
+        {
+            "status": "ok",
+            "merged_member": source_id,
+            "into": target_id,
+            "deleted_cloud_faces": deleted_faces,
+            "encoding_updated": encoding_updated,
+        }
+    ), 200
 
 
 @app.get("/ad/<member_id>")
@@ -285,7 +279,6 @@ def member_directory():
         purchases = []
         if profile.member_id:
             purchases = database.get_purchase_history(profile.member_id)
-
         directory.append({"profile": profile, "purchases": purchases})
 
     return render_template("members.html", members=directory)
@@ -313,7 +306,6 @@ def serve_ad_asset(filename: str):
     if (not full.startswith(base)) or (not os.path.isfile(full)):
         abort(404)
 
-    # 僅傳遞檔名（扁平結構），避免路徑跳脫
     return send_from_directory(ads_dir, os.path.basename(full), conditional=True)
 
 
@@ -325,13 +317,12 @@ def ad_preview(filename: str):
         "ad.html",
         hero_image_url=hero_image_url,
         scenario_key=request.args.get("scenario_key", "brand_new"),
-        # 支援 v2/ debug 由模板參數控制
     )
 
 
 @app.get("/health")
 def health_check():
-    # 強化健康檢查，方便你遠端排錯
+    # 強化健康檢查，方便遠端排錯
     ads_dir = current_app.config.get("ADS_DIR") or ""
     exists = os.path.isdir(ads_dir)
     sample = []
@@ -341,12 +332,7 @@ def health_check():
     except Exception:
         sample = []
     return jsonify(
-        {
-            "status": "ok",
-            "ads_dir": ads_dir,
-            "ads_dir_exists": exists,
-            "ads_dir_sample": sample,
-        }
+        {"status": "ok", "ads_dir": ads_dir, "ads_dir_exists": exists, "ads_dir_sample": sample}
     )
 
 
@@ -354,10 +340,8 @@ def health_check():
 # Helpers
 # ---------------------------------------------------------------------------
 def _resolve_hero_image_url(scenario_key: str) -> str | None:
-    """優先使用 VM 圖庫（/ad-assets），缺檔時回退到 repo 內的 /images/ads。"""
-    filename = AD_IMAGE_BY_SCENARIO.get(scenario_key) or AD_IMAGE_BY_SCENARIO.get(
-        "brand_new"
-    )
+    """優先使用 VM 圖庫（/ad-assets），缺檔時回退到 repo 內的 /static/images/ads。"""
+    filename = AD_IMAGE_BY_SCENARIO.get(scenario_key) or AD_IMAGE_BY_SCENARIO.get("brand_new")
     if not filename:
         return None
 
@@ -367,8 +351,8 @@ def _resolve_hero_image_url(scenario_key: str) -> str | None:
     if candidate and os.path.isfile(candidate):
         return url_for("serve_ad_asset", filename=filename)
 
-    # fallback：讓畫面至少有圖
-    return f"/images/ads/{filename}"
+    # fallback：讓畫面至少有圖（走 Flask static）
+    return url_for("static", filename=f"images/ads/{filename}")
 
 
 def _extract_image_payload(req) -> Tuple[bytes, str]:
