@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime
 import mimetypes
+from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 from typing import Iterable, Tuple
@@ -40,11 +40,14 @@ DATA_DIR = BASE_DIR / "data"
 DB_PATH = DATA_DIR / "mvp.sqlite3"
 UPLOAD_DIR = DATA_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-ADS_DIR = Path(os.environ.get("ADS_DIR", "/srv/esp32-ads"))
+
+# === VM 外部圖庫設定（可透過環境變數覆蓋） ===
+ADS_DIR = os.environ.get("ADS_DIR", "/srv/esp32-ads")
+Path(ADS_DIR).mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
 app.config["JSON_AS_ASCII"] = False
-app.config["ADS_DIR"] = ADS_DIR
+app.config["ADS_DIR"] = ADS_DIR  # 儲存為字串路徑
 
 gemini = GeminiService()
 rekognition = RekognitionService()
@@ -68,7 +71,6 @@ def index() -> str:
 @app.post("/upload_face")
 def upload_face():
     """Receive an image from the ESP32-CAM and return the member identifier."""
-
     overall_start = perf_counter()
 
     try:
@@ -102,6 +104,8 @@ def upload_face():
     purchases = database.get_purchase_history(member_id)
     insights = analyse_purchase_intent(purchases, new_member=new_member)
     profile = database.get_member_profile(member_id)
+
+    # 只有非 brand_new 才呼叫 LLM 產生文案
     creative = None
     if gemini.can_generate_ads and insights.scenario != "brand_new":
         try:
@@ -139,7 +143,6 @@ def upload_face():
     _purge_upload_images(stale_images)
 
     scenario_key = derive_scenario_key(insights, profile=profile)
-
     hero_image_url = _resolve_hero_image_url(scenario_key)
 
     payload = {
@@ -159,17 +162,13 @@ def upload_face():
 @app.post("/members/merge")
 def merge_members():
     """Merge two member identifiers when the same face was duplicated."""
-
     payload = request.get_json(silent=True) or {}
     source_id = str(payload.get("source") or "").strip()
     target_id = str(payload.get("target") or "").strip()
     prefer_source = bool(payload.get("prefer_source_encoding", False))
 
     if not source_id or not target_id:
-        return (
-            jsonify({"status": "error", "message": "source 與 target 參數必須提供"}),
-            400,
-        )
+        return jsonify({"status": "error", "message": "source 與 target 參數必須提供"}), 400
 
     try:
         source_encoding, target_encoding = database.merge_members(source_id, target_id)
@@ -193,18 +192,15 @@ def merge_members():
         database.update_member_encoding(target_id, source_encoding)
         encoding_updated = True
 
-    return (
-        jsonify(
-            {
-                "status": "ok",
-                "merged_member": source_id,
-                "into": target_id,
-                "deleted_cloud_faces": deleted_faces,
-                "encoding_updated": encoding_updated,
-            }
-        ),
-        200,
-    )
+    return jsonify(
+        {
+            "status": "ok",
+            "merged_member": source_id,
+            "into": target_id,
+            "deleted_cloud_faces": deleted_faces,
+            "encoding_updated": encoding_updated,
+        }
+    ), 200
 
 
 @app.get("/ad/<member_id>")
@@ -212,6 +208,7 @@ def render_ad(member_id: str):
     purchases = database.get_purchase_history(member_id)
     insights = analyse_purchase_intent(purchases)
     profile = database.get_member_profile(member_id)
+
     creative = None
     if gemini.can_generate_ads and insights.scenario != "brand_new":
         try:
@@ -232,6 +229,7 @@ def render_ad(member_id: str):
             )
         except GeminiUnavailableError as exc:
             logging.warning("Gemini ad generation unavailable: %s", exc)
+
     context = build_ad_context(
         member_id,
         purchases,
@@ -240,6 +238,7 @@ def render_ad(member_id: str):
         creative=creative,
     )
     hero_image_url = _resolve_hero_image_url(context.scenario_key)
+
     return render_template(
         "ad.html",
         context=context,
@@ -280,7 +279,6 @@ def member_directory():
         purchases = []
         if profile.member_id:
             purchases = database.get_purchase_history(profile.member_id)
-
         directory.append({"profile": profile, "purchases": purchases})
 
     return render_template("members.html", members=directory)
@@ -288,75 +286,73 @@ def member_directory():
 
 @app.get("/uploads/<path:filename>")
 def serve_upload_image(filename: str):
-    return send_from_directory(UPLOAD_DIR, filename)
+    return send_from_directory(UPLOAD_DIR, filename, conditional=True)
 
 
+# === VM 圖庫對外供圖（/ad-assets/<filename>） ===
 @app.get("/ad-assets/<path:filename>")
 def serve_ad_asset(filename: str):
-    ads_dir = current_app.config.get("ADS_DIR")
+    ads_dir = current_app.config.get("ADS_DIR") or ""
     if not ads_dir:
         abort(404)
 
-    ads_path = Path(ads_dir)
-    safe_path = safe_join(str(ads_path), filename)
+    # 安全拼接與邊界檢查
+    safe_path = safe_join(ads_dir, filename)
     if not safe_path:
         abort(404)
 
-    candidate = Path(safe_path)
-    if not candidate.is_file():
+    base = os.path.realpath(ads_dir)
+    full = os.path.realpath(safe_path)
+    if (not full.startswith(base)) or (not os.path.isfile(full)):
         abort(404)
 
-    try:
-        relative_path = candidate.relative_to(ads_path)
-    except ValueError:
-        abort(404)
+    return send_from_directory(ads_dir, os.path.basename(full), conditional=True)
 
-    return send_from_directory(str(ads_path), str(relative_path))
+
+# === 新樣式預覽（不影響 /ad/<member_id>）===
+@app.get("/ad-preview/<path:filename>")
+def ad_preview(filename: str):
+    hero_image_url = url_for("serve_ad_asset", filename=filename)
+    return render_template(
+        "ad.html",
+        hero_image_url=hero_image_url,
+        scenario_key=request.args.get("scenario_key", "brand_new"),
+    )
 
 
 @app.get("/health")
 def health_check():
-    ads_dir = current_app.config.get("ADS_DIR")
-    ads_dir_path = Path(ads_dir) if ads_dir else None
-    sample: list[str] = []
-    if ads_dir_path and ads_dir_path.is_dir():
-        sample = sorted(
-            [entry.name for entry in ads_dir_path.iterdir() if entry.is_file()]
-        )[:5]
-
-    return {
-        "status": "ok",
-        "ads_dir": str(ads_dir) if ads_dir else None,
-        "ads_dir_sample": sample,
-    }
+    # 強化健康檢查，方便遠端排錯
+    ads_dir = current_app.config.get("ADS_DIR") or ""
+    exists = os.path.isdir(ads_dir)
+    sample = []
+    try:
+        if exists:
+            sample = sorted(os.listdir(ads_dir))[:10]
+    except Exception:
+        sample = []
+    return jsonify(
+        {"status": "ok", "ads_dir": ads_dir, "ads_dir_exists": exists, "ads_dir_sample": sample}
+    )
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 def _resolve_hero_image_url(scenario_key: str) -> str | None:
-    preferred_filename = AD_IMAGE_BY_SCENARIO.get(scenario_key)
-    default_filename = AD_IMAGE_BY_SCENARIO.get("brand_new")
-    filename = preferred_filename or default_filename
-
+    """優先使用 VM 圖庫（/ad-assets），缺檔時回退到 repo 內的 /static/images/ads。"""
+    filename = AD_IMAGE_BY_SCENARIO.get(scenario_key) or AD_IMAGE_BY_SCENARIO.get("brand_new")
     if not filename:
         return None
 
-    ads_dir = current_app.config.get("ADS_DIR")
+    ads_dir = current_app.config.get("ADS_DIR") or ""
+    candidate = os.path.join(ads_dir, filename) if ads_dir else None
 
-    if ads_dir:
-        ads_path = Path(ads_dir)
-        candidate = ads_path / filename
-        if candidate.is_file():
-            return url_for("serve_ad_asset", filename=filename)
+    if candidate and os.path.isfile(candidate):
+        return url_for("serve_ad_asset", filename=filename)
 
-        if default_filename and default_filename != filename:
-            fallback_candidate = ads_path / default_filename
-            if fallback_candidate.is_file():
-                return url_for("serve_ad_asset", filename=default_filename)
-
-    static_filename = preferred_filename or default_filename or filename
-    return f"/images/ads/{static_filename}"
+    # fallback：讓畫面至少有圖（走 Flask static）
+    return url_for("static", filename=f"images/ads/{filename}")
 
 
 def _extract_image_payload(req) -> Tuple[bytes, str]:
@@ -412,5 +408,5 @@ def _purge_upload_images(filenames: Iterable[str]) -> None:
 
 
 if __name__ == "__main__":
+    # 開發模式直接啟動；部署請用 gunicorn / systemd 並確保帶入 ADS_DIR
     app.run(host="0.0.0.0", port=8000, debug=True)
-

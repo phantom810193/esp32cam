@@ -8,7 +8,8 @@ from typing import Iterable, Literal
 from .ai import AdCreative
 from .database import MemberProfile, Purchase
 
-
+# Persona → 商品/情境「細分鍵」對應
+# （把 home-manager 對到 homemaker；wellness-gourmet 併到 fitness，確保有對應圖片）
 PROFILE_SEGMENT_BY_LABEL: dict[str, str] = {
     "dessert-lover": "dessert",
     "family-groceries": "kindergarten",
@@ -17,25 +18,30 @@ PROFILE_SEGMENT_BY_LABEL: dict[str, str] = {
     "wellness-gourmet": "fitness",
 }
 
-
+# 廣告主視覺檔名對應表（由 app.py 的 _resolve_hero_image_url 使用）
 AD_IMAGE_BY_SCENARIO: dict[str, str] = {
+    # 1) 全新顧客（資料庫完全無歷史） → 固定文案圖
     "brand_new": "ME0000.jpg",
-    "registered:fitness": "ME0003.jpg",
+
+    # 2) 已註冊會員（依商品類別）
     "registered:dessert": "ME0001.jpg",
     "registered:kindergarten": "ME0002.jpg",
-    "unregistered:fitness": "AD0000.jpg",
-    "unregistered:homemaker": "AD0001.jpg",
-    "repeat_purchase:fitness": "ME0003.jpg",
+    "registered:fitness": "ME0003.jpg",
+
+    # （保險）如果流程產生 repeat_purchase:<cat> 也能對到相同圖
     "repeat_purchase:dessert": "ME0001.jpg",
     "repeat_purchase:kindergarten": "ME0002.jpg",
-    "repeat_purchase": "ME0001.jpg",
-}
+    "repeat_purchase:fitness": "ME0003.jpg",
+    "repeat_purchase": "ME0001.jpg",  # 無類別時的備援
 
+    # 3) 未註冊會員但有明顯偏好（引導入會）
+    "unregistered:fitness": "AD0000.jpg",
+    "unregistered:homemaker": "AD0001.jpg",
+}
 
 @dataclass
 class PurchaseInsights:
     """Summarised shopping intent derived from historical purchases."""
-
     scenario: Literal["brand_new", "repeat_purchase", "returning_member"]
     recommended_item: str | None
     probability: float
@@ -45,11 +51,9 @@ class PurchaseInsights:
     @property
     def probability_percent(self) -> int:
         """Return a user-friendly percentage for template rendering."""
-
         if self.probability <= 0:
             return 62
         return max(45, min(96, round(self.probability * 100)))
-
 
 @dataclass
 class AdContext:
@@ -62,17 +66,14 @@ class AdContext:
     insights: PurchaseInsights
     scenario_key: str
 
-
 def analyse_purchase_intent(
     purchases: Iterable[Purchase], *, new_member: bool = False
 ) -> PurchaseInsights:
     """Estimate what should be promoted based on the shopper's history."""
-
     purchase_list = list(purchases)
     total_orders = len(purchase_list)
 
-    # Treat the welcome gift as "no real history" so that brand-new members
-    # still receive the onboarding style advertisement.
+    # 把歡迎禮視為「尚無真實消費史」，保留新客 onboarding 體驗
     if purchase_list and total_orders == 1:
         only_item = purchase_list[0].item.strip()
         if only_item == "歡迎禮盒":
@@ -93,8 +94,7 @@ def analyse_purchase_intent(
 
     for index, purchase in enumerate(purchase_list):
         item = purchase.item.strip()
-        # Recent purchases should have a higher impact – weight them slightly
-        # more by decaying with the position in the list.
+        # 越新的權重略高（簡單遞減）
         weight = 1.0 + max(0, 10 - index) * 0.05
         total_weight += weight
         frequency[item] += 1
@@ -121,37 +121,33 @@ def analyse_purchase_intent(
         total_purchases=total_orders,
     )
 
-
 def derive_scenario_key(
     insights: PurchaseInsights, *, profile: MemberProfile | None = None
 ) -> str:
     """Convert insights and persona data into a marketing scenario key."""
-
     if insights.scenario == "brand_new":
         return "brand_new"
 
     profile_label = getattr(profile, "profile_label", "")
-    segment = PROFILE_SEGMENT_BY_LABEL.get(profile_label)
+    segment = PROFILE_SEGMENT_BY_LABEL.get(profile_label, "general")
     registered = bool(getattr(profile, "mall_member_id", ""))
+
+    # 優先用會員狀態 + persona 分群來挑 hero 圖
     prefix = "registered" if registered else "unregistered"
-    candidate_keys: list[str] = []
+    scenario_key = f"{prefix}:{segment}"
+    if scenario_key in AD_IMAGE_BY_SCENARIO:
+        return scenario_key
 
-    if insights.scenario == "repeat_purchase":
-        if segment:
-            candidate_keys.append(f"repeat_purchase:{segment}")
-        candidate_keys.append("repeat_purchase")
+    # 若 persona 無法對到既有分群，嘗試用回購情境附加類別（若上層有實作）
+    if insights.scenario.startswith("repeat_purchase"):
+        rp_key = f"repeat_purchase:{segment}"
+        if rp_key in AD_IMAGE_BY_SCENARIO:
+            return rp_key
+        if "repeat_purchase" in AD_IMAGE_BY_SCENARIO:
+            return "repeat_purchase"
 
-    if segment:
-        candidate_keys.append(f"{prefix}:{segment}")
-
-    candidate_keys.append("brand_new")
-
-    for key in candidate_keys:
-        if key in AD_IMAGE_BY_SCENARIO:
-            return key
-
+    # 最終退回新客圖，避免空白
     return "brand_new"
-
 
 def build_ad_context(
     member_id: str,
@@ -192,12 +188,10 @@ def build_ad_context(
         scenario_key=scenario_key,
     )
 
-
 def _format_quantity(quantity: float) -> str:
     if quantity.is_integer():
         return str(int(quantity))
     return f"{quantity:.1f}"
-
 
 def _fallback_copy(
     greeting: str,
@@ -212,22 +206,16 @@ def _fallback_copy(
         subheading = (
             f"{subheading_code}第一次到店，立即加入會員解鎖紅利點數、生日禮與本週專屬折扣"
         )
-        highlight = (
-            "掃描服務台 QR Code 馬上入會，今日完成註冊送咖啡招待與 120 點開卡禮！"
-        )
+        highlight = "掃描服務台 QR Code 馬上入會，今日完成註冊送咖啡招待與 120 點開卡禮！"
         return headline, subheading, highlight
 
     if insights.scenario == "repeat_purchase":
         item = insights.recommended_item or (purchases[0].item if purchases else "人氣商品")
         headline = f"{greeting}，{item} 回購加碼！"
-        subheading = (
-            f"{subheading_code}最近 {insights.repeat_count} 次都選擇了 {item}"
-        )
+        subheading = f"{subheading_code}最近 {insights.repeat_count} 次都選擇了 {item}"
         if latest_summary:
             subheading += f"｜上次 {latest_summary}"
-        highlight = (
-            f"{item} 會員限定：第 {insights.repeat_count + 1} 件 82 折，再贈職人限定隨行包！"
-        )
+        highlight = f"{item} 會員限定：第 {insights.repeat_count + 1} 件 82 折，再贈職人限定隨行包！"
         return headline, subheading, highlight
 
     item = insights.recommended_item or (purchases[0].item if purchases else "人氣商品")
@@ -235,12 +223,9 @@ def _fallback_copy(
     headline = f"{greeting}，預留了你的 {item}"
     subheading = f"{subheading_code}系統預測你對 {item} 的購買機率高達 {probability_text}"
     if latest_summary:
-        subheading += f"｜上次 {latest_summary}"
-    highlight = (
-        f"{item} 今日限量再享會員專屬 88 折，結帳輸入 MEMBER95 加贈點數！"
-    )
+        subheading += f"｜上次 {最新_summary}"
+    highlight = f"{item} 今日限量再享會員專屬 88 折，結帳輸入 MEMBER95 加贈點數！"
     return headline, subheading, highlight
-
 
 def _recent_purchase_summary(purchases: list[Purchase]) -> str | None:
     if not purchases:
@@ -251,7 +236,6 @@ def _recent_purchase_summary(purchases: list[Purchase]) -> str | None:
         f"（{_format_quantity(latest.quantity)} 件）"
     )
 
-
 def _format_probability(probability: float) -> str:
     if probability <= 0:
         return "62%"
@@ -259,15 +243,12 @@ def _format_probability(probability: float) -> str:
     percentage = max(45, min(96, percentage))
     return f"{percentage}%"
 
-
 def _member_salutation(member_code: str) -> str:
     if member_code:
         return f"會員 {member_code}"
     return "親愛的貴賓"
 
-
 def _subheading_prefix(member_code: str) -> str:
     if member_code:
         return f"商場會員代號：{member_code}｜"
     return "尚未綁定商場會員，立即至服務台完成綁定享專屬禮遇｜"
-

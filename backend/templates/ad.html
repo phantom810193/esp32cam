@@ -1,178 +1,122 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-Hant">
-  <head>
-    <meta charset="utf-8" />
-    <title>智慧零售廣告看板</title>
-    <meta http-equiv="refresh" content="5" />
+<head>
+  <meta charset="utf-8" />
+  <title>{{ page_title|default("智慧推播廣告") }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- 每 5 秒刷新；可用 refresh_sec 覆蓋 -->
+  <meta http-equiv="refresh" content="{{ refresh_sec|default(5) }}">
+
+  {# v2 才載入新版樣式（partial 使用的 CSS） #}
+  {% if request.args.get('v2') %}
+    <link rel="preload" as="image" href="{{ hero_image_url|default(url_for('static', filename='images/ads/ME0000.jpg')) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/ads.css') }}">
+  {% else %}
+    {# 舊版樣式：沿用 Codex 的設計（不動你的既有行為） #}
     <style>
-      body {
-        margin: 0;
-        font-family: "Noto Sans TC", "PingFang TC", sans-serif;
-        background: radial-gradient(circle at top, #fef3c7, #f8fafc);
-        color: #111827;
-      }
-      .banner {
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        min-height: 100vh;
-        text-align: center;
-        padding: 3rem 2rem;
-      }
-      .hero {
-        width: min(72rem, 90vw);
-        margin-bottom: 2.5rem;
-        border-radius: 2rem;
-        overflow: hidden;
-        box-shadow: 0 25px 50px rgba(15, 23, 42, 0.18);
-      }
-      .hero img {
-        width: 100%;
-        height: auto;
-        display: block;
-      }
-      h1 {
-        font-size: 3rem;
-        margin-bottom: 0.75rem;
-        color: #1d4ed8;
-      }
-      .subheading {
-        font-size: 1.5rem;
-        margin-bottom: 2rem;
-        color: #334155;
-        white-space: pre-line;
-      }
-      .member-code {
-        font-size: 1.1rem;
-        margin: 0.5rem 0 1.25rem;
-        color: #0f172a;
-      }
-      .highlight {
-        background: #ef4444;
-        color: white;
-        padding: 1.25rem 2rem;
-        border-radius: 1.5rem;
-        font-size: 1.75rem;
-        font-weight: 600;
-        box-shadow: 0 10px 30px rgba(239, 68, 68, 0.35);
-        max-width: 60rem;
-        white-space: pre-line;
-      }
-      .insight-card {
-        margin-top: 2rem;
-        background: rgba(255, 255, 255, 0.85);
-        border-radius: 1.25rem;
-        padding: 1.5rem 2rem;
-        box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
-        max-width: 56rem;
-        color: #1f2937;
-      }
-      .insight-card .badge {
-        display: inline-block;
-        padding: 0.35rem 0.9rem;
-        border-radius: 999px;
-        background: #1d4ed8;
-        color: white;
-        font-size: 0.9rem;
-        margin-bottom: 0.75rem;
-        letter-spacing: 0.08em;
-      }
-      .insight-card p {
-        margin: 0.25rem 0;
-        line-height: 1.6;
-        font-size: 1.05rem;
-      }
-      .history {
-        margin-top: 3rem;
-        max-width: 70rem;
-        width: 100%;
-      }
-      .history h2 {
-        margin-bottom: 1rem;
-        font-size: 1.75rem;
-        color: #0f172a;
-      }
-      .history ul {
-        list-style: none;
-        padding: 0;
-        margin: 0;
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
-        gap: 1rem;
-      }
-      .history li {
-        background: white;
-        border-radius: 1rem;
-        padding: 1.25rem;
-        box-shadow: 0 10px 25px rgba(15, 23, 42, 0.08);
-      }
-      .history .item {
-        display: block;
-        font-size: 1.3rem;
-        font-weight: 600;
-        margin-bottom: 0.5rem;
-      }
-      .history .date,
-      .history .meta {
-        display: block;
-        color: #475569;
-      }
-      .history-empty {
-        margin-top: 2rem;
-        font-size: 1.25rem;
-        color: #1e293b;
-      }
+      body { margin:0; font-family:"Noto Sans TC","PingFang TC",sans-serif;
+        background: radial-gradient(circle at top, #fef3c7, #f8fafc); color:#111827; }
+      .banner { display:flex; flex-direction:column; justify-content:center; align-items:center;
+        min-height:100vh; text-align:center; padding:3rem 2rem; }
+      .hero { width:min(72rem, 90vw); margin-bottom:2.5rem; border-radius:2rem; overflow:hidden;
+        box-shadow:0 25px 50px rgba(15,23,42,.18); }
+      .hero img { width:100%; height:auto; display:block; }
+      h1 { font-size:3rem; margin-bottom:.75rem; color:#1d4ed8; }
+      .subheading { font-size:1.5rem; margin-bottom:2rem; color:#334155; white-space:pre-line; }
+      .member-code { font-size:1.1rem; margin:.5rem 0 1.25rem; color:#0f172a; }
+      .highlight { background:#ef4444; color:#fff; padding:1.25rem 2rem; border-radius:1.5rem;
+        font-size:1.75rem; font-weight:600; box-shadow:0 10px 30px rgba(239,68,68,.35);
+        max-width:60rem; white-space:pre-line; }
+      .insight-card { margin-top:2rem; background:rgba(255,255,255,.85); border-radius:1.25rem;
+        padding:1.5rem 2rem; box-shadow:0 12px 28px rgba(15,23,42,.12); max-width:56rem; color:#1f2937; }
+      .insight-card .badge { display:inline-block; padding:.35rem .9rem; border-radius:999px;
+        background:#1d4ed8; color:#fff; font-size:.9rem; margin-bottom:.75rem; letter-spacing:.08em; }
+      .insight-card p { margin:.25rem 0; line-height:1.6; font-size:1.05rem; }
+      .history { margin-top:3rem; max-width:70rem; width:100%; }
+      .history h2 { margin-bottom:1rem; font-size:1.75rem; color:#0f172a; }
+      .history ul { list-style:none; padding:0; margin:0; display:grid;
+        grid-template-columns:repeat(auto-fit,minmax(16rem,1fr)); gap:1rem; }
+      .history li { background:#fff; border-radius:1rem; padding:1.25rem; box-shadow:0 10px 25px rgba(15,23,42,.08); }
+      .history .item { display:block; font-size:1.3rem; font-weight:600; margin-bottom:.5rem; }
+      .history .date, .history .meta { display:block; color:#475569; }
+      .history-empty { margin-top:2rem; font-size:1.25rem; color:#1e293b; }
     </style>
-  </head>
-  <body>
-    <div class="banner">
-      {% include "partials/ad_hero.html" %}
-      <h1>{{ context.headline }}</h1>
-      <div class="member-code">
-        {% if context.member_code %}
+  {% endif %}
+</head>
+<body>
+
+{% if request.args.get('v2') %}
+  {# 新版樣式：partial（帶 debug 支援） #}
+  {% set debug = (request.args.get('debug') == '1') %}
+  {% include "partials/ad_hero.html" %}
+
+{% else %}
+  {# 舊版樣式（Codex 版）：保留 insight 卡片與歷史清單 #}
+  <div class="banner">
+    <div class="hero">
+      <img src="{{ hero_image_url|default(url_for('static', filename='images/ads/ME0000.jpg')) }}"
+           alt="廣告主視覺 {{ (scenario_key or (context.insights.scenario if context and context.insights is defined else '')) | default('') }}">
+    </div>
+
+    <h1>{{ (context.headline if context and context.headline is defined else (copy.title if copy and copy.title is defined else "智慧零售廣告看板")) }}</h1>
+
+    <div class="member-code">
+      {% if context and context.member_code %}
         商場會員代號：{{ context.member_code }}
-        {% else %}
+      {% else %}
         尚未綁定商場會員代號，歡迎至服務台完成綁定
-        {% endif %}
-      </div>
-      <div class="subheading">{{ context.subheading }}</div>
-      <div class="highlight">{{ context.highlight }}</div>
-      <div class="insight-card">
-        {% set scenario = context.insights.scenario %}
-        {% if scenario == 'brand_new' %}
-          <span class="badge">新客偵測</span>
-          <p>第一次來店，尚未累積消費紀錄，立即推播加入會員與公版歡迎廣告。</p>
-          <p>完成註冊即可領取開卡禮，並於現場啟用專屬折扣。</p>
-        {% elif scenario == 'repeat_purchase' %}
-          <span class="badge">回購洞察</span>
-          <p>近期 {{ context.insights.repeat_count }} 次都選擇「{{ context.insights.recommended_item }}」，系統自動生成此商品的個人化推播。</p>
-          <p>建議同步展示加價購組合或升級方案，提高客單價。</p>
-        {% else %}
-          <span class="badge">老會員預測</span>
-          <p>根據歷史消費，AI 預估再次購買「{{ context.insights.recommended_item }}」的機率約 {{ context.insights.probability_percent }}%。</p>
-          <p>推播會員專屬優惠，並提醒可於收銀台加碼點數。</p>
-        {% endif %}
-      </div>
-      {% if context.purchases %}
+      {% endif %}
+    </div>
+
+    <div class="subheading">
+      {{ (context.subheading if context and context.subheading is defined else (copy.subtitle if copy and copy.subtitle is defined else "")) }}
+    </div>
+
+    <div class="highlight">
+      {{ (context.highlight if context and context.highlight is defined
+          else (copy.bullets|default(["入會禮","生日禮","點數回饋"])|join(" · "))) }}
+    </div>
+
+    <div class="insight-card">
+      {% set scenario = (context.insights.scenario if context and context.insights is defined and context.insights.scenario is defined else scenario_key|default('')) %}
+      {% if scenario == 'brand_new' %}
+        <span class="badge">新客偵測</span>
+        <p>第一次來店，尚未累積消費紀錄，立即推播加入會員與公版歡迎廣告。</p>
+        <p>完成註冊即可領取開卡禮，並於現場啟用專屬折扣。</p>
+      {% elif scenario == 'repeat_purchase' %}
+        <span class="badge">回購洞察</span>
+        <p>近期 {{ context.insights.repeat_count if context and context.insights is defined and context.insights.repeat_count is defined else "多次" }} 次都選擇「{{ context.insights.recommended_item if context and context.insights is defined and context.insights.recommended_item is defined else "熱門品項" }}」，系統自動生成此商品的個人化推播。</p>
+        <p>建議同步展示加價購組合或升級方案，提高客單價。</p>
+      {% else %}
+        <span class="badge">老會員預測</span>
+        <p>根據歷史消費，AI 預估再次購買「{{ context.insights.recommended_item if context and context.insights is defined and context.insights.recommended_item is defined else "偏好品項" }}」的機率約 {{ context.insights.probability_percent if context and context.insights is defined and context.insights.probability_percent is defined else "—" }}。</p>
+        <p>推播會員專屬優惠，並提醒可於收銀台加碼點數。</p>
+      {% endif %}
+    </div>
+
+    {% if context and context.purchases %}
       <div class="history">
         <h2>歷史消費紀錄</h2>
         <ul>
           {% for purchase in context.purchases %}
-          <li>
-            <span class="item">{{ purchase.item }}</span>
-            <span class="date">{{ purchase.purchased_at }}</span>
-            {% set qty = '{:g}'.format(purchase.quantity) %}
-            <span class="meta">
-              單價：${{ '%.0f'|format(purchase.unit_price) }}｜數量：{{ qty }}｜總價：${{ '%.0f'|format(purchase.total_price) }}
-            </span>
-          </li>
+            <li>
+              <span class="item">{{ purchase.item }}</span>
+              <span class="date">{{ purchase.purchased_at }}</span>
+              {% set qty = '{:g}'.format(purchase.quantity) if purchase.quantity is defined else '1' %}
+              <span class="meta">
+                單價：${{ '%.0f'|format(purchase.unit_price) if purchase.unit_price is defined else '—' }}
+                ｜數量：{{ qty }}
+                ｜總價：${{ '%.0f'|format(purchase.total_price) if purchase.total_price is defined else '—' }}
+              </span>
+            </li>
           {% endfor %}
         </ul>
       </div>
-      {% else %}
-      <div class="history-empty">尚無歷史紀錄，立即開啟您的專屬優惠！</div>
-      {% endif %}
-    </div>
-  </body>
+    {% else %}
+      <div class="history history-empty">尚無消費紀錄</div>
+    {% endif %}
+  </div>
+{% endif %}
+
+</body>
 </html>
