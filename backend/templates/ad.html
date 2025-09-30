@@ -7,9 +7,12 @@
   <!-- 每 5 秒刷新；可用 refresh_sec 覆蓋 -->
   <meta http-equiv="refresh" content="{{ refresh_sec|default(5) }}">
 
-  {# v2 才載入新版樣式（partial 使用的 CSS） #}
-  {% if request.args.get('v2') %}
-    <link rel="preload" as="image" href="{{ hero_image_url|default(url_for('static', filename='images/ads/ME0000.jpg')) }}">
+  {% set is_v2 = request.args.get('v2') == '1' %}
+  {% set hero_default = url_for('static', filename='images/ads/ME0000.jpg') %}
+  {% set hero_url = hero_image_url|default(hero_default) %}
+
+  {% if is_v2 %}
+    <link rel="preload" as="image" href="{{ hero_url }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/ads.css') }}">
   {% else %}
     {# 舊版樣式：沿用 Codex 的設計（不動你的既有行為） #}
@@ -45,7 +48,13 @@
 </head>
 <body>
 
-{% if request.args.get('v2') %}
+{% set context = context if context is defined else None %}
+{% set insights = context.insights if context and context.insights is defined else None %}
+{% set scenario = scenario_key|default(insights.scenario if insights and insights.scenario is defined else '') %}
+{% set hero_image_url = hero_url %}
+{% set scenario_key = scenario %}
+
+{% if is_v2 %}
   {# 新版樣式：partial（帶 debug 支援） #}
   {% set debug = (request.args.get('debug') == '1') %}
   {% include "partials/ad_hero.html" %}
@@ -54,11 +63,13 @@
   {# 舊版樣式（Codex 版）：保留 insight 卡片與歷史清單 #}
   <div class="banner">
     <div class="hero">
-      <img src="{{ hero_image_url|default(url_for('static', filename='images/ads/ME0000.jpg')) }}"
-           alt="廣告主視覺 {{ (scenario_key or (context.insights.scenario if context and context.insights is defined else '')) | default('') }}">
+      <img src="{{ hero_url }}"
+           alt="廣告主視覺 {{ scenario|default('') }}">
     </div>
 
-    <h1>{{ (context.headline if context and context.headline is defined else (copy.title if copy and copy.title is defined else "智慧零售廣告看板")) }}</h1>
+    {% set legacy_copy = copy if copy is defined and copy else None %}
+    {% set headline = context.headline if context and context.headline is defined else (legacy_copy.title if legacy_copy and legacy_copy.title is defined else "智慧零售廣告看板") %}
+    <h1>{{ headline }}</h1>
 
     <div class="member-code">
       {% if context and context.member_code %}
@@ -69,27 +80,32 @@
     </div>
 
     <div class="subheading">
-      {{ (context.subheading if context and context.subheading is defined else (copy.subtitle if copy and copy.subtitle is defined else "")) }}
+      {% set subheading = context.subheading if context and context.subheading is defined else (legacy_copy.subtitle if legacy_copy and legacy_copy.subtitle is defined else "") %}
+      {{ subheading }}
     </div>
 
     <div class="highlight">
-      {{ (context.highlight if context and context.highlight is defined
-          else (copy.bullets|default(["入會禮","生日禮","點數回饋"])|join(" · "))) }}
+      {% set highlight_text = context.highlight if context and context.highlight is defined else None %}
+      {% if highlight_text %}
+        {{ highlight_text }}
+      {% else %}
+        {% set bullets = legacy_copy.bullets if legacy_copy and legacy_copy.bullets is defined and legacy_copy.bullets else ["入會禮","生日禮","點數回饋"] %}
+        {{ bullets|join(" · ") }}
+      {% endif %}
     </div>
 
     <div class="insight-card">
-      {% set scenario = (context.insights.scenario if context and context.insights is defined and context.insights.scenario is defined else scenario_key|default('')) %}
       {% if scenario == 'brand_new' %}
         <span class="badge">新客偵測</span>
         <p>第一次來店，尚未累積消費紀錄，立即推播加入會員與公版歡迎廣告。</p>
         <p>完成註冊即可領取開卡禮，並於現場啟用專屬折扣。</p>
       {% elif scenario == 'repeat_purchase' %}
         <span class="badge">回購洞察</span>
-        <p>近期 {{ context.insights.repeat_count if context and context.insights is defined and context.insights.repeat_count is defined else "多次" }} 次都選擇「{{ context.insights.recommended_item if context and context.insights is defined and context.insights.recommended_item is defined else "熱門品項" }}」，系統自動生成此商品的個人化推播。</p>
+        <p>近期 {{ insights.repeat_count if insights and insights.repeat_count is defined else "多次" }} 次都選擇「{{ insights.recommended_item if insights and insights.recommended_item is defined else "熱門品項" }}」，系統自動生成此商品的個人化推播。</p>
         <p>建議同步展示加價購組合或升級方案，提高客單價。</p>
       {% else %}
         <span class="badge">老會員預測</span>
-        <p>根據歷史消費，AI 預估再次購買「{{ context.insights.recommended_item if context and context.insights is defined and context.insights.recommended_item is defined else "偏好品項" }}」的機率約 {{ context.insights.probability_percent if context and context.insights is defined and context.insights.probability_percent is defined else "—" }}。</p>
+        <p>根據歷史消費，AI 預估再次購買「{{ insights.recommended_item if insights and insights.recommended_item is defined else "偏好品項" }}」的機率約 {{ insights.probability_percent if insights and insights.probability_percent is defined else "—" }}。</p>
         <p>推播會員專屬優惠，並提醒可於收銀台加碼點數。</p>
       {% endif %}
     </div>

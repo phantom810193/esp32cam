@@ -19,6 +19,7 @@ html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);
 .subtitle{margin:.25rem 0 1rem 0;opacity:.95;font-size:clamp(1.05rem,1.2vw+.6rem,1.35rem)}
 .bullets{margin:0 0 1.25rem 0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:.5rem 1rem}
 .bullets li{background:rgba(255,255,255,.12);padding:.35rem .6rem;border-radius:999px;border:1px solid rgba(255,255,255,.2);backdrop-filter:blur(4px)}
+.callout{margin:0 0 1.25rem 0;font-size:clamp(1.1rem,1.4vw+.6rem,1.45rem);font-weight:600;letter-spacing:.02em;opacity:.92}
 
 .btn{display:inline-block;padding:.7rem 1rem;border-radius:12px;text-decoration:none;background:#fff;
   color:#111;font-weight:700;box-shadow:var(--shadow)}

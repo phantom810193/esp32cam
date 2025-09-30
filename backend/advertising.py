@@ -32,7 +32,7 @@ AD_IMAGE_BY_SCENARIO: dict[str, str] = {
     "repeat_purchase:dessert": "ME0001.jpg",
     "repeat_purchase:kindergarten": "ME0002.jpg",
     "repeat_purchase:fitness": "ME0003.jpg",
-    "repeat_purchase": "ME0001.jpg",  # 無類別時的備援
+    "repeat_purchase": "ME0003.jpg",  # 無類別時的備援
 
     # 3) 未註冊會員但有明顯偏好（引導入會）
     "unregistered:fitness": "AD0000.jpg",
@@ -129,24 +129,23 @@ def derive_scenario_key(
         return "brand_new"
 
     profile_label = getattr(profile, "profile_label", "")
-    segment = PROFILE_SEGMENT_BY_LABEL.get(profile_label, "general")
+    segment = PROFILE_SEGMENT_BY_LABEL.get(profile_label, "")
     registered = bool(getattr(profile, "mall_member_id", ""))
 
-    # 優先用會員狀態 + persona 分群來挑 hero 圖
-    prefix = "registered" if registered else "unregistered"
-    scenario_key = f"{prefix}:{segment}"
-    if scenario_key in AD_IMAGE_BY_SCENARIO:
-        return scenario_key
+    if segment:
+        prefix = "registered" if registered else "unregistered"
+        scenario_key = f"{prefix}:{segment}"
+        if scenario_key in AD_IMAGE_BY_SCENARIO:
+            return scenario_key
 
-    # 若 persona 無法對到既有分群，嘗試用回購情境附加類別（若上層有實作）
     if insights.scenario.startswith("repeat_purchase"):
-        rp_key = f"repeat_purchase:{segment}"
-        if rp_key in AD_IMAGE_BY_SCENARIO:
-            return rp_key
+        if segment:
+            rp_key = f"repeat_purchase:{segment}"
+            if rp_key in AD_IMAGE_BY_SCENARIO:
+                return rp_key
         if "repeat_purchase" in AD_IMAGE_BY_SCENARIO:
             return "repeat_purchase"
 
-    # 最終退回新客圖，避免空白
     return "brand_new"
 
 def build_ad_context(
