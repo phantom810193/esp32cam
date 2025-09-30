@@ -5,7 +5,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import Iterable, Sequence
+from typing import TYPE_CHECKING, Iterable, Sequence
 
 try:  # pragma: no cover - optional dependency for offline development
     import google.generativeai as genai  # type: ignore
@@ -13,6 +13,9 @@ try:  # pragma: no cover - optional dependency for offline development
 except Exception:  # pragma: no cover - guard against missing dependencies
     genai = None  # type: ignore
     google_exceptions = None  # type: ignore
+
+if TYPE_CHECKING:
+    from .advertising import PurchaseInsights  # pragma: no cover
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -113,7 +116,13 @@ class GeminiService:
         return description
 
     # ------------------------------------------------------------------
-    def generate_ad_copy(self, member_id: str, purchases: Iterable[dict[str, object]]) -> AdCreative:
+    def generate_ad_copy(
+        self,
+        member_id: str,
+        purchases: Iterable[dict[str, object]],
+        *,
+        insights: "PurchaseInsights | None" = None,
+    ) -> AdCreative:
         """Use Gemini Text to produce fresh advertising copy."""
 
         if not self.can_generate_ads:
@@ -122,6 +131,8 @@ class GeminiService:
         assert self._text_model is not None  # for the type checker
         purchase_list = list(purchases)
         prompt_payload = json.dumps(purchase_list, ensure_ascii=False)
+        insight_summary = self._describe_insights(insights)
+        insight_block = f"\n情境重點：{insight_summary}" if insight_summary else ""
         prompt = f"""
 你是一位零售行銷 AI，目標是根據歷史消費紀錄產生一段動態廣告文案。
 請閱讀以下 JSON 陣列描述的購買紀錄：{prompt_payload}
@@ -132,7 +143,7 @@ class GeminiService:
   "subheading": "...副標...",
   "highlight": "...吸睛促購語..."
 }}
-文案語氣請友善、以繁體中文呈現，若沒有歷史紀錄，請推廣今日的主打商品。
+文案語氣請友善、以繁體中文呈現，若沒有歷史紀錄，請推廣今日的主打商品。{insight_block}
 會員 ID：{member_id}
 """
         try:
@@ -149,6 +160,37 @@ class GeminiService:
         if not text:
             raise GeminiUnavailableError("Gemini Text returned an empty response")
         return self._parse_ad_response(text)
+
+    def _describe_insights(self, insights: "PurchaseInsights | None") -> str:
+        if not insights:
+            return ""
+
+        scenario = getattr(insights, "scenario", "")
+        recommended = getattr(insights, "recommended_item", None)
+        repeat_count = getattr(insights, "repeat_count", 0)
+        probability = getattr(insights, "probability", 0.0)
+        probability_percent = getattr(insights, "probability_percent", None)
+        total_orders = getattr(insights, "total_purchases", 0)
+
+        if scenario == "brand_new":
+            return "第一次來店，請引導加入會員並介紹開卡禮。"
+
+        if scenario == "repeat_purchase" and recommended:
+            return (
+                f"顧客近期 {repeat_count} 次都購買 {recommended}，"
+                "請針對此商品延伸加值組合與升級方案。"
+            )
+
+        if scenario == "returning_member" and recommended:
+            probability_pct = probability_percent
+            if probability_pct is None:
+                probability_pct = round(max(0.0, probability) * 100)
+            return (
+                f"老會員累積 {total_orders} 筆消費，AI 預測對 {recommended} 的購買機率約 "
+                f"{probability_pct}% ，請強調會員專屬優惠。"
+            )
+
+        return ""
 
     # ------------------------------------------------------------------
     def _parse_ad_response(self, text: str) -> AdCreative:

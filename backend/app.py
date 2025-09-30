@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime
 import mimetypes
 from pathlib import Path
@@ -11,14 +12,22 @@ from uuid import uuid4
 
 from flask import (
     Flask,
+    abort,
+    current_app,
     jsonify,
     render_template,
     request,
     send_from_directory,
     url_for,
 )
+from werkzeug.utils import safe_join
 
-from .advertising import build_ad_context
+from .advertising import (
+    AD_IMAGE_BY_SCENARIO,
+    analyse_purchase_intent,
+    build_ad_context,
+    derive_scenario_key,
+)
 from .ai import GeminiService, GeminiUnavailableError
 from .aws import RekognitionService
 from .database import Database
@@ -31,9 +40,11 @@ DATA_DIR = BASE_DIR / "data"
 DB_PATH = DATA_DIR / "mvp.sqlite3"
 UPLOAD_DIR = DATA_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+ADS_DIR = Path(os.environ.get("ADS_DIR", "/srv/esp32-ads"))
 
 app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
 app.config["JSON_AS_ASCII"] = False
+app.config["ADS_DIR"] = ADS_DIR
 
 gemini = GeminiService()
 rekognition = RekognitionService()
@@ -89,8 +100,10 @@ def upload_face():
 
     ad_generation_start = perf_counter()
     purchases = database.get_purchase_history(member_id)
+    insights = analyse_purchase_intent(purchases, new_member=new_member)
+    profile = database.get_member_profile(member_id)
     creative = None
-    if gemini.can_generate_ads:
+    if gemini.can_generate_ads and insights.scenario != "brand_new":
         try:
             creative = gemini.generate_ad_copy(
                 member_id,
@@ -105,10 +118,10 @@ def upload_face():
                     }
                     for purchase in purchases
                 ],
+                insights=insights,
             )
         except GeminiUnavailableError as exc:
             logging.warning("Gemini ad generation unavailable: %s", exc)
-    build_ad_context(member_id, purchases, creative=creative)
     ad_generation_duration = perf_counter() - ad_generation_start
 
     total_duration = perf_counter() - overall_start
@@ -125,12 +138,18 @@ def upload_face():
     stale_images = database.cleanup_upload_events(keep_latest=1)
     _purge_upload_images(stale_images)
 
+    scenario_key = derive_scenario_key(insights, profile=profile)
+
+    hero_image_url = _resolve_hero_image_url(scenario_key)
+
     payload = {
         "status": "ok",
         "member_id": member_id,
         "member_code": database.get_member_code(member_id),
         "new_member": new_member,
         "ad_url": url_for("render_ad", member_id=member_id, _external=True),
+        "scenario_key": scenario_key,
+        "hero_image_url": hero_image_url,
     }
     if distance is not None:
         payload["distance"] = distance
@@ -191,27 +210,42 @@ def merge_members():
 @app.get("/ad/<member_id>")
 def render_ad(member_id: str):
     purchases = database.get_purchase_history(member_id)
+    insights = analyse_purchase_intent(purchases)
+    profile = database.get_member_profile(member_id)
     creative = None
-    if gemini.can_generate_ads:
+    if gemini.can_generate_ads and insights.scenario != "brand_new":
         try:
-                creative = gemini.generate_ad_copy(
-                    member_id,
-                    [
-                        {
-                            "member_code": purchase.member_code,
-                            "item": purchase.item,
-                            "purchased_at": purchase.purchased_at,
-                            "unit_price": purchase.unit_price,
-                            "quantity": purchase.quantity,
-                            "total_price": purchase.total_price,
-                        }
-                        for purchase in purchases
-                    ],
-                )
+            creative = gemini.generate_ad_copy(
+                member_id,
+                [
+                    {
+                        "member_code": purchase.member_code,
+                        "item": purchase.item,
+                        "purchased_at": purchase.purchased_at,
+                        "unit_price": purchase.unit_price,
+                        "quantity": purchase.quantity,
+                        "total_price": purchase.total_price,
+                    }
+                    for purchase in purchases
+                ],
+                insights=insights,
+            )
         except GeminiUnavailableError as exc:
             logging.warning("Gemini ad generation unavailable: %s", exc)
-    context = build_ad_context(member_id, purchases, creative=creative)
-    return render_template("ad.html", context=context)
+    context = build_ad_context(
+        member_id,
+        purchases,
+        insights=insights,
+        profile=profile,
+        creative=creative,
+    )
+    hero_image_url = _resolve_hero_image_url(context.scenario_key)
+    return render_template(
+        "ad.html",
+        context=context,
+        hero_image_url=hero_image_url,
+        scenario_key=context.scenario_key,
+    )
 
 
 @app.get("/latest_upload")
@@ -257,14 +291,74 @@ def serve_upload_image(filename: str):
     return send_from_directory(UPLOAD_DIR, filename)
 
 
+@app.get("/ad-assets/<path:filename>")
+def serve_ad_asset(filename: str):
+    ads_dir = current_app.config.get("ADS_DIR")
+    if not ads_dir:
+        abort(404)
+
+    ads_path = Path(ads_dir)
+    safe_path = safe_join(str(ads_path), filename)
+    if not safe_path:
+        abort(404)
+
+    candidate = Path(safe_path)
+    if not candidate.is_file():
+        abort(404)
+
+    try:
+        relative_path = candidate.relative_to(ads_path)
+    except ValueError:
+        abort(404)
+
+    return send_from_directory(str(ads_path), str(relative_path))
+
+
 @app.get("/health")
 def health_check():
-    return {"status": "ok"}
+    ads_dir = current_app.config.get("ADS_DIR")
+    ads_dir_path = Path(ads_dir) if ads_dir else None
+    sample: list[str] = []
+    if ads_dir_path and ads_dir_path.is_dir():
+        sample = sorted(
+            [entry.name for entry in ads_dir_path.iterdir() if entry.is_file()]
+        )[:5]
+
+    return {
+        "status": "ok",
+        "ads_dir": str(ads_dir) if ads_dir else None,
+        "ads_dir_sample": sample,
+    }
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+def _resolve_hero_image_url(scenario_key: str) -> str | None:
+    preferred_filename = AD_IMAGE_BY_SCENARIO.get(scenario_key)
+    default_filename = AD_IMAGE_BY_SCENARIO.get("brand_new")
+    filename = preferred_filename or default_filename
+
+    if not filename:
+        return None
+
+    ads_dir = current_app.config.get("ADS_DIR")
+
+    if ads_dir:
+        ads_path = Path(ads_dir)
+        candidate = ads_path / filename
+        if candidate.is_file():
+            return url_for("serve_ad_asset", filename=filename)
+
+        if default_filename and default_filename != filename:
+            fallback_candidate = ads_path / default_filename
+            if fallback_candidate.is_file():
+                return url_for("serve_ad_asset", filename=default_filename)
+
+    static_filename = preferred_filename or default_filename or filename
+    return f"/images/ads/{static_filename}"
+
+
 def _extract_image_payload(req) -> Tuple[bytes, str]:
     if req.files:
         for key in ("image", "file", "photo"):
