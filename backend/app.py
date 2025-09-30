@@ -31,6 +31,7 @@ from .advertising import (
 from .ai import GeminiService, GeminiUnavailableError
 from .aws import RekognitionService
 from .database import Database
+from .prediction import predict_next_purchases
 from .recognizer import FaceRecognizer
 
 logging.basicConfig(level=logging.INFO)
@@ -45,7 +46,12 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 ADS_DIR = os.environ.get("ADS_DIR", "/srv/esp32-ads")
 Path(ADS_DIR).mkdir(parents=True, exist_ok=True)
 
-app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
+app = Flask(
+    __name__,
+    template_folder=str(BASE_DIR / "templates"),
+    static_folder=str(BASE_DIR / "static"),
+    static_url_path="/static",
+)
 app.config["JSON_AS_ASCII"] = False
 app.config["ADS_DIR"] = ADS_DIR  # 儲存為字串路徑
 
@@ -284,6 +290,50 @@ def member_directory():
     return render_template("members.html", members=directory)
 
 
+@app.get("/manager")
+def manager_dashboard_view():
+    member_id = (request.args.get("member_id") or "").strip()
+    profiles = database.list_member_profiles()
+    selectable_members = [profile for profile in profiles if profile.member_id]
+
+    selected_id = member_id or (selectable_members[0].member_id if selectable_members else "")
+    context: dict[str, object] | None = None
+    error: str | None = None
+
+    if selected_id:
+        purchases = database.get_purchase_history(selected_id)
+        profile = database.get_member_profile(selected_id)
+        insights = analyse_purchase_intent(purchases)
+        scenario_key = derive_scenario_key(insights, profile=profile)
+        hero_image_url = _manager_hero_image(profile, scenario_key)
+        prediction = predict_next_purchases(
+            purchases,
+            profile=profile,
+            insights=insights,
+            limit=7,
+        )
+
+        context = {
+            "member_id": selected_id,
+            "member": profile,
+            "analysis": insights,
+            "scenario_key": scenario_key,
+            "hero_image_url": hero_image_url,
+            "prediction": prediction,
+            "ad_url": url_for("render_ad", member_id=selected_id, v2=1, _external=False),
+        }
+    else:
+        error = "尚未建立任何會員資料"
+
+    return render_template(
+        "manager.html",
+        context=context,
+        member_id=member_id,
+        members=selectable_members,
+        error=error,
+    )
+
+
 @app.get("/uploads/<path:filename>")
 def serve_upload_image(filename: str):
     return send_from_directory(UPLOAD_DIR, filename, conditional=True)
@@ -324,21 +374,35 @@ def ad_preview(filename: str):
 def health_check():
     # 強化健康檢查，方便遠端排錯
     ads_dir = current_app.config.get("ADS_DIR") or ""
-    exists = os.path.isdir(ads_dir)
-    sample = []
-    try:
-        if exists:
-            sample = sorted(os.listdir(ads_dir))[:10]
-    except Exception:
-        sample = []
+    ads_path = Path(ads_dir)
+    exists = ads_path.is_dir()
+    sample: list[str] = []
+    if exists:
+        try:
+            sample = [entry.name for entry in sorted(ads_path.iterdir())[:10]]
+        except OSError:
+            sample = []
     return jsonify(
-        {"status": "ok", "ads_dir": ads_dir, "ads_dir_exists": exists, "ads_dir_sample": sample}
+        {
+            "status": "ok",
+            "ads_dir": ads_dir,
+            "ads_dir_exists": exists,
+            "ads_dir_sample": sample,
+        }
     )
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _manager_hero_image(profile, scenario_key: str) -> str | None:
+    if profile and profile.first_image_filename:
+        return url_for("serve_upload_image", filename=profile.first_image_filename)
+    return _resolve_hero_image_url(scenario_key)
+
+
 def _resolve_hero_image_url(scenario_key: str) -> str | None:
     """優先使用 VM 圖庫（/ad-assets），缺檔時回退到 repo 內的 /static/images/ads。"""
     filename = AD_IMAGE_BY_SCENARIO.get(scenario_key) or AD_IMAGE_BY_SCENARIO.get("brand_new")
@@ -346,10 +410,10 @@ def _resolve_hero_image_url(scenario_key: str) -> str | None:
         return None
 
     ads_dir = current_app.config.get("ADS_DIR") or ""
-    candidate = os.path.join(ads_dir, filename) if ads_dir else None
-
-    if candidate and os.path.isfile(candidate):
-        return url_for("serve_ad_asset", filename=filename)
+    if ads_dir:
+        candidate = Path(ads_dir) / filename
+        if candidate.is_file():
+            return url_for("serve_ad_asset", filename=filename)
 
     # fallback：讓畫面至少有圖（走 Flask static）
     return url_for("static", filename=f"images/ads/{filename}")
