@@ -298,18 +298,21 @@ def render_ad(member_id: str):
 
 @app.get("/ad-image/<member_id>")
 def ad_image(member_id: str):
-    """回傳一張已將短文案畫到 hero 圖上的 JPG。"""
+    """回傳一張已將 20 字內標題文案畫到 hero 圖上的 JPG（底部半透明黑條 + 白字）。"""
     purchases = database.get_purchase_history(member_id)
     insights = analyse_purchase_intent(purchases)
     profile = database.get_member_profile(member_id)
     scenario_key = derive_scenario_key(insights, profile=profile)
 
-    # 取得圖檔「實際路徑」
+    # 取得底圖「實際路徑」
     image_path = _resolve_hero_image_path(scenario_key)
     if image_path is None or not image_path.is_file() or Image is None:
         abort(404)
 
-    # 文案：優先用 LLM，否則本地生成 20 字內短句
+    base = Image.open(image_path).convert("RGB")
+    W, H = base.size
+
+    # 生成 20 字內標題文案（優先 Gemini，否則模板）
     copy_text = None
     if gemini.can_generate_ads and insights.scenario != "brand_new":
         try:
@@ -317,7 +320,7 @@ def ad_image(member_id: str):
         except Exception:
             copy_text = None
     if not copy_text:
-        item = getattr(insights, "recommended_item", None) or "本月嚴選好物"
+        item = getattr(insights, "recommended_item", None) or "精選商品"
         templates = [
             f"今天就來 {item}",
             f"{item} 限時優惠！",
@@ -326,42 +329,39 @@ def ad_image(member_id: str):
             f"會員私享：{item}",
         ]
         copy_text = templates[hash(member_id) % len(templates)]
-        if len(copy_text) > 20:
-            copy_text = copy_text[:20]
+    # 安全截斷到 20 個字
+    if len(copy_text) > 20:
+        copy_text = copy_text[:20]
 
-    # 開圖與繪製
-    im = Image.open(image_path).convert("RGB")
-    w, h = im.size
-    draw = ImageDraw.Draw(im)
+    # 合成：半透明黑條 + 置中文字
+    rgba = base.convert("RGBA")
+    bar_h = int(H * 0.16)           # 黑條高度
+    overlay = Image.new("RGBA", (W, bar_h), (0, 0, 0, 170))
+    rgba.alpha_composite(overlay, dest=(0, H - bar_h))
 
-    # 找字型（Noto CJK 最佳）
-    font_paths = [
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/noto/NotoSansTC-Regular.otf",
-        "/usr/share/fonts/truetype/noto/NotoSansTC-Regular.ttf",
-    ]
+    # 字型（優先 Noto CJK）
     font = None
-    for fp in font_paths:
+    for fp in [
+        "/usr/share/fonts/opentype/noto/NotoSansCJKtc-Medium.otf",
+        "/usr/share/fonts/truetype/noto/NotoSansTC-Medium.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    ]:
         if os.path.isfile(fp):
             try:
-                font = ImageFont.truetype(fp, size=max(24, int(h * 0.035)))
+                font = ImageFont.truetype(fp, size=int(bar_h * 0.45))
                 break
             except Exception:
                 pass
     if font is None:
         font = ImageFont.load_default()
 
-    # 底部半透明黑條 + 白字
-    margin = int(h * 0.03)
-    pad = int(h * 0.018)
-    text_w, text_h = draw.textbbox((0, 0), copy_text, font=font)[2:]
-    box_h = text_h + pad * 2
-    draw.rectangle([(0, h - box_h - margin), (w, h)], fill=(0, 0, 0, 180))
-    draw.text((margin, h - box_h - margin + pad), copy_text, fill=(255, 255, 255), font=font)
+    draw = ImageDraw.Draw(rgba)
+    bbox = draw.textbbox((0, 0), copy_text, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    draw.text(((W - tw) // 2, H - bar_h + (bar_h - th) // 2), copy_text, fill=(255, 255, 255, 255), font=font)
 
     buf = io.BytesIO()
-    im.save(buf, format="JPEG", quality=90)
+    rgba.convert("RGB").save(buf, format="JPEG", quality=90)
     buf.seek(0)
     return send_file(buf, mimetype="image/jpeg", download_name=f"{member_id}.jpg")
 
