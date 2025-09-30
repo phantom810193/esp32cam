@@ -98,7 +98,7 @@ def index() -> str:
 @app.route("/manager", methods=["GET", "POST"])
 def manager_dashboard_view():
     if request.method == "POST":
-        # 允許直接在 /manager 上傳圖片 → 找出 member_id → 導回 GET
+        # 允許直接在 /manager 上傳圖片 → 找出 member_id → 存圖 + 記錄事件 → 導回 GET
         try:
             image_bytes, mime_type = _extract_image_payload(request)
             encoding = recognizer.encode(image_bytes, mime_type=mime_type)
@@ -111,6 +111,7 @@ def manager_dashboard_view():
             ), 400
 
         member_id, _ = database.find_member_by_encoding(encoding, recognizer)
+        new_member = False
         if member_id is None:
             # 新客：建立、給歡迎禮、索引 Rekognition
             member_id = database.create_member(encoding, recognizer.derive_member_id(encoding))
@@ -118,9 +119,22 @@ def manager_dashboard_view():
             indexed = recognizer.register_face(image_bytes, member_id)
             if indexed is not None:
                 database.update_member_encoding(member_id, indexed)
+            new_member = True
 
-            # 存上傳圖（讓 hero 能顯示）
-            _persist_upload_image(member_id, image_bytes, mime_type)
+        # 不論新舊，都存上傳圖並記錄事件（讓左上角立即顯示最新照片）
+        filename = _persist_upload_image(member_id, image_bytes, mime_type)
+        try:
+            database.record_upload_event(
+                member_id=member_id,
+                image_filename=filename,
+                upload_duration=0.0,
+                recognition_duration=0.0,
+                ad_duration=0.0,
+                total_duration=0.0,
+            )
+            database.cleanup_upload_events(keep_latest=1)
+        except Exception as exc:  # 若 DB schema 舊版沒這表也不致命
+            logging.warning("record_upload_event failed: %s", exc)
 
         return redirect(url_for("manager_dashboard_view", member_id=member_id))
 
@@ -456,7 +470,11 @@ def healthz_check():
 # ---------------------------------------------------------------------------
 
 def _manager_hero_image(profile, scenario_key: str) -> str | None:
-    if profile and profile.first_image_filename:
+    """左上角 hero：1) 最新上傳事件 2) 會員第一張 3) 情境預設圖"""
+    last = database.get_latest_upload_event()
+    if last and last.image_filename:
+        return url_for("serve_upload_image", filename=last.image_filename)
+    if profile and getattr(profile, "first_image_filename", None):
         return url_for("serve_upload_image", filename=profile.first_image_filename)
     return _resolve_hero_image_url(scenario_key)
 
