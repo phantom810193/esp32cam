@@ -46,10 +46,20 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 ADS_DIR = os.environ.get("ADS_DIR", "/srv/esp32-ads")
 Path(ADS_DIR).mkdir(parents=True, exist_ok=True)
 
+# === 確保靜態測試檔存在，供健康檢查 HEAD 驗證用 ===
+STATIC_DIR = BASE_DIR / "static"
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
+HELLO_TXT = STATIC_DIR / "hello.txt"
+if not HELLO_TXT.exists():
+    try:
+        HELLO_TXT.write_text("ok\n", encoding="utf-8")
+    except OSError:
+        pass  # 若 filesystem 受限，不影響主要流程
+
 app = Flask(
     __name__,
     template_folder=str(BASE_DIR / "templates"),
-    static_folder=str(BASE_DIR / "static"),
+    static_folder=str(STATIC_DIR),
     static_url_path="/static",
 )
 app.config["JSON_AS_ASCII"] = False
@@ -370,9 +380,11 @@ def ad_preview(filename: str):
     )
 
 
-@app.get("/health")
-def health_check():
-    # 強化健康檢查，方便遠端排錯
+# ---------------------------------------------------------------------------
+# Health checks
+# ---------------------------------------------------------------------------
+
+def _health_payload() -> dict:
     ads_dir = current_app.config.get("ADS_DIR") or ""
     ads_path = Path(ads_dir)
     exists = ads_path.is_dir()
@@ -382,20 +394,29 @@ def health_check():
             sample = [entry.name for entry in sorted(ads_path.iterdir())[:10]]
         except OSError:
             sample = []
-    return jsonify(
-        {
-            "status": "ok",
-            "ads_dir": ads_dir,
-            "ads_dir_exists": exists,
-            "ads_dir_sample": sample,
-        }
-    )
+    return {
+        "status": "ok",
+        "ads_dir": ads_dir,
+        "ads_dir_exists": exists,
+        "ads_dir_sample": sample,
+        "static_example": "/static/hello.txt",  # 給 HEAD 測試用
+    }
+
+
+@app.get("/health")
+def health_check():
+    return jsonify(_health_payload())
+
+
+@app.get("/healthz")
+def healthz_check():
+    # 與 /health 同內容，便於腳本/CI 復用
+    return jsonify(_health_payload())
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
 
 def _manager_hero_image(profile, scenario_key: str) -> str | None:
     if profile and profile.first_image_filename:
