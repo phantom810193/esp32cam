@@ -1,263 +1,231 @@
-"""Prediction helpers for estimating next-best offers."""
+# -*- coding: utf-8 -*-
+"""
+Predictions & history endpoints
+- GET /members/<member_id>/predictions?ym=YYYY-MM
+- GET /members/<member_id>/history?ym=YYYY-MM
+說明：
+- 以 SQLite 為主（預設路徑 backend/data/mvp.sqlite3，亦可由環境變數 DB_PATH 指定）
+- 推估規則：取「當年度上一個月」的行為，推本月「尚未購買」的 7 筆候選
+- 欄位：商品編號/名稱/類別/價格/查閱率/預估購買機率(%)
+- 若缺少 views 表，view_rate 以購買次數做近似估計並正規化
+"""
 from __future__ import annotations
-
-from collections import Counter, defaultdict
+import os, sqlite3, math, datetime as dt
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from math import exp
-from typing import Iterable, Sequence
+from typing import List, Dict, Any
+from flask import Blueprint, jsonify, request
 
-from .advertising import PurchaseInsights
-from .catalogue import (
-    CATEGORY_LABELS,
-    Product,
-    category_label,
-    get_catalogue,
-    infer_category_from_item,
-    purchased_product_codes,
-)
-from .database import MemberProfile, Purchase
+predict_bp = Blueprint("predict", __name__)
 
+def db_path() -> str:
+    return os.getenv("DB_PATH", os.path.join(os.path.dirname(__file__), "..", "data", "mvp.sqlite3"))
 
-@dataclass
-class PredictedItem:
-    product_code: str
-    product_name: str
-    category: str
-    category_label: str
-    price: float
-    view_rate_percent: float
-    probability: float
-    probability_percent: float
+def connect():
+    conn = sqlite3.connect(db_path())
+    conn.row_factory = sqlite3.Row
+    return conn
 
-
-@dataclass
-class PredictionResult:
-    items: list[PredictedItem]
-    history: list[Purchase]
-    top_products: list[dict[str, object]]
-    activities: list[dict[str, str]]
-    window_label: str
-
-
-def parse_timestamp(value: str) -> datetime:
-    try:
-        return datetime.strptime(value, "%Y-%m-%d %H:%M")
-    except ValueError:
-        return datetime.fromisoformat(value)
-
-
-def get_previous_month_purchases(
-    purchases: Iterable[Purchase], *, reference: datetime | None = None
-) -> list[Purchase]:
-    ordered = sorted(purchases, key=lambda purchase: parse_timestamp(purchase.purchased_at))
-    if not ordered:
-        return []
-
-    reference_dt = reference or parse_timestamp(ordered[-1].purchased_at)
-    reference_dt = reference_dt.replace(day=1)
-    previous_month = reference_dt - timedelta(days=1)
-    target_year = previous_month.year
-    target_month = previous_month.month
-
-    window: list[Purchase] = [
-        purchase
-        for purchase in ordered
-        if (
-            (ts := parse_timestamp(purchase.purchased_at)).year == target_year
-            and ts.month == target_month
-        )
-    ]
-    if window:
-        return window
-
-    buckets: defaultdict[tuple[int, int], list[Purchase]] = defaultdict(list)
-    for purchase in ordered:
-        ts = parse_timestamp(purchase.purchased_at)
-        buckets[(ts.year, ts.month)].append(purchase)
-
-    if not buckets:
-        return []
-
-    latest_bucket = max(buckets.keys())
-    return buckets[latest_bucket]
-
-
-def _softmax(scores: Sequence[float]) -> list[float]:
-    if not scores:
-        return []
-    shift = max(scores)
-    exponentials = [exp(score - shift) for score in scores]
-    total = sum(exponentials)
-    if total == 0:
-        return [0.0 for _ in scores]
-    return [value / total for value in exponentials]
-
-
-def predict_next_purchases(
-    purchases: Iterable[Purchase],
-    *,
-    profile: MemberProfile | None = None,
-    insights: PurchaseInsights | None = None,
-    limit: int = 7,
-) -> PredictionResult:
-    purchase_list = list(purchases)
-    window = get_previous_month_purchases(purchase_list)
-    if not window:
-        window = purchase_list
-
-    # Build frequency data.
-    category_counter: Counter[str] = Counter()
-    price_points: list[float] = []
-    for purchase in window:
-        category = infer_category_from_item(purchase.item)
-        category_counter[category] += 1
-        price_points.append(float(purchase.unit_price))
-
-    history_set = {purchase.item for purchase in purchase_list}
-    purchased_codes = purchased_product_codes(history_set)
-
-    total_category = sum(category_counter.values()) or 1
-    category_weight_map = {
-        category: count / total_category for category, count in category_counter.items()
-    }
-
-    recent_categories = [infer_category_from_item(p.item) for p in purchase_list[-5:]]
-    trend_weight: defaultdict[str, float] = defaultdict(float)
-    for index, category in enumerate(reversed(recent_categories), start=1):
-        trend_weight[category] += 1 / index
-    if trend_weight:
-        max_trend = max(trend_weight.values())
+def ym_prev(ym: str | None) -> str:
+    # ym = "YYYY-MM"; 若空，取今天的上個月
+    if not ym:
+        today = dt.date.today().replace(day=1)
+        prev = (today - dt.timedelta(days=1)).replace(day=1)
     else:
-        max_trend = 1.0
+        y, m = map(int, ym.split("-"))
+        base = dt.date(y, m, 1)
+        prev = (base - dt.timedelta(days=1)).replace(day=1)
+    return f"{prev.year:04d}-{prev.month:02d}"
 
-    average_price = sum(price_points) / len(price_points) if price_points else 1200.0
+@dataclass
+class ItemRow:
+    sku: str
+    name: str
+    category: str
+    price: float
+    view_rate: float
+    prob_pct: float
 
-    novelty_boost = 1.0 if profile and profile.mall_member_id else 0.8
+def _safe_float(x) -> float:
+    try:
+        return float(x)
+    except Exception:
+        return 0.0
 
-    catalogue = get_catalogue()
-    scored: list[tuple[float, Product]] = []
-    for product in catalogue:
-        if product.code in purchased_codes:
-            continue
+def _get_last_month_range(ym: str) -> tuple[str, str]:
+    y, m = map(int, ym.split("-"))
+    start = dt.date(y, m, 1)
+    if m == 12:
+        end = dt.date(y+1, 1, 1)
+    else:
+        end = dt.date(y, m+1, 1)
+    return (start.isoformat(), end.isoformat())
 
-        cat_weight = category_weight_map.get(product.category, 0.15)
-        recency_bonus = trend_weight.get(product.category, 0.0) / max_trend
-        price_similarity = 1.0 - min(
-            abs(product.price - average_price) / max(product.price, average_price, 1.0),
-            1.0,
-        )
-        novelty = novelty_boost if product.name not in history_set else 0.3
+def has_table(conn, name: str) -> bool:
+    cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (name,))
+    return cur.fetchone() is not None
 
-        score = (
-            0.45 * cat_weight
-            + 0.25 * recency_bonus
-            + 0.2 * price_similarity
-            + 0.1 * novelty
-        )
-        scored.append((score, product))
+def fetch_catalog(conn) -> Dict[str, Dict[str, Any]]:
+    # 需要 items 表：sku(name, category, price)
+    if not has_table(conn, "items"):
+        return {}
+    out = {}
+    for r in conn.execute("SELECT sku, name, category, price FROM items;"):
+        out[r["sku"]] = dict(sku=r["sku"], name=r["name"], category=r["category"], price=_safe_float(r["price"]))
+    return out
 
-    scored.sort(key=lambda entry: entry[0], reverse=True)
-    top_scored = scored[: limit * 2]
-    probabilities = _softmax([score for score, _ in top_scored])
-
-    results: list[PredictedItem] = []
-    for index, ((score, product), probability) in enumerate(zip(top_scored, probabilities)):
-        if len(results) >= limit:
-            break
-        adjusted_view_rate = product.view_rate * (0.9 + category_weight_map.get(product.category, 0.1))
-        adjusted_view_rate = min(1.0, adjusted_view_rate)
-        probability_percent = round(probability * 100, 1)
-        results.append(
-            PredictedItem(
-                product_code=product.code,
-                product_name=product.name,
-                category=product.category,
-                category_label=category_label(product.category),
-                price=product.price,
-                view_rate_percent=round(adjusted_view_rate * 100, 1),
-                probability=probability,
-                probability_percent=probability_percent,
-            )
-        )
-
-    # Build supporting data for the manager dashboard.
-    window_label = _format_window_label(window)
-    history = sorted(window, key=lambda p: parse_timestamp(p.purchased_at), reverse=True)
-    top_products = _summarise_top_products(window)
-    activities = _build_activity_feed(window, insights)
-
-    return PredictionResult(
-        items=results,
-        history=history,
-        top_products=top_products,
-        activities=activities,
-        window_label=window_label,
+def last_month_purchases(conn, member_id: str, ym_last: str) -> Dict[str, int]:
+    start, end = _get_last_month_range(ym_last)
+    if not has_table(conn, "purchases"):
+        return {}
+    cur = conn.execute(
+        """
+        SELECT sku, COUNT(*) AS cnt
+        FROM purchases
+        WHERE member_id = ? AND purchased_at >= ? AND purchased_at < ?
+        GROUP BY sku
+        """,
+        (member_id, start, end)
     )
+    return {r["sku"]: r["cnt"] for r in cur.fetchall()}
 
+def last_month_views(conn, ym_last: str) -> Dict[str, int]:
+    # 可選 views 表：views(sku, viewed_at)
+    if not has_table(conn, "views"):
+        return {}
+    start, end = _get_last_month_range(ym_last)
+    cur = conn.execute(
+        """
+        SELECT sku, COUNT(*) AS v
+        FROM views
+        WHERE viewed_at >= ? AND viewed_at < ?
+        GROUP BY sku
+        """,
+        (start, end)
+    )
+    return {r["sku"]: r["v"] for r in cur.fetchall()}
 
-def _format_window_label(window: Sequence[Purchase]) -> str:
-    if not window:
-        return "近期"
-    latest = parse_timestamp(window[-1].purchased_at)
-    return f"{latest.year} 年 {latest.month:02d} 月"
+def member_level(conn, member_id: str) -> str:
+    if not has_table(conn, "members"):
+        return "guest"
+    cur = conn.execute("SELECT COALESCE(level, 'general') AS lv FROM members WHERE member_id=?;", (member_id,))
+    r = cur.fetchone()
+    return (r["lv"] if r else "guest") or "guest"
 
-
-def _summarise_top_products(purchases: Sequence[Purchase]) -> list[dict[str, object]]:
-    counter: Counter[str] = Counter()
-    revenue: defaultdict[str, float] = defaultdict(float)
-    for purchase in purchases:
-        counter[purchase.item] += float(purchase.quantity)
-        revenue[purchase.item] += float(purchase.total_price)
-    top_items = counter.most_common(3)
-    summary: list[dict[str, object]] = []
-    for name, quantity in top_items:
-        summary.append(
-            {
-                "item": name,
-                "quantity": quantity,
-                "total_price": round(revenue[name], 1),
-            }
+@predict_bp.get("/members/<member_id>/history")
+def history(member_id: str):
+    ym = request.args.get("ym")  # 指定月份
+    ym_last = ym_prev(ym)
+    start, end = _get_last_month_range(ym_last)
+    with connect() as conn:
+        if not has_table(conn, "purchases"):
+            return jsonify({"ym": ym_last, "rows": []})
+        cur = conn.execute(
+            """
+            SELECT purchased_at, sku, item AS name, category, unit_price AS price, quantity, total_price
+            FROM purchases
+            WHERE member_id=? AND purchased_at >= ? AND purchased_at < ?
+            ORDER BY purchased_at DESC
+            """,
+            (member_id, start, end)
         )
-    return summary
+        rows = [dict(r) for r in cur.fetchall()]
+    return jsonify({"ym": ym_last, "rows": rows})
 
+@predict_bp.get("/members/<member_id>/predictions")
+def predictions(member_id: str):
+    """
+    回傳 7 筆候選 + 機率(%)
+    公式（可簡化理解）：
+      score = normalize( view_rate * conv_rate * time_decay * member_weight )
+    其中：
+      - view_rate 來自 views 表；若無，改以上月整體購買次數估計
+      - conv_rate 以「上月購買次數 / max(1, 上月瀏覽)」估計
+      - time_decay 若該會員對該 SKU 曾在過去 90 天買過則衰減
+      - member_weight 依會員等級做 0.9~1.2 微調
+    """
+    ym = request.args.get("ym")
+    ym_last = ym_prev(ym)
 
-def _build_activity_feed(
-    purchases: Sequence[Purchase], insights: PurchaseInsights | None
-) -> list[dict[str, str]]:
-    if not purchases:
-        return []
-    latest_timestamp = parse_timestamp(purchases[-1].purchased_at)
-    categories = [infer_category_from_item(purchase.item) for purchase in purchases]
-    category_counts = Counter(categories)
+    with connect() as conn:
+        catalog = fetch_catalog(conn)
+        if not catalog:
+            return jsonify({"ym": ym_last, "rows": []})
 
-    templates = {
-        "fitness": "參與了會員健身互動課程，完成體能評估",
-        "dessert": "參加甜點試吃活動，留下高度滿意回饋",
-        "kindergarten": "參與親子共學日並關注幼兒成長課程",
-        "homemaker": "參與家居市集體驗新品居家用品",
-        "general": "逛遊生活選品快閃店，對永續主題最感興趣",
-    }
+        # 基礎統計
+        v_all = last_month_views(conn, ym_last)
+        p_all_member_last = last_month_purchases(conn, member_id, ym_last)
 
-    feed: list[dict[str, str]] = []
-    for category, count in category_counts.most_common(3):
-        description = templates.get(category, templates["general"])
-        feed.append(
-            {
-                "title": CATEGORY_LABELS.get(category, "生活選品"),
-                "description": description,
-                "timestamp": (latest_timestamp - timedelta(days=count)).strftime("%Y-%m-%d"),
-            }
-        )
+        # 本月已購商品 (避免推薦)
+        this_ym = ym or dt.date.today().strftime("%Y-%m")
+        p_this_month = last_month_purchases(conn, member_id, this_ym)  # 便利用同函式抓今月，命名沿用
+        already = set(p_this_month.keys())
 
-    if insights and insights.recommended_item:
-        feed.insert(
-            0,
-            {
-                "title": "AI 推薦",
-                "description": f"針對 {insights.recommended_item} 提供專屬回訪方案",
-                "timestamp": latest_timestamp.strftime("%Y-%m-%d"),
-            },
-        )
+        # 估計整體 view 分母
+        total_views = sum(v_all.values())
+        if total_views == 0:
+            # 無 views 表或皆為 0：以全站上月購買次數近似 view
+            all_purchases = {}
+            if has_table(conn, "purchases"):
+                start, end = _get_last_month_range(ym_last)
+                cur = conn.execute(
+                    """SELECT sku, COUNT(*) AS cnt FROM purchases
+                       WHERE purchased_at >= ? AND purchased_at < ?
+                       GROUP BY sku;""", (start, end))
+                all_purchases = {r["sku"]: r["cnt"] for r in cur.fetchall()}
+            v_all = all_purchases
+            total_views = max(1, sum(v_all.values()))
 
-    return feed[:3]
+        # 會員權重
+        lv = member_level(conn, member_id)
+        mw = {"vip": 1.2, "gold": 1.1, "general": 1.0, "guest": 0.95}.get(lv, 1.0)
+
+        scored: List[ItemRow] = []
+        # 時近衰減需要該會員近 90 天的最後一次購買日
+        recent_last: Dict[str, str] = {}
+        if has_table(conn, "purchases"):
+            cur = conn.execute(
+                """SELECT sku, MAX(purchased_at) AS last_at
+                   FROM purchases
+                   WHERE member_id=?
+                     AND purchased_at >= date('now','-180 day')
+                   GROUP BY sku;""",
+                (member_id,)
+            )
+            recent_last = {r["sku"]: r["last_at"] for r in cur.fetchall() if r["last_at"]}
+
+        # 計分
+        for sku, meta in catalog.items():
+            if sku in already:
+                continue  # 本月已買就不推
+            views = v_all.get(sku, 0)
+            conv = p_all_member_last.get(sku, 0)
+            view_rate = views / total_views if total_views else 0.0
+            conv_rate = conv / max(1, views)
+            # time decay: 最近買過者衰減（越近衰減越大，避免連續推相同品）
+            decay = 1.0
+            if sku in recent_last:
+                days = max(0, (dt.date.today() - dt.date.fromisoformat(recent_last[sku])).days)
+                lam = 1.0 / 45.0
+                decay = math.exp(-lam * (90 - min(90, days)))
+            score = max(0.0, view_rate * conv_rate * decay * mw)
+            scored.append(ItemRow(
+                sku=sku,
+                name=str(meta.get("name","")),
+                category=str(meta.get("category","")),
+                price=float(meta.get("price") or 0.0),
+                view_rate=round(view_rate*100, 2),
+                prob_pct=0.0  # 暫存，稍後正規化
+            ))
+        # 正規化為百分比
+        ssum = sum([i.view_rate for i in scored]) or 1.0
+        for i in scored:
+            # 這裡用 view_rate 近似分母，若要更嚴謹可保存 score 再正規化
+            i.prob_pct = round((i.view_rate / ssum) * 100.0, 1)
+
+        # 取前 7
+        top7 = sorted(scored, key=lambda x: x.prob_pct, reverse=True)[:7]
+        rows = [dict(
+            sku=i.sku, name=i.name, category=i.category, price=i.price,
+            view_rate=i.view_rate, probability_percent=i.prob_pct
+        ) for i in top7]
+        return jsonify({"ym": ym_last, "rows": rows, "member_level": lv})
