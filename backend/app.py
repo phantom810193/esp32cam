@@ -1,3 +1,4 @@
+# backend/app.py
 """Flask backend for the ESP32-CAM retail advertising MVP."""
 from __future__ import annotations
 
@@ -58,6 +59,7 @@ app.config["JSON_AS_ASCII"] = False
 app.config["ADS_DIR"] = ADS_DIR  # 儲存為字串路徑
 app.register_blueprint(adgen_blueprint)
 
+# --- 服務初始化（Vertex AI / AWS / DB）
 gemini = GeminiService()
 rekognition = RekognitionService()
 if rekognition.can_describe_faces:
@@ -420,14 +422,18 @@ def extended_health_check():
     else:
         gcs_status["error"] = "ASSET_BUCKET not configured"
 
+    # 併入 Vertex AI 健康資訊
+    ai_status = gemini.health_probe()
+
     return jsonify(
         {
-            "status": "ok",
+            "status": "ok" if ai_status.get("vertexai") == "initialized" else "degraded",
             "ads_dir": str(ads_path),
             "ads_dir_exists": exists,
             "ads_dir_writable": writable,
             "ads_dir_sample": sample,
             "gcs": gcs_status,
+            "vertex": ai_status,
         }
     )
 
