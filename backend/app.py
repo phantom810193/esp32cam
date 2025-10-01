@@ -4,19 +4,25 @@ from __future__ import annotations
 
 import json
 import logging
-import mimetypes
-import os
-import time
+
 from datetime import datetime
+
+import json
+import math
+import mimetypes
+from io import BytesIO
+
 from pathlib import Path
 from time import perf_counter
 from typing import Iterable, Tuple
 from uuid import uuid4
 
+from queue import Queue
+from threading import Lock
+
 from flask import (
     Flask,
-    abort,
-    current_app,
+    Response,
     jsonify,
     render_template,
     request,
@@ -25,18 +31,15 @@ from flask import (
     stream_with_context,
     url_for,
 )
-from google.cloud import storage
-from werkzeug.utils import safe_join
 
-from .advertising import (
-    AD_IMAGE_BY_SCENARIO,
-    analyse_purchase_intent,
-    build_ad_context,
-    derive_scenario_key,
-)
+
+from PIL import Image, ImageOps, UnidentifiedImageError
+
+from .advertising import AdContext, build_ad_context
 from .ai import GeminiService, GeminiUnavailableError
 from .aws import RekognitionService
-from .database import Database
+from .database import Database, Purchase, SEED_MEMBER_IDS
+
 from .prediction import predict_next_purchases
 from .recognizer import FaceRecognizer
 from .routes import adgen_blueprint
@@ -59,22 +62,16 @@ DB_PATH = Path(os.environ.get("DB_PATH", str(DATA_DIR / "mvp.sqlite3")))
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", str(DATA_DIR / "uploads")))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-# VM 外部圖庫（可透過環境變數覆蓋）
-ADS_DIR = os.environ.get("ADS_DIR", "/srv/esp32-ads")
-Path(ADS_DIR).mkdir(parents=True, exist_ok=True)
 
-# Rekognition 開關（預設不 reset；只有顯式設 1 才做）
-REKOG_RESET = os.environ.get("REKOG_RESET", "0") == "1"
+PERSONA_LABELS = {
+    "dessert-lover": "甜點收藏家",
+    "family-groceries": "幼兒園家長",
+    "fitness-enthusiast": "健身族",
+    "home-manager": "家庭主婦",
+    "wellness-gourmet": "健康食品愛好者",
+}
 
-# -----------------------------------------------------------------------------
-# Flask App
-# -----------------------------------------------------------------------------
-app = Flask(
-    __name__,
-    template_folder=str(BASE_DIR / "templates"),
-    static_folder=str(BASE_DIR / "static"),
-    static_url_path="/static",
-)
+app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
 app.config["JSON_AS_ASCII"] = False
 app.config["ADS_DIR"] = ADS_DIR  # 儲存為字串路徑
 app.register_blueprint(adgen_blueprint)
@@ -113,12 +110,212 @@ recognizer = FaceRecognizer(rekognition)
 database = Database(DB_PATH)
 database.ensure_demo_data()
 
-# -----------------------------------------------------------------------------
-# Routes
-# -----------------------------------------------------------------------------
+
+class _LatestAdHub:
+    """Broadcast the most recent ad context to connected clients."""
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._subscribers: set[Queue] = set()
+        self._context: dict[str, object] | None = None
+
+    def snapshot(self) -> dict[str, object] | None:
+        with self._lock:
+            if self._context is None:
+                return None
+            return json.loads(json.dumps(self._context))
+
+    def subscribe(self) -> Queue:
+        queue: Queue = Queue()
+        with self._lock:
+            self._subscribers.add(queue)
+            context = self._context
+        if context is not None:
+            queue.put(context)
+        return queue
+
+    def unsubscribe(self, queue: Queue) -> None:
+        with self._lock:
+            self._subscribers.discard(queue)
+
+    def publish(self, context: dict[str, object]) -> None:
+        with self._lock:
+            self._context = context
+            subscribers = list(self._subscribers)
+        for queue in subscribers:
+            queue.put(context)
+
+
+_latest_ad_hub = _LatestAdHub()
+
+
+def _persona_label_display(profile_label: str | None) -> str | None:
+    if not profile_label:
+        return None
+    return PERSONA_LABELS.get(
+        profile_label,
+        profile_label.replace("-", " ").title(),
+    )
+
+
+def _serialize_ad_context(context: AdContext) -> dict[str, object]:
+    return {
+        "member_id": context.member_id,
+        "member_code": context.member_code,
+        "headline": context.headline,
+        "subheading": context.subheading,
+        "highlight": context.highlight,
+        "purchases": [
+            {
+                "item": purchase.item,
+                "purchased_at": purchase.purchased_at,
+                "product_category": purchase.product_category,
+                "internal_item_code": purchase.internal_item_code,
+                "unit_price": purchase.unit_price,
+                "quantity": purchase.quantity,
+                "total_price": purchase.total_price,
+            }
+            for purchase in context.purchases
+        ],
+    }
+
+_existing_event = database.get_latest_upload_event()
+if _existing_event is not None:
+    _existing_purchases = database.get_purchase_history(_existing_event.member_id)
+    _existing_context = build_ad_context(
+        _existing_event.member_id, _existing_purchases
+    )
+    _latest_ad_hub.publish(_serialize_ad_context(_existing_context))
+
+    del _existing_context, _existing_event, _existing_purchases
+
+
+
 @app.get("/")
 def index() -> str:
     return render_template("index.html")
+
+@app.get("/dashboard")
+def dashboard() -> str:
+    """Render the customer dashboard demo page."""
+    requested_member_id = request.args.get("member_id")
+    member_id = requested_member_id or None
+
+    try:
+        requested_page = int(request.args.get("page", "1"))
+    except ValueError:
+        requested_page = 1
+    requested_page = max(1, requested_page)
+
+    profile = None
+    if member_id:
+        profile = database.get_member_profile(member_id)
+
+    if profile is None:
+        latest_event = database.get_latest_upload_event()
+        if latest_event:
+            member_id = latest_event.member_id
+            profile = database.get_member_profile(member_id)
+
+    if profile is None:
+        for seed_member_id in SEED_MEMBER_IDS:
+            seeded_profile = database.get_member_profile(seed_member_id)
+            if seeded_profile is not None:
+                member_id = seed_member_id
+                profile = seeded_profile
+                break
+
+    purchases: list[Purchase] = []
+    page = 1
+    page_count = 1
+    has_prev = False
+    has_next = False
+    total_purchases = 0
+    predicted_items = []
+    prediction_window_label: str | None = None
+    if profile and member_id:
+        full_history = database.get_purchase_history(member_id)
+        prediction_result = predict_next_purchases(full_history, profile=profile)
+        predicted_items = prediction_result.items
+        prediction_window_label = prediction_result.window_label
+
+        limit = 7
+        total_purchases = len(full_history)
+        if total_purchases:
+            page_count = max(1, math.ceil(total_purchases / limit))
+            page = min(max(1, requested_page), page_count)
+            offset = (page - 1) * limit
+            purchases = full_history[offset : offset + limit]
+        else:
+            page = 1
+            page_count = 1
+            purchases = []
+        has_prev = page > 1
+        has_next = page < page_count
+    else:
+        page = 1
+        page_count = 1
+        has_prev = False
+        has_next = False
+
+    points_balance_display: str | None = None
+    if profile and profile.points_balance is not None:
+        points_balance_display = f"{profile.points_balance:,.0f}"
+
+    joined_at_display: str | None = None
+    if profile and profile.joined_at:
+        for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+            try:
+                joined_dt = datetime.strptime(profile.joined_at, fmt)
+            except ValueError:
+                continue
+            else:
+                joined_at_display = joined_dt.strftime("%Y-%m-%d")
+                break
+        else:
+            joined_at_display = profile.joined_at
+
+    persona_label: str | None = None
+    display_name: str | None = None
+    if profile:
+        persona_label = _persona_label_display(profile.profile_label)
+        display_name = profile.name or persona_label
+    if display_name is None:
+        display_name = "尚未命名會員"
+
+    profile_image_url: str | None = None
+    if profile and profile.first_image_filename:
+        static_upload_path = Path(app.static_folder or "") / "uploads" / profile.first_image_filename
+        if static_upload_path.exists():
+            profile_image_url = url_for(
+                "static", filename=f"uploads/{profile.first_image_filename}"
+            )
+        else:
+            upload_file = UPLOAD_DIR / profile.first_image_filename
+            if upload_file.exists():
+                profile_image_url = url_for(
+                    "serve_upload_image", filename=profile.first_image_filename
+                )
+
+    return render_template(
+        "dashboard.html",
+        profile=profile,
+        purchases=purchases,
+        persona_label=persona_label,
+        display_name=display_name,
+        points_balance_display=points_balance_display,
+        joined_at_display=joined_at_display,
+        profile_image_url=profile_image_url,
+        requested_member_id=requested_member_id,
+        resolved_member_id=member_id,
+        page=page,
+        page_count=page_count,
+        has_prev=has_prev,
+        has_next=has_next,
+        total_purchases=total_purchases,
+        predicted_items=predicted_items,
+        prediction_window_label=prediction_window_label,
+    )
 
 
 @app.post("/upload_face")
@@ -167,6 +364,8 @@ def upload_face():
                 [
                     {
                         "member_code": purchase.member_code,
+                        "product_category": purchase.product_category,
+                        "internal_item_code": purchase.internal_item_code,
                         "item": purchase.item,
                         "purchased_at": purchase.purchased_at,
                         "unit_price": purchase.unit_price,
@@ -179,6 +378,10 @@ def upload_face():
             )
         except GeminiUnavailableError as exc:
             logging.warning("Gemini ad generation unavailable: %s", exc)
+
+    context = build_ad_context(member_id, purchases, creative=creative)
+    _latest_ad_hub.publish(_serialize_ad_context(context))
+
     ad_generation_duration = perf_counter() - ad_generation_start
 
     total_duration = perf_counter() - overall_start
@@ -265,21 +468,23 @@ def render_ad(member_id: str):
     creative = None
     if gemini.can_generate_ads and insights.scenario != "brand_new":
         try:
-            creative = gemini.generate_ad_copy(
-                member_id,
-                [
-                    {
-                        "member_code": purchase.member_code,
-                        "item": purchase.item,
-                        "purchased_at": purchase.purchased_at,
-                        "unit_price": purchase.unit_price,
-                        "quantity": purchase.quantity,
-                        "total_price": purchase.total_price,
-                    }
-                    for purchase in purchases
-                ],
-                insights=insights,
-            )
+                creative = gemini.generate_ad_copy(
+                    member_id,
+                    [
+                        {
+                            "member_code": purchase.member_code,
+                            "product_category": purchase.product_category,
+                            "internal_item_code": purchase.internal_item_code,
+                            "item": purchase.item,
+                            "purchased_at": purchase.purchased_at,
+                            "unit_price": purchase.unit_price,
+                            "quantity": purchase.quantity,
+                            "total_price": purchase.total_price,
+                        }
+                        for purchase in purchases
+                    ],
+                )
+
         except GeminiUnavailableError as exc:
             logging.warning("Gemini ad generation unavailable: %s", exc)
 
@@ -373,6 +578,36 @@ def latest_ad_stream() -> Response:
     return Response(_generate(), headers=headers)
 
 
+
+@app.get("/ad/latest")
+def render_latest_ad():
+    context = _latest_ad_hub.snapshot()
+    return render_template(
+        "ad_latest.html",
+        context=context,
+        stream_url=url_for("latest_ad_stream"),
+    )
+
+
+@app.get("/ad/latest/stream")
+def latest_ad_stream():
+    def event_stream():
+        queue = _latest_ad_hub.subscribe()
+        try:
+            while True:
+                context = queue.get()
+                payload = json.dumps(context, ensure_ascii=False)
+                yield f"data: {payload}\n\n"
+        finally:
+            _latest_ad_hub.unsubscribe(queue)
+
+    response = Response(
+        stream_with_context(event_stream()), mimetype="text/event-stream"
+    )
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 @app.get("/latest_upload")
 def latest_upload_dashboard():
     event = database.get_latest_upload_event()
@@ -381,11 +616,22 @@ def latest_upload_dashboard():
             "latest_upload.html",
             event=None,
             members_url=url_for("member_directory"),
+            display_name=None,
+            persona_label=None,
         )
 
     image_url = None
     if event.image_filename:
         image_url = url_for("serve_upload_image", filename=event.image_filename)
+
+    profile = database.get_member_profile(event.member_id)
+    persona_label: str | None = None
+    display_name: str | None = None
+    if profile:
+        persona_label = _persona_label_display(profile.profile_label)
+        display_name = profile.name or persona_label
+    if display_name is None:
+        display_name = "尚未命名會員"
 
     return render_template(
         "latest_upload.html",
@@ -393,6 +639,8 @@ def latest_upload_dashboard():
         image_url=image_url,
         ad_url=url_for("render_ad", member_id=event.member_id, _external=True),
         members_url=url_for("member_directory"),
+        display_name=display_name,
+        persona_label=persona_label,
     )
 
 
@@ -405,7 +653,20 @@ def member_directory():
         purchases = []
         if profile.member_id:
             purchases = database.get_purchase_history(profile.member_id)
-        directory.append({"profile": profile, "purchases": purchases})
+
+
+        persona_label = _persona_label_display(profile.profile_label)
+        display_name = profile.name or persona_label or "尚未命名會員"
+
+        directory.append(
+            {
+                "profile": profile,
+                "purchases": purchases,
+                "persona_label": persona_label,
+                "display_name": display_name,
+            }
+        )
+
 
     return render_template("members.html", members=directory)
 
@@ -598,6 +859,8 @@ def _create_welcome_purchase(member_id: str) -> None:
     database.add_purchase(
         member_id,
         item="歡迎禮盒",
+        product_category="迎新禮遇",
+        internal_item_code="WELCOME-001",
         purchased_at=now.strftime("%Y-%m-%d %H:%M"),
         unit_price=880.0,
         quantity=1,
@@ -614,10 +877,24 @@ def _persist_upload_image(member_id: str, image_bytes: bytes, mime_type: str) ->
     filename = f"{timestamp}_{unique_suffix}_{member_id}{extension}"
     path = UPLOAD_DIR / filename
     try:
-        path.write_bytes(image_bytes)
-    except OSError as exc:
-        logging.warning("Failed to persist uploaded image %s: %s", path, exc)
-        return None
+
+        with Image.open(BytesIO(image_bytes)) as image:
+            normalized = ImageOps.exif_transpose(image)
+            save_kwargs: dict[str, object] = {}
+            image_format = (image.format or normalized.format or "").upper()
+            if image_format == "JPEG" or extension.lower() in {".jpg", ".jpeg"}:
+                save_kwargs.update(quality=95, optimize=True)
+            normalized.save(path, **save_kwargs)
+    except (UnidentifiedImageError, OSError) as exc:
+        logging.warning(
+            "Failed to normalise uploaded image %s via Pillow: %s", filename, exc
+        )
+        try:
+            path.write_bytes(image_bytes)
+        except OSError as write_exc:
+            logging.warning("Failed to persist uploaded image %s: %s", path, write_exc)
+            return None
+
     return filename
 
 

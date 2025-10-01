@@ -36,7 +36,6 @@
         max-width: 100%;
         border-radius: 12px;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        transform: rotate(180deg);
       }
       dl {
         display: grid;
@@ -115,6 +114,12 @@
             <dd>{{ event.created_at }}</dd>
             <dt>辨識結果</dt>
             <dd>會員代號：{{ event.member_code }}（ID：{{ event.member_id }}）</dd>
+            <dt>會員姓名</dt>
+            <dd>{{ display_name }}</dd>
+            {% if persona_label %}
+            <dt>Persona 標籤</dt>
+            <dd>{{ persona_label }}</dd>
+            {% endif %}
             <dt>廣告頁面</dt>
             <dd><a class="button" href="{{ ad_url }}" target="_blank" rel="noopener">開啟個人化廣告頁</a></dd>
             <dt>會員資料</dt>

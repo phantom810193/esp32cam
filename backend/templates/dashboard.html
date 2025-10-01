@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>你的專屬折扣</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <header>
+        <h1>你的專屬折扣</h1>
+        <nav>
+            <ul id="nav-links">
+                <li class="event"><a href="#" title="促銷活動">促銷活動</a></li>
+                <li class="shop"><a href="#" title="店舖管理">店舖管理</a></li>
+                <li class="product"><a href="#" title="商品管理">商品管理</a></li>
+                <li class="payment"><a href="#" title="金流管理">金流管理</a></li>
+                <li class="customer active"><a href="#" title="顧客資料">顧客資料</a></li>
+            </ul>
+        </nav>
+    </header>
+    <main id="customer-profile">
+        {% if not profile %}
+            <section class="customer-empty">
+                <p>目前找不到符合的會員資料{% if requested_member_id %}（查詢 ID：{{ requested_member_id }}）{% endif %}。</p>
+                <p>請稍候再試，或上傳新照片以建立會員紀錄。</p>
+            </section>
+        {% else %}
+        <div class="customer-layout">
+            <article id="customer-information">
+                <h2 class="hide">顧客資料</h2>
+                <div class="customer-panel">
+                    <figure class="customer-photo {% if not profile_image_url %}placeholder{% endif %}">
+                        {% set fallback_photo = url_for('static', filename='images/face.jpg') %}
+                        <img src="{{ profile_image_url or fallback_photo }}" alt="{{ display_name }} 的照片">
+                    </figure>
+                    <section class="customer-infolist">
+                        <ul class="customer-basic-info">
+                            <li class="customer-name">{{ display_name }}</li>
+                            {% set membership_status = profile.member_status or '尚未提供' %}
+                            <li class="customer-level {% if membership_status == '有效' %}general{% endif %}">{{ membership_status }}</li>
+                            <li>Face ID：{{ profile.member_id or '尚未指派' }}</li>
+                            <li>會員編號：{{ profile.mall_member_id or '尚未提供' }}</li>
+                            <li>會員狀態：{{ membership_status }}</li>
+                            <li>入會日期：{{ joined_at_display or profile.joined_at or '尚未提供' }}</li>
+                            <li>點數餘額：
+                                {% if points_balance_display %}
+                                    {{ points_balance_display }} 點
+                                {% elif profile.points_balance is not none %}
+                                    {{ '%.0f'|format(profile.points_balance) }} 點
+                                {% else %}
+                                    尚未提供
+                                {% endif %}
+                            </li>
+                        </ul>
+                        <ul class="customer-contact-info">
+                            <li>性別：{{ profile.gender or '尚未提供' }}</li>
+                            <li>出生年月：{{ profile.birth_date or '未填寫' }}</li>
+                            <li>聯絡電話：{{ profile.phone or '尚未提供' }}</li>
+                            <li>電子郵件：{{ profile.email or '尚未提供' }}</li>
+                            <li>郵遞地址：{{ profile.address or '未填寫' }}</li>
+                            <li>職業 / 產業別：{{ profile.occupation or '未填寫' }}</li>
+                        </ul>
+                    </section>
+                </div>
+            </article>
+            <article id="customer-details">
+                <section id="customer-tags">
+                    <h2>顧客標籤</h2>
+                    <ul class="customer-taglist">
+                        {% if persona_label %}
+                        <li>#{{ persona_label }}</li>
+                        {% endif %}
+                        <li>#健身族群</li>
+                        <li>#保健食品</li>
+                        <li>#蛋白粉</li>
+                        <li>#水果</li>
+                        <li>#美妝愛好</li>
+                    </ul>
+                </section>
+                <section id="customer-preferences">
+                    <h2 class="hide">顧客偏好</h2>
+                    <ul class="customer-preferencelist">
+                        <!-- <li><span>偏好品牌</span>Adidas, New Balance</li> -->
+                        <li><span>偏好商品類別</span>穀物 / 早餐、健康飲品</li>
+                        <li><span>最近消費時間</span><i>2天前</i> 2025/09/25</li>
+                        <li><span>本季消費頻率</span>每月 <i>4</i>次</li>
+                        <li><span>平均消費金額</span>NT$ <i>8,320</i></li>
+                    </ul>
+                </section>
+                <section id="customer-purchase-history">
+                    <h2 class="hide">顧客購買歷史</h2>
+                    <span id="tab-1">1</span>
+                    <span id="tab-2">2</span>
+                    <span id="tab-3">3</span>
+                    <span id="tab-4">4</span>
+                    <div id="tab">
+                        <ul>
+                            <li><a href="#tab-1" title="感興趣商品推估">感興趣商品推估</a></li>
+                            <li><a href="#tab-2" title="歷史消費紀錄">歷史消費紀錄</a></li>
+                            <li><a href="#tab-3" title="動線區域停留時間">動線區域停留時間</a></li>
+                            <li><a href="#tab-4" title="參與活動紀錄">參與活動紀錄</a></li>
+                        </ul>
+                        <div class="tab-content-1">
+                            <h3 class="hide">感興趣商品推估</h3>
+                            <ul class="tool">
+                                <li><a href="" class="search">搜尋</a></li>
+                                <li><a href="" class="filter">篩選</a></li>
+                            </ul>
+                            <section class="prediction-results">
+                                {% if prediction_window_label %}
+                                <p class="prediction-window-label" id="prediction-window-label">參考期間：{{ prediction_window_label }}</p>
+                                {% endif %}
+                                <table aria-describedby="prediction-window-label">
+                                    <thead>
+                                        <tr>
+                                            <th>商品編號</th>
+                                            <th>商品名稱</th>
+                                            <th>商品類別</th>
+                                            <th>商品價格</th>
+                                            <th>查閱率</th>
+                                            <th>預估購買機率</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="prediction-table-body">
+                                        {% if predicted_items %}
+                                            {% for item in predicted_items %}
+                                                {% set probability_class = 'hight' if item.probability_percent >= 85 else 'medium' if item.probability_percent >= 60 else '' %}
+                                                {% set probability_text = '%.1f'|format(item.probability_percent) %}
+                                                <tr data-prediction-row="true" data-index="{{ loop.index0 }}">
+                                                    <td>{{ item.product_code }}</td>
+                                                    <td>{{ item.product_name }}</td>
+                                                    <td>{{ item.category_label }}</td>
+                                                    <td>{{ '${:,.0f}'.format(item.price) }}</td>
+                                                    <td>{{ '%.1f'|format(item.view_rate_percent) }}%</td>
+                                                    <td>
+                                                        {% if probability_class %}
+                                                            <span class="{{ probability_class }}">{{ probability_text }}%</span>
+                                                        {% else %}
+                                                            {{ probability_text }}%
+                                                        {% endif %}
+                                                    </td>
+                                                </tr>
+                                            {% endfor %}
+                                        {% else %}
+                                            <tr class="empty-message" data-empty-row="true">
+                                                <td colspan="6">目前無可用的推薦商品。</td>
+                                            </tr>
+                                        {% endif %}
+                                    </tbody>
+                                </table>
+                                <ul class="page" id="prediction-pagination" aria-label="感興趣商品推估頁面導覽"></ul>
+                            </section>
+                        <div class="advertising">
+                            <ul class="advertising_info">
+                                <!-- <li><span>上傳速度</span>0.3秒</li>
+                                <li><span>辨識速度</span>0.6秒</li>
+                                <li><span>廣告生成</span>0.8秒</li>
+                                <li><span>總計耗時</span>0.8秒</li> -->
+                                {% set ad_link = resolved_member_id and 'http://34.80.216.88:8000/ad/' ~ resolved_member_id %}
+                                <li class="btn">
+                                    <a href="{{ ad_link or '#' }}" title="檢視生成廣告"{% if not ad_link %} aria-disabled="true" tabindex="-1"{% endif %}>檢視生成廣告</a>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="tab-content-2">
+                        <h3 class="hide">歷史消費紀錄</h3>
+                        <ul class="tool">
+                            <li><a href="#" class="search" aria-disabled="true">搜尋</a></li>
+                            <li><a href="#" class="filter" aria-disabled="true">篩選</a></li>
+                        </ul>
+                        <table class="purchase-history">
+                            <thead>
+                                <tr>
+                                    <th scope="col" class="datetime">消費日期時間</th>
+                                    <th scope="col" class="item">項目</th>
+                                    <th scope="col" class="category">商品類別</th>
+                                    <th scope="col" class="numeric">單價</th>
+                                    <th scope="col" class="numeric">數量</th>
+                                    <th scope="col" class="numeric">總價</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% if purchases %}
+                                    {% for purchase in purchases %}
+                                        <tr>
+                                            <td class="datetime">{{ purchase.purchased_at }}</td>
+                                            <td class="item">{{ purchase.item }}</td>
+                                            <td class="category">{{ purchase.product_category or '—' }}</td>
+                                            <td class="numeric">${{ '%.0f'|format(purchase.unit_price) }}</td>
+                                            {% set qty_text = ('%.2f'|format(purchase.quantity)).rstrip('0').rstrip('.') %}
+                                            <td class="numeric">{{ qty_text }}</td>
+                                            <td class="numeric">${{ '%.0f'|format(purchase.total_price) }}</td>
+                                        </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    <tr>
+                                        <td colspan="6" class="empty-message">尚未有消費紀錄。</td>
+                                    </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                        <div class="history-pagination" aria-label="歷史消費紀錄頁面導覽">
+                            <span class="page-status">第 {{ page }} / {{ page_count }} 頁</span>
+                            <div class="pagination-links">
+                                <a class="prev{% if not has_prev %} disabled{% endif %}"
+                                   href="{{ url_for('dashboard', member_id=resolved_member_id, page=page - 1) }}"
+                                   {% if not has_prev %}aria-disabled="true" tabindex="-1"{% endif %}>上一頁</a>
+                                <a class="next{% if not has_next %} disabled{% endif %}"
+                                   href="{{ url_for('dashboard', member_id=resolved_member_id, page=page + 1) }}"
+                                   {% if not has_next %}aria-disabled="true" tabindex="-1"{% endif %}>下一頁</a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="tab-content-3"><p>內容-3</p>
+                    </div>
+                    <div class="tab-content-4"><p>內容-4</p>
+                    </div>
+                </div>
+            </section>
+            
+        </article>
+        </div>
+        {% endif %}
+    </main>
+    <!-- <footer>
+        <p>2025 &copy;  你的專屬折扣
+    </footer> -->
+    <script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const tableBody = document.querySelector('#prediction-table-body');
+        const pagination = document.querySelector('#prediction-pagination');
+        if (!tableBody || !pagination) {
+            return;
+        }
+
+        const dataRows = Array.from(tableBody.querySelectorAll('tr[data-prediction-row="true"]'));
+        if (!dataRows.length) {
+            pagination.style.display = 'none';
+            return;
+        }
+
+        const pageSize = 7;
+        const totalPages = Math.ceil(dataRows.length / pageSize);
+        let currentPage = 1;
+
+        function renderPage(page) {
+            currentPage = page;
+            dataRows.forEach(function (row, index) {
+                const pageIndex = Math.floor(index / pageSize) + 1;
+                row.style.display = pageIndex === page ? '' : 'none';
+            });
+            const items = pagination.querySelectorAll('li');
+            items.forEach(function (item, index) {
+                item.classList.toggle('active', index + 1 === page);
+            });
+        }
+
+        function buildPagination() {
+            pagination.innerHTML = '';
+            if (totalPages <= 1) {
+                pagination.style.display = 'none';
+                return;
+            }
+
+            pagination.style.display = '';
+            for (let page = 1; page <= totalPages; page += 1) {
+                const li = document.createElement('li');
+                if (page === currentPage) {
+                    li.classList.add('active');
+                }
+                const link = document.createElement('a');
+                link.href = '#';
+                link.textContent = String(page);
+                link.title = `第${page}頁`;
+                link.addEventListener('click', function (event) {
+                    event.preventDefault();
+                    if (page === currentPage) {
+                        return;
+                    }
+                    renderPage(page);
+                });
+                li.appendChild(link);
+                pagination.appendChild(li);
+            }
+        }
+
+        buildPagination();
+        renderPage(1);
+    });
+    </script>
+</body>
+</html>

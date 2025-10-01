@@ -43,6 +43,11 @@
         font-size: 1.5rem;
         color: #1f4e79;
       }
+      .member-card h2 .persona-label {
+        font-size: 0.95rem;
+        color: #6c757d;
+        margin-left: 0.5rem;
+      }
       .member-meta {
         display: grid;
         grid-template-columns: minmax(180px, 220px) 1fr;
@@ -161,13 +166,6 @@
       <a class="back-link" href="{{ url_for('latest_upload_dashboard') }}">← 返回最新上傳影像儀表板</a>
     </header>
     <main>
-      {% set label_map = {
-        'dessert-lover': '甜點收藏家',
-        'family-groceries': '幼兒園家長',
-        'fitness-enthusiast': '健身族',
-        'home-manager': '家庭主婦',
-        'wellness-gourmet': '健康食品愛好者'
-      } %}
       {% if not members %}
         <div class="member-card">
           <p class="empty-message">目前沒有可顯示的會員資料。</p>
@@ -176,10 +174,13 @@
         {% for entry in members %}
           {% set profile = entry.profile %}
           {% set purchases = entry.purchases %}
+          {% set persona_label = entry.persona_label %}
           <section class="member-card">
-            {% set persona_name = label_map.get(profile.profile_label, profile.profile_label | replace('-', ' ') | title) %}
             <h2>
-              {{ persona_name }}
+              {{ entry.display_name }}
+              {% if persona_label %}
+                <span class="persona-label">· {{ persona_label }}</span>
+              {% endif %}
               {% if profile.mall_member_id %}
                 <small>（商場會員代號：{{ profile.mall_member_id }}）</small>
               {% else %}
@@ -189,7 +190,7 @@
             <div class="member-meta">
               <div class="member-photo {% if not profile.first_image_filename %}placeholder{% endif %}">
                 {% if profile.first_image_filename %}
-                  <img src="{{ url_for('serve_upload_image', filename=profile.first_image_filename) }}" alt="{{ profile.member_id or '尚未指派' }} 首次辨識影像">
+                  <img src="{{ url_for('serve_upload_image', filename=profile.first_image_filename) }}" alt="{{ entry.display_name }} 首次辨識影像">
                   <span class="caption">首次辨識影像</span>
                 {% else %}
                   <span>尚未留存首次辨識影像</span>
@@ -203,26 +204,32 @@
                   </div>
                   <div class="summary-item">
                     <span class="label">會員狀態</span>
-                    <span class="value">{{ profile.member_status }}</span>
+                    <span class="value">{{ profile.member_status or '尚未提供' }}</span>
                   </div>
                   <div class="summary-item">
                     <span class="label">入會日期</span>
-                    <span class="value">{{ profile.joined_at }}</span>
+                    <span class="value">{{ profile.joined_at or '尚未提供' }}</span>
                   </div>
                   <div class="summary-item">
                     <span class="label">點數餘額</span>
-                    <span class="value">{{ '%.0f'|format(profile.points_balance) }}</span>
+                    <span class="value">
+                      {% if profile.points_balance is not none %}
+                        {{ '%.0f'|format(profile.points_balance) }}
+                      {% else %}
+                        尚未提供
+                      {% endif %}
+                    </span>
                   </div>
                 </div>
                 <dl class="profile-details">
                   <dt>性別</dt>
-                  <dd>{{ profile.gender }}</dd>
+                  <dd>{{ profile.gender or '尚未提供' }}</dd>
                   <dt>出生年月</dt>
                   <dd>{{ profile.birth_date or '未填寫' }}</dd>
                   <dt>連絡電話</dt>
-                  <dd>{{ profile.phone }}</dd>
+                  <dd>{{ profile.phone or '尚未提供' }}</dd>
                   <dt>電子郵件</dt>
-                  <dd>{{ profile.email }}</dd>
+                  <dd>{{ profile.email or '尚未提供' }}</dd>
                   <dt>郵遞地址</dt>
                   <dd>{{ profile.address or '未填寫' }}</dd>
                   <dt>職業</dt>

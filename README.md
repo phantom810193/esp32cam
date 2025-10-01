@@ -89,8 +89,9 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
 6. API 重點：
 
     - `POST /upload_face`：接受 `image/jpeg` 或 `multipart/form-data` 影像。回傳 JSON，內含 `member_id`、`member_code`（僅在已有商場註冊代號時帶值）、`new_member` 旗標與廣告頁 URL。
-    - `GET /ad/<member_id>`：根據 SQLite + Gemini Text 的輸出生成廣告頁，內建 `<meta http-equiv="refresh" content="5">`，適合放在電視棒上自動輪播。
-    - `GET /ad/latest/stream`：透過 Server-Sent Events 形式推送最新的上傳事件與廣告頁連結，前端或電視棒可直接串流更新。若僅需單次查詢，可加上 `?once=1` 取得最新事件後立即結束連線。
+    - `GET /ad/<member_id>`：根據 SQLite + Gemini Text 的輸出生成廣告頁，適合在除錯或需要鎖定特定會員時手動檢視。
+    - `GET /dashboard?member_id=MEMxxxx`：管理人員專用的會員儀表板。可輸入 `member_id` 查詢特定會員，也會自動回退至最新上傳事件或預設示範會員。頁面會顯示會員基本資料、聯絡資訊、點數餘額、Persona 標籤及購買歷史，並在有上傳首張照片時自動載入對應人像。
+    - `GET /ad/latest`：即時廣告看板。使用 Server-Sent Events (SSE) 監聽最新辨識結果，電視棒只要固定開啟這個網址就會自動切換成剛辨識完成的會員廣告，不需重新整理頁面。
     - `GET /latest_upload`：顯示最新上傳影像、辨識結果、個人化廣告連結與各階段耗時分析，方便除錯與現場展示。後端會保留最新一張上傳影像，並為每位會員留存首次辨識的照片，以避免佔用過多空間又能在名單頁回溯影像。
     - `GET /members`：瀏覽預寫會員的個人資料、首次辨識影像與 2025 年消費紀錄，也可從最新上傳儀表板的「會員資料」按鈕快速進入。
     - `POST /adgen`：呼叫 Vertex AI Gemini + Imagen 生成標題、副標、CTA 與海報圖。
@@ -199,8 +200,9 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
 
 ## 前端展示（電視棒 / 螢幕）
 
-- 在電視棒或任何瀏覽器打開 `http://<server-ip>:8000/ad/<member_id>` 即可。
-- 網頁每 5 秒刷新一次，Gemini Text 產出的主標、副標、促購亮點會即時更新。若 AI 功能未啟用，則會顯示預設模板。
+- 建議在電視棒或任何瀏覽器打開 `http://<server-ip>:8000/ad/latest`，透過 SSE 自動切換成最新辨識出的會員廣告。
+- 若需固定觀看指定會員，仍可開啟 `http://<server-ip>:8000/ad/<member_id>` 進行除錯。此頁會保留原本的輪播刷新行為。
+- 管理人員可前往 `http://<server-ip>:8000/dashboard` 檢視會員儀表板，亦可透過查詢參數 `?member_id=MEMxxxx` 指定會員。此頁整合會員基本資料、聯絡方式、點數餘額與購買紀錄，方便現場客服或營運團隊快速掌握狀態。
 
 ## ESP32-CAM（PlatformIO 範例）
 
@@ -226,8 +228,8 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
 ## Demo 建議流程
 
 1. 啟動雲端或本地的 Flask 伺服器並設定 Amazon Rekognition 憑證與 `GEMINI_API_KEY`。
-2. 將 HDMI 電視棒固定在 `/ad/<member_id>` 頁面，或使用瀏覽器展示。
-3. ESP32-CAM 開機 → 拍照上傳 → 後端呼叫 Amazon Rekognition → 查詢 SQLite → Gemini Text 生成廣告 → 頁面自動刷新，整體流程預期 < 10 秒。
+2. 將 HDMI 電視棒固定在 `/ad/latest` 頁面，或使用瀏覽器展示，即可即時看到最新辨識的會員廣告。
+3. ESP32-CAM 開機 → 拍照上傳 → 後端呼叫 Amazon Rekognition → 查詢 SQLite → Gemini Text 生成廣告 → SSE 推播至 `/ad/latest` 頁面，整體流程預期 < 10 秒。
 4. 錄製 < 1 分鐘 Demo 影片展示「上傳 → 廣告更新」的完整閉環。
 
 ## 後續擴充想法（Nice-to-Have）

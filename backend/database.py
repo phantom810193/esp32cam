@@ -8,6 +8,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Iterable
 from zoneinfo import ZoneInfo
 
 from .recognizer import FaceEncoding, FaceRecognizer
@@ -41,6 +42,8 @@ _TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 class Purchase:
     member_id: str
     member_code: str
+    product_category: str
+    internal_item_code: str
     item: str
     purchased_at: str
     unit_price: float
@@ -52,15 +55,16 @@ class Purchase:
 class MemberProfile:
     profile_id: int
     profile_label: str
+    name: str | None
     member_id: str | None
     mall_member_id: str | None
-    member_status: str
-    joined_at: str
-    points_balance: float
-    gender: str
+    member_status: str | None
+    joined_at: str | None
+    points_balance: float | None
+    gender: str | None
     birth_date: str | None
-    phone: str
-    email: str
+    phone: str | None
+    email: str | None
     address: str | None
     occupation: str | None
     first_image_filename: str | None
@@ -81,12 +85,33 @@ class UploadEvent:
 
 def _build_seed_purchases(
     start_timestamp: str,
-    items: list[tuple[str, float, float]],
+    items: list[tuple[str, float, float] | tuple[str, float, float, str] | tuple[str, float, float, str, str]],
     member_code: str | None = None,
+    *,
+    default_category: str = "一般商品",
+    code_prefix: str = "SKU",
 ) -> list[dict[str, float | str]]:
     base = datetime.fromisoformat(start_timestamp)
     purchases: list[dict[str, float | str]] = []
-    for index, (name, unit_price, quantity) in enumerate(items):
+    for index, spec in enumerate(items, start=1):
+        name: str
+        unit_price: float
+        quantity: float
+        category: str
+        internal_code: str
+
+        if len(spec) == 3:
+            name, unit_price, quantity = spec  # type: ignore[misc]
+            category = default_category
+            internal_code = f"{code_prefix}-{index:03d}"
+        elif len(spec) == 4:
+            name, unit_price, quantity, category = spec  # type: ignore[misc]
+            internal_code = f"{code_prefix}-{index:03d}"
+        else:
+            name, unit_price, quantity, category, internal_code = spec  # type: ignore[misc]
+            if not internal_code:
+                internal_code = f"{code_prefix}-{index:03d}"
+
         scheduled = base + timedelta(days=index * 3 + (index % 4), hours=index % 5, minutes=(index * 11) % 60)
         purchases.append(
             {
@@ -96,6 +121,8 @@ def _build_seed_purchases(
                 "unit_price": float(unit_price),
                 "quantity": float(quantity),
                 "total_price": round(unit_price * quantity, 2),
+                "product_category": category,
+                "internal_item_code": internal_code,
             }
         )
     return purchases
@@ -164,6 +191,7 @@ class Database:
             expected_profile_columns = [
                 "profile_id",
                 "profile_label",
+                "name",
                 "member_id",
                 "mall_member_id",
                 "member_status",
@@ -177,23 +205,39 @@ class Database:
                 "occupation",
                 "first_image_filename",
             ]
-            if profile_columns and profile_columns != expected_profile_columns:
-                conn.execute("DROP TABLE IF EXISTS member_profiles")
+
+            if profile_columns:
+                if profile_columns != expected_profile_columns:
+                    conn.execute("DROP TABLE IF EXISTS member_profiles")
+                else:
+                    profile_meta = conn.execute("PRAGMA table_info(member_profiles)").fetchall()
+                    nullable_columns = {
+                        "member_status",
+                        "joined_at",
+                        "points_balance",
+                        "gender",
+                        "phone",
+                        "email",
+                        "name",
+                    }
+                    if any(row["name"] in nullable_columns and row["notnull"] for row in profile_meta):
+                        conn.execute("DROP TABLE IF EXISTS member_profiles")
 
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS member_profiles (
                     profile_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     profile_label TEXT NOT NULL UNIQUE,
+                    name TEXT,
                     member_id TEXT UNIQUE,
                     mall_member_id TEXT,
-                    member_status TEXT NOT NULL DEFAULT '有效',
-                    joined_at TEXT NOT NULL,
-                    points_balance REAL NOT NULL DEFAULT 0,
-                    gender TEXT NOT NULL,
+                    member_status TEXT DEFAULT '有效',
+                    joined_at TEXT,
+                    points_balance REAL DEFAULT 0,
+                    gender TEXT,
                     birth_date TEXT,
-                    phone TEXT NOT NULL,
-                    email TEXT NOT NULL,
+                    phone TEXT,
+                    email TEXT,
                     address TEXT,
                     occupation TEXT,
                     first_image_filename TEXT,
@@ -207,6 +251,8 @@ class Database:
                 "id",
                 "member_id",
                 "member_code",
+                "product_category",
+                "internal_item_code",
                 "purchased_at",
                 "item",
                 "unit_price",
@@ -222,6 +268,8 @@ class Database:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     member_id TEXT NOT NULL,
                     member_code TEXT NOT NULL,
+                    product_category TEXT NOT NULL DEFAULT '',
+                    internal_item_code TEXT NOT NULL DEFAULT '',
                     purchased_at TEXT NOT NULL,
                     item TEXT NOT NULL,
                     unit_price REAL NOT NULL,
@@ -508,6 +556,7 @@ class Database:
                 """
                 SELECT profile_id,
                        profile_label,
+                       name,
                        member_id,
                        mall_member_id,
                        member_status,
@@ -532,15 +581,17 @@ class Database:
         return MemberProfile(
             profile_id=int(row["profile_id"]),
             profile_label=str(row["profile_label"]),
+            name=str(row["name"]) if row["name"] else None,
             member_id=str(row["member_id"]) if row["member_id"] else None,
             mall_member_id=str(row["mall_member_id"]) if row["mall_member_id"] else None,
-            member_status=str(row["member_status"]),
-            joined_at=str(row["joined_at"]),
-            points_balance=float(row["points_balance"]),
-            gender=str(row["gender"]),
+            member_status=str(row["member_status"]) if row["member_status"] else None,
+            joined_at=str(row["joined_at"]) if row["joined_at"] else None,
+            points_balance=float(row["points_balance"]) if row["points_balance"] is not None else None,
+            gender=str(row["gender"]) if row["gender"] else None,
             birth_date=str(row["birth_date"]) if row["birth_date"] else None,
-            phone=str(row["phone"]),
-            email=str(row["email"]),
+            phone=str(row["phone"]) if row["phone"] else None,
+            email=str(row["email"]) if row["email"] else None,
+
             address=str(row["address"]) if row["address"] else None,
             occupation=str(row["occupation"]) if row["occupation"] else None,
             first_image_filename=
@@ -553,6 +604,7 @@ class Database:
                 """
                 SELECT profile_id,
                        profile_label,
+                       name,
                        member_id,
                        mall_member_id,
                        member_status,
@@ -576,15 +628,17 @@ class Database:
                 MemberProfile(
                     profile_id=int(row["profile_id"]),
                     profile_label=str(row["profile_label"]),
+                    name=str(row["name"]) if row["name"] else None,
                     member_id=str(row["member_id"]) if row["member_id"] else None,
                     mall_member_id=str(row["mall_member_id"]) if row["mall_member_id"] else None,
-                    member_status=str(row["member_status"]),
-                    joined_at=str(row["joined_at"]),
-                    points_balance=float(row["points_balance"]),
-                    gender=str(row["gender"]),
+                    member_status=str(row["member_status"]) if row["member_status"] else None,
+                    joined_at=str(row["joined_at"]) if row["joined_at"] else None,
+                    points_balance=float(row["points_balance"]) if row["points_balance"] is not None else None,
+                    gender=str(row["gender"]) if row["gender"] else None,
                     birth_date=str(row["birth_date"]) if row["birth_date"] else None,
-                    phone=str(row["phone"]),
-                    email=str(row["email"]),
+                    phone=str(row["phone"]) if row["phone"] else None,
+                    email=str(row["email"]) if row["email"] else None,
+
                     address=str(row["address"]) if row["address"] else None,
                     occupation=str(row["occupation"]) if row["occupation"] else None,
                     first_image_filename=
@@ -623,6 +677,8 @@ class Database:
         member_id: str,
         *,
         member_code: str | None = None,
+        product_category: str | None = None,
+        internal_item_code: str | None = None,
         item: str,
         purchased_at: str,
         unit_price: float,
@@ -633,23 +689,29 @@ class Database:
             resolved_code = self.get_member_code(member_id)
         else:
             resolved_code = member_code
+        resolved_category = product_category or ""
+        resolved_internal_code = internal_item_code or ""
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO purchases (
                     member_id,
                     member_code,
+                    product_category,
+                    internal_item_code,
                     purchased_at,
                     item,
                     unit_price,
                     quantity,
                     total_price
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     member_id,
                     resolved_code,
+                    resolved_category,
+                    resolved_internal_code,
                     purchased_at,
                     item,
                     float(unit_price),
@@ -662,22 +724,37 @@ class Database:
     def get_purchase_history(self, member_id: str) -> list[Purchase]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT member_id, member_code, purchased_at, item, unit_price, quantity, total_price"
+                "SELECT member_id, member_code, product_category, internal_item_code, purchased_at, item, unit_price, quantity, total_price"
                 " FROM purchases WHERE member_id = ? ORDER BY purchased_at DESC, id DESC",
                 (member_id,),
             ).fetchall()
-        return [
-            Purchase(
-                member_id=row["member_id"],
-                member_code=row["member_code"],
-                item=row["item"],
-                purchased_at=row["purchased_at"],
-                unit_price=float(row["unit_price"]),
-                quantity=float(row["quantity"]),
-                total_price=float(row["total_price"]),
-            )
-            for row in rows
-        ]
+        return self._rows_to_purchases(rows)
+
+    def get_purchase_history_page(
+        self, member_id: str, limit: int, offset: int
+    ) -> list[Purchase]:
+        limit = max(0, int(limit))
+        offset = max(0, int(offset))
+        if limit == 0:
+            return []
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT member_id, member_code, product_category, internal_item_code, purchased_at, item, unit_price, quantity, total_price"
+                " FROM purchases WHERE member_id = ? ORDER BY purchased_at DESC, id DESC LIMIT ? OFFSET ?",
+                (member_id, limit, offset),
+            ).fetchall()
+        return self._rows_to_purchases(rows)
+
+    def count_purchase_history(self, member_id: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS total FROM purchases WHERE member_id = ?",
+                (member_id,),
+            ).fetchone()
+        if row is None:
+            return 0
+        return int(row["total"]) if "total" in row.keys() else int(row[0])
 
     def record_upload_event(
         self,
@@ -1129,23 +1206,36 @@ class Database:
         dessert_history = _build_seed_purchases(
             "2025-01-04 10:30",
             dessert_specs,
+            "ME0001",
+            default_category="甜點與烘焙",
+            code_prefix="DES",
         )
         kids_history = _build_seed_purchases(
             "2025-01-05 09:20",
             kids_specs,
+            "ME0002",
+            default_category="親子成長與家庭",
+            code_prefix="FAM",
         )
 
         fitness_history = _build_seed_purchases(
             "2025-01-06 07:30",
             fitness_specs,
+            "ME0003",
+            default_category="運動與體能",
+            code_prefix="FIT",
         )
         homemaker_history = _build_seed_purchases(
             "2025-01-08 08:45",
             homemaker_specs,
+            default_category="居家生活",
+            code_prefix="HOM",
         )
         health_history = _build_seed_purchases(
             "2025-01-09 09:10",
             health_specs,
+            default_category="健康食尚",
+            code_prefix="HLT",
         )
 
         self._profile_purchase_templates = {
@@ -1160,6 +1250,7 @@ class Database:
 
         self._seed_member_profile(
             profile_label="dessert-lover",
+            name="林悅心",
             member_id=None,
             mall_member_id="ME0001",
             member_status="有效",
@@ -1174,6 +1265,7 @@ class Database:
         )
         self._seed_member_profile(
             profile_label="family-groceries",
+            name="陳雅雯",
             member_id=None,
             mall_member_id="ME0002",
             member_status="有效",
@@ -1188,6 +1280,7 @@ class Database:
         )
         self._seed_member_profile(
             profile_label="fitness-enthusiast",
+            name="張智翔",
             member_id=None,
             mall_member_id="ME0003",
             member_status="有效",
@@ -1202,31 +1295,34 @@ class Database:
         )
         self._seed_member_profile(
             profile_label="home-manager",
+            name="黃珮真",
             member_id=None,
             mall_member_id="",
-            member_status="有效",
-            joined_at="2023-03-18",
-            points_balance=640,
-            gender="女",
+            member_status=None,
+            joined_at=None,
+            points_balance=None,
+            gender=None,
             birth_date=None,
-            phone="0977-334-556",
-            email="homemanager@example.com",
-            address="桃園市桃園區同德五街66號",
+            phone=None,
+            email=None,
+            address=None,
             occupation=None,
         )
         self._seed_member_profile(
             profile_label="wellness-gourmet",
+            name="吳品蓉",
             member_id=None,
             mall_member_id="",
-            member_status="有效",
-            joined_at="2024-01-05",
-            points_balance=520,
-            gender="男",
-            birth_date="1992-10-02",
-            phone="0966-778-990",
-            email="healthbuyer@example.com",
+            member_status=None,
+            joined_at=None,
+            points_balance=None,
+            gender=None,
+            birth_date=None,
+            phone=None,
+            email=None,
             address=None,
-            occupation="營養顧問",
+            occupation=None,
+
         )
 
     def _seed_member_history(
@@ -1262,15 +1358,17 @@ class Database:
         self,
         *,
         profile_label: str,
+        name: str | None,
         member_id: str | None,
         mall_member_id: str | None,
-        member_status: str,
-        joined_at: str,
-        points_balance: float,
-        gender: str,
+        member_status: str | None,
+        joined_at: str | None,
+        points_balance: float | None,
+        gender: str | None,
         birth_date: str | None,
-        phone: str,
-        email: str,
+        phone: str | None,
+        email: str | None,
+
         address: str | None,
         occupation: str | None,
     ) -> None:
@@ -1281,11 +1379,12 @@ class Database:
             ).fetchone()
 
             params = (
+                name,
                 member_id,
                 mall_member_id,
                 member_status,
                 joined_at,
-                float(points_balance),
+                float(points_balance) if points_balance is not None else None,
                 gender,
                 birth_date,
                 phone,
@@ -1299,6 +1398,7 @@ class Database:
                     """
                     INSERT INTO member_profiles (
                         profile_label,
+                        name,
                         member_id,
                         mall_member_id,
                         member_status,
@@ -1311,7 +1411,7 @@ class Database:
                         address,
                         occupation
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (profile_label, *params),
                 )
@@ -1319,7 +1419,8 @@ class Database:
                 conn.execute(
                     """
                     UPDATE member_profiles
-                    SET member_id = ?,
+                    SET name = ?,
+                        member_id = ?,
                         mall_member_id = ?,
                         member_status = ?,
                         joined_at = ?,
@@ -1335,4 +1436,21 @@ class Database:
                     (*params, row["profile_id"]),
                 )
             conn.commit()
+
+    @staticmethod
+    def _rows_to_purchases(rows: Iterable[sqlite3.Row]) -> list[Purchase]:
+        return [
+            Purchase(
+                member_id=row["member_id"],
+                member_code=row["member_code"],
+                product_category=str(row["product_category"] or ""),
+                internal_item_code=str(row["internal_item_code"] or ""),
+                item=row["item"],
+                purchased_at=row["purchased_at"],
+                unit_price=float(row["unit_price"]),
+                quantity=float(row["quantity"]),
+                total_price=float(row["total_price"]),
+            )
+            for row in rows
+        ]
 
