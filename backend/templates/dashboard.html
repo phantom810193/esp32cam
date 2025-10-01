@@ -107,92 +107,50 @@
                                 <li><a href="" class="search">搜尋</a></li>
                                 <li><a href="" class="filter">篩選</a></li>
                             </ul>
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>內部商品編號</th>
-                                        <th>商品名稱</th>
-                                        <th>商品類別</th>
-                                        <th>商品價格</th>
-                                        <th>商品<br/>查閱率</th>
-                                        <!--th>廣告<br/>查閱率</th>
-                                        <th>相似紀錄<br/>符合率</th-->
-                                        <th>預估購買機率</th>
-                                    </tr>
-                                </thead>
-                            <tbody>
-                                <tr>
-                                    <td>100234</td>
-                                    <td>桂花牌有機澳洲燕麥片 500g</td>
-                                    <td>穀物 / 早餐</td>
-                                    <td>$250</td>
-                                    <td>85%</td>
-                                    <!--td>70%</td>
-                                    <td>90%</td-->
-                                    <td><span class="hight">96%</span></td>
-                                </tr>
-                                <tr>
-                                    <td>204233</td>
-                                    <td>Light 能量蛋白棒 | 醇濃巧克力</td>
-                                    <td>健康飲品</td>
-                                    <td>$260</td>
-                                    <td>80%</td>
-                                    <!--td>65%</td>
-                                    <td>85%</td-->
-                                    <td><span class="hight">92%</span></td>
-                                </tr>
-                                <tr>
-                                    <td>401022</td>
-                                    <td>冷壓綜合果汁 350ml</td>
-                                    <td>健康飲品</td>
-                                    <td>$95</td>
-                                    <td>75%</td>
-                                    <!--td>60%</td>
-                                    <td>80%</td-->
-                                    <td><span class="hight">80%</span></td>
-                                </tr>
-                                <tr>
-                                    <td>305120</td>
-                                    <td>瑜伽墊止滑清潔噴霧</td>
-                                    <td>運動配件</td>
-                                    <td>$240</td>
-                                    <td>75%</td>
-                                    <!--td>60%</td>
-                                    <td>40%</td-->
-                                    <td><span class="medium">70%</span></td>
-                                </tr>
-                                <tr>
-                                    <td>401022</td>
-                                    <td>無糖優格 200ml</td>
-                                    <td>健康飲品</td>
-                                    <td>$$250</td>
-                                    <td>75%</td>
-                                    <!--td>45%</td>
-                                    <td>31%</td-->
-                                    <td><span class="medium">68%</span></td>
-                                </tr>
-                                <tr>
-                                    <td>823144</td>
-                                    <td>冷壓蘋果果汁 350ml</td>
-                                    <td>健康飲品</td>
-                                    <td>$95</td>
-                                    <td>75%</td>
-                                    <!--td>39%</td>
-                                    <td>26%</td-->
-                                    <td><span class="medium">67%</span></td>
-                                </tr>
-                                <tr>
-                                    <td>621412</td>
-                                    <td>橡膠啞鈴 14kg</td>
-                                    <td>運動配件</td>
-                                    <td>$395</td>
-                                    <td>72%</td>
-                                    <!--td>25%</td>
-                                    <td>21%</td-->
-                                    <td><span class="medium">66%</span></td>
-                                </tr>
-                            </tbody>
-                        </table>
+                            <section class="prediction-results">
+                                {% if prediction_window_label %}
+                                <p class="prediction-window-label" id="prediction-window-label">參考期間：{{ prediction_window_label }}</p>
+                                {% endif %}
+                                <table aria-describedby="prediction-window-label">
+                                    <thead>
+                                        <tr>
+                                            <th>商品編號</th>
+                                            <th>商品名稱</th>
+                                            <th>商品類別</th>
+                                            <th>商品價格</th>
+                                            <th>查閱率</th>
+                                            <th>預估購買機率</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="prediction-table-body">
+                                        {% if predicted_items %}
+                                            {% for item in predicted_items %}
+                                                {% set probability_class = 'hight' if item.probability_percent >= 85 else 'medium' if item.probability_percent >= 60 else '' %}
+                                                {% set probability_text = '%.1f'|format(item.probability_percent) %}
+                                                <tr data-prediction-row="true" data-index="{{ loop.index0 }}">
+                                                    <td>{{ item.product_code }}</td>
+                                                    <td>{{ item.product_name }}</td>
+                                                    <td>{{ item.category_label }}</td>
+                                                    <td>{{ '${:,.0f}'.format(item.price) }}</td>
+                                                    <td>{{ '%.1f'|format(item.view_rate_percent) }}%</td>
+                                                    <td>
+                                                        {% if probability_class %}
+                                                            <span class="{{ probability_class }}">{{ probability_text }}%</span>
+                                                        {% else %}
+                                                            {{ probability_text }}%
+                                                        {% endif %}
+                                                    </td>
+                                                </tr>
+                                            {% endfor %}
+                                        {% else %}
+                                            <tr class="empty-message" data-empty-row="true">
+                                                <td colspan="6">目前無可用的推薦商品。</td>
+                                            </tr>
+                                        {% endif %}
+                                    </tbody>
+                                </table>
+                                <ul class="page" id="prediction-pagination" aria-label="感興趣商品推估頁面導覽"></ul>
+                            </section>
                         <div class="advertising">
                             <ul class="advertising_info">
                                 <!-- <li><span>上傳速度</span>0.3秒</li>
@@ -205,11 +163,6 @@
                                 </li>
                             </ul>
                         </div>
-                        <ul class="page">
-                            <li class="active"><a href="" title="第1頁">1</a></li>
-                            <li><a href="" title="第2頁">2</a></li>
-                            <li><a href="" title="第3頁">3</a></li>
-                        </ul>
                     </div>
                     <div class="tab-content-2">
                         <h3 class="hide">歷史消費紀錄</h3>
@@ -274,5 +227,68 @@
     <!-- <footer>
         <p>2025 &copy;  你的專屬折扣
     </footer> -->
+    <script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const tableBody = document.querySelector('#prediction-table-body');
+        const pagination = document.querySelector('#prediction-pagination');
+        if (!tableBody || !pagination) {
+            return;
+        }
+
+        const dataRows = Array.from(tableBody.querySelectorAll('tr[data-prediction-row="true"]'));
+        if (!dataRows.length) {
+            pagination.style.display = 'none';
+            return;
+        }
+
+        const pageSize = 7;
+        const totalPages = Math.ceil(dataRows.length / pageSize);
+        let currentPage = 1;
+
+        function renderPage(page) {
+            currentPage = page;
+            dataRows.forEach(function (row, index) {
+                const pageIndex = Math.floor(index / pageSize) + 1;
+                row.style.display = pageIndex === page ? '' : 'none';
+            });
+            const items = pagination.querySelectorAll('li');
+            items.forEach(function (item, index) {
+                item.classList.toggle('active', index + 1 === page);
+            });
+        }
+
+        function buildPagination() {
+            pagination.innerHTML = '';
+            if (totalPages <= 1) {
+                pagination.style.display = 'none';
+                return;
+            }
+
+            pagination.style.display = '';
+            for (let page = 1; page <= totalPages; page += 1) {
+                const li = document.createElement('li');
+                if (page === currentPage) {
+                    li.classList.add('active');
+                }
+                const link = document.createElement('a');
+                link.href = '#';
+                link.textContent = String(page);
+                link.title = `第${page}頁`;
+                link.addEventListener('click', function (event) {
+                    event.preventDefault();
+                    if (page === currentPage) {
+                        return;
+                    }
+                    renderPage(page);
+                });
+                li.appendChild(link);
+                pagination.appendChild(li);
+            }
+        }
+
+        buildPagination();
+        renderPage(1);
+    });
+    </script>
 </body>
 </html>

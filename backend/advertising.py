@@ -18,6 +18,11 @@ class AdContext:
     purchases: list[Purchase]
 
 
+@dataclass
+class PurchaseInsights:
+    recommended_item: str | None = None
+
+
 def build_ad_context(
     member_id: str, purchases: Iterable[Purchase], creative: AdCreative | None = None
 ) -> AdContext:
