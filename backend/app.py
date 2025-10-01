@@ -38,11 +38,11 @@ from .advertising import (
 from .ai import GeminiService, GeminiUnavailableError
 from .aws import RekognitionService
 from .database import Database
-from .prediction import predict_next_purchases
-from .recognizer import FaceRecognizer
+# ⬇︎ 修正：改從 routes.predict 匯入方法與藍圖
+from .routes.predict import predict_next_purchases, predict_bp
+from .routes.identify import identify_bp
+# ⬇︎ adgen blueprint 仍維持
 from .routes import adgen_blueprint
-from .routes.predict import predict_bp          # ← 新增：機率推薦 API
-from .routes.identify import identify_bp        # ← 新增：辨識/上傳 API
 
 # -----------------------------------------------------------------------------
 # Logging
@@ -80,17 +80,15 @@ app = Flask(
 )
 app.config["JSON_AS_ASCII"] = False
 app.config["ADS_DIR"] = ADS_DIR  # 儲存為字串路徑
-
-# 掛載 Blueprints
 app.register_blueprint(adgen_blueprint)
-app.register_blueprint(predict_bp)     # ← 新增
-app.register_blueprint(identify_bp)    # ← 新增
+# ⬇︎ 新增的兩個 blueprint
+app.register_blueprint(predict_bp)
+app.register_blueprint(identify_bp)
 
 # -----------------------------------------------------------------------------
 # Services (Vertex AI / AWS Rekognition / DB)
 # -----------------------------------------------------------------------------
 gemini = GeminiService()
-
 rekognition = RekognitionService()
 
 def _maybe_prepare_rekognition() -> None:
@@ -105,12 +103,11 @@ def _maybe_prepare_rekognition() -> None:
             else:
                 logging.warning("Amazon Rekognition collection reset requested but failed; continuing")
         else:
-            # 輕量動作：確保 collection 存在即可（若你的 service 沒有 ensure_*，可安全略過）
             ensure_fn = getattr(rekognition, "ensure_collection", None)
             if callable(ensure_fn):
                 ensure_fn()
                 logging.info("Amazon Rekognition collection ensured (no reset)")
-    except Exception as exc:  # 安全防護，避免啟動因雲端初始化失敗而崩潰
+    except Exception as exc:
         logging.warning("Rekognition prepare step failed: %s", exc)
 
 _maybe_prepare_rekognition()
@@ -165,7 +162,6 @@ def upload_face():
     insights = analyse_purchase_intent(purchases, new_member=new_member)
     profile = database.get_member_profile(member_id)
 
-    # 只有非 brand_new 才呼叫 LLM 產生文案
     creative = None
     if gemini.can_generate_ads and insights.scenario != "brand_new":
         try:
@@ -473,7 +469,6 @@ def serve_ad_asset(filename: str):
     if not ads_dir:
         abort(404)
 
-    # 安全拼接與邊界檢查
     safe_path = safe_join(ads_dir, filename)
     if not safe_path:
         abort(404)
@@ -499,7 +494,6 @@ def ad_preview(filename: str):
 
 @app.get("/health")
 def health_check():
-    # 強化健康檢查，方便遠端排錯
     ads_dir = current_app.config.get("ADS_DIR") or ""
     ads_path = Path(ads_dir)
     exists = ads_path.is_dir()
@@ -554,7 +548,7 @@ def extended_health_check():
             client = storage.Client()
             bucket = client.bucket(bucket_name)
             gcs_status["reachable"] = bucket.exists()
-        except Exception as exc:  # pylint: disable=broad-except
+        except Exception as exc:
             gcs_status["error"] = str(exc)
     else:
         gcs_status["error"] = "ASSET_BUCKET not configured"
@@ -574,7 +568,6 @@ def extended_health_check():
             "vertex": ai_status,
         }
     )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -598,7 +591,6 @@ def _resolve_hero_image_url(scenario_key: str) -> str | None:
         if candidate.is_file():
             return url_for("serve_ad_asset", filename=filename)
 
-    # fallback：讓畫面至少有圖（走 Flask static）
     return url_for("static", filename=f"images/ads/{filename}")
 
 
@@ -655,5 +647,4 @@ def _purge_upload_images(filenames: Iterable[str]) -> None:
 
 
 if __name__ == "__main__":
-    # 開發模式直接啟動；部署請用 gunicorn / systemd 並確保帶入 ADS_DIR / DB_PATH 等
     app.run(host="0.0.0.0", port=8000, debug=True)
