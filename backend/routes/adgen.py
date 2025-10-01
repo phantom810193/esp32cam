@@ -5,6 +5,7 @@ import json
 import logging
 import os
 from datetime import datetime, timedelta
+from time import perf_counter
 from typing import Any, Dict
 from uuid import uuid4
 
@@ -16,8 +17,9 @@ from vertexai.preview.vision_models import ImageGenerationModel
 
 adgen_blueprint = Blueprint("adgen", __name__)
 
-_TEXT_MODEL_NAME = os.environ.get("VERTEX_TEXT_MODEL", "gemini-1.5-pro")
-_IMAGE_MODEL_NAME = os.environ.get("VERTEX_IMAGE_MODEL", "imagegeneration@002")
+_TEXT_MODEL_NAME = os.environ.get("VERTEX_TEXT_MODEL", "gemini-2.5-pro")
+_IMAGE_MODEL_NAME = os.environ.get("VERTEX_IMAGE_MODEL", "imagen-3.0-generate-001")
+_IMAGE_SIZE = os.environ.get("VERTEX_IMAGE_SIZE", "1080x1080")
 _DEFAULT_REGION = os.environ.get("GCP_REGION", "asia-east1")
 
 _vertex_initialised = False
@@ -114,7 +116,19 @@ def _generate_copy(sku: str, member_profile: Dict[str, Any]) -> Dict[str, str]:
 def _generate_image_bytes(sku: str, copy: Dict[str, str], member_profile: Dict[str, Any]) -> bytes:
     model = _get_image_model()
     prompt = _build_image_prompt(sku, copy, member_profile)
-    result = model.generate_images(prompt=prompt, number_of_images=1, aspect_ratio="1:1")
+    request_kwargs = {"prompt": prompt, "number_of_images": 1}
+    if _IMAGE_SIZE:
+        request_kwargs["image_size"] = _IMAGE_SIZE
+    else:
+        request_kwargs["aspect_ratio"] = "1:1"
+
+    try:
+        result = model.generate_images(**request_kwargs)
+    except TypeError:
+        # 舊版 SDK 不支援 image_size，退回使用 aspect_ratio 參數
+        request_kwargs.pop("image_size", None)
+        request_kwargs["aspect_ratio"] = "1:1"
+        result = model.generate_images(**request_kwargs)
     if not result.images:
         raise RuntimeError("Vertex AI Images did not return any image data")
     image = result.images[0]
@@ -152,6 +166,8 @@ def _fallback_payload(sku: str) -> Dict[str, str]:
 
 @adgen_blueprint.post("/adgen")
 def create_generated_ad():
+    """Generate an advertisement asset via Vertex AI Gemini + Imagen."""
+
     payload = request.get_json(silent=True) or {}
     sku = str(payload.get("sku") or "").strip()
     if not sku:
@@ -161,19 +177,42 @@ def create_generated_ad():
     if not isinstance(member_profile, dict):
         member_profile = {}
 
+    started_at = perf_counter()
     try:
         _ensure_vertex_initialised()
+        copy_started_at = perf_counter()
         copy = _generate_copy(sku, member_profile)
+        copy_duration = perf_counter() - copy_started_at
+
+        image_started_at = perf_counter()
         image_bytes = _generate_image_bytes(sku, copy, member_profile)
+        image_duration = perf_counter() - image_started_at
+
+        upload_started_at = perf_counter()
         image_url = _upload_to_gcs(image_bytes, sku)
+        upload_duration = perf_counter() - upload_started_at
     except Exception as exc:  # pylint: disable=broad-except
         logging.exception("Ad generation pipeline failed for SKU %s: %s", sku, exc)
         fallback = _fallback_payload(sku)
         return jsonify(fallback), 503
 
-    return jsonify({
-        "title": copy["title"],
-        "subline": copy["subline"],
-        "cta": copy["cta"],
-        "image_url": image_url,
-    })
+    total_duration = perf_counter() - started_at
+    logging.info(
+        "Ad generation for %s completed in %.2fs (copy=%.2fs, image=%.2fs, upload=%.2fs)",
+        sku,
+        total_duration,
+        copy_duration,
+        image_duration,
+        upload_duration,
+    )
+    if total_duration > 10:
+        logging.warning("Ad generation for %s exceeded 10s SLA (%.2fs)", sku, total_duration)
+
+    return jsonify(
+        {
+            "title": copy["title"],
+            "subline": copy["subline"],
+            "cta": copy["cta"],
+            "image_url": image_url,
+        }
+    )

@@ -517,7 +517,22 @@ def extended_health_check():
     ads_dir = current_app.config.get("ADS_DIR") or ""
     ads_path = Path(ads_dir)
     exists = ads_path.is_dir()
-    writable = exists and os.access(ads_path, os.W_OK)
+    writable = False
+    write_error: str | None = None
+    if exists:
+        test_path = ads_path / f".healthz-{uuid4().hex}.tmp"
+        try:
+            with open(test_path, "w", encoding="utf-8") as handle:
+                handle.write("ok")
+            writable = True
+        except OSError as exc:
+            write_error = str(exc)
+            logging.warning("Ads directory write test failed for %s: %s", ads_path, exc)
+        finally:
+            try:
+                test_path.unlink(missing_ok=True)
+            except OSError:
+                pass
     sample: list[str] = []
     if exists:
         try:
@@ -547,6 +562,7 @@ def extended_health_check():
             "ads_dir_exists": exists,
             "ads_dir_writable": writable,
             "ads_dir_sample": sample,
+            "ads_dir_write_error": write_error,
             "gcs": gcs_status,
             "vertex": ai_status,
         }

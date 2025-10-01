@@ -7,7 +7,8 @@
 1. **ESP32-CAM 拍照上傳**：韌體每隔數秒拍照並透過 HTTP POST 將 JPEG 送至雲端 `/upload_face` API。
 2. **Amazon Rekognition 雲端辨識**：Flask 後端把影像送進 Amazon Rekognition，取得臉部結構與屬性摘要並產生匿名 `MEMxxxxxxxxxx` 會員 ID。
 3. **SQLite 會員 & 消費資料**：後端使用摘要向 SQLite 查詢既有會員與歷史訂單，找不到則建立新會員並寫入歡迎優惠。
-4. **Gemini Text 生成廣告**：把會員歷史紀錄整理成 JSON，交給 Gemini Text 回傳包含主標、副標、促購亮點的廣告文案。
+4. **Vertex AI 圖文生成**：後端呼叫 Gemini (`gemini-2.5-pro`) 產生標題、副標與 CTA，再把結果交給 Imagen (`imagen-3.0-generate-001`) 生成
+   1080x1080 的廣告海報。生成完立即寫入 GCS 並產製簽名網址，全流程以 **10 秒內完成** 為服務水位。
 5. **廣告頁輸出**：後端將文案與歷史訂單傳入 Jinja2 模板 `/ad/<member_id>`，網頁每 5 秒自動刷新，適合放在 HDMI 電視棒或任何瀏覽器輪播。
 
 ## 專案結構
@@ -73,12 +74,25 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
    export ASSET_BUCKET="esp32cam-assets"
    ```
 
-   - 服務帳號至少需要 `Vertex AI User` 與 `Storage Object Admin` 權限，
-     才能呼叫 Gemini 文案模型並將 Imagen 圖片寫入指定的 GCS bucket。
+   - 服務帳號至少需要 `Vertex AI User`、`Vertex AI Service Agent`（若為新專案需啟用）與 `Storage Object Admin` 權限，
+     才能呼叫 Gemini 文案模型並將 Imagen 圖片寫入指定的 GCS bucket。建議：
+     1. 於 Google Cloud Console 啟用 **Vertex AI API** 與 **Cloud Storage**。
+     2. 為專案建立服務帳號，例如 `esp32cam-adgen@<project-id>.iam.gserviceaccount.com`。
+     3. 將上述角色授與該服務帳號，下載 JSON 金鑰並指定給 `GOOGLE_APPLICATION_CREDENTIALS`。
    - `ASSET_BUCKET` 必須事先建立（名稱可自訂），後端會將生成的海報
-     以 `adgen/<SKU>/<date>/<uuid>.png` 命名存放並回傳 12 小時的簽名網址。
+     以 `adgen/<SKU>/<date>/<uuid>.png` 命名存放並回傳 12 小時簽名網址。若打算跨專案存取，請記得授權服務帳號至該 bucket。
    - 若環境暫時無法連線至 Vertex AI 或 GCS，API 會退回預設模板與
      `ME0000.jpg` 圖片，仍可驗證整體流程。
+
+   | 變數 | 說明 |
+   | --- | --- |
+   | `GOOGLE_APPLICATION_CREDENTIALS` | 服務帳號 JSON 金鑰路徑。 |
+   | `GCP_PROJECT_ID` | Vertex AI 與 GCS 所屬專案。 |
+   | `GCP_REGION` | Vertex AI 區域，預設 `asia-east1`。 |
+   | `ASSET_BUCKET` | 用來儲存 Imagen 成果的 GCS bucket。 |
+   | `VERTEX_TEXT_MODEL` *(選填)* | 覆寫 Gemini 文案模型，預設 `gemini-2.5-pro`。 |
+   | `VERTEX_IMAGE_MODEL` *(選填)* | 覆寫 Imagen 模型，預設 `imagen-3.0-generate-001`。 |
+   | `VERTEX_IMAGE_SIZE` *(選填)* | 覆寫輸出尺寸，預設 `1080x1080`。 |
 
 5. 啟動 Flask 伺服器（於專案根目錄執行）：
 
@@ -111,10 +125,17 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
    - 每個商品皆附帶基礎查閱率（View Rate）與售價資訊，方便預測模組產生 UI 所需欄位。
    - 透過 `infer_category_from_item()` 將歷史訂單名稱對應回目錄品類，確保跨模組一致性。
 
-8. 機率計算公式：
+8. 商品查閱率與機率計算公式：
 
    - `backend/prediction.py` 會取出「上一個月」的消費紀錄，若該月份沒有資料則回退至最近一個有紀錄的月份。
-   - 針對所有候選商品計算分數：
+   - 先根據商品目錄中的 `view_rate`（0~1）搭配會員上一期的品類權重，計算查閱率：
+
+     ```text
+     adjusted_view_rate = min(1.0, base_view_rate * (0.9 + category_weight(category)))
+     view_rate_percent = round(adjusted_view_rate * 100, 1)
+     ```
+
+   - 再針對所有候選商品計算分數：
 
      ```text
      score = 0.45 * category_weight
@@ -127,7 +148,7 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
      - `recency_bonus`：依據最近 5 筆交易的品類倒序加權（越新的比重越高）。
      - `price_similarity`：商品售價與歷史平均單價的差異，越接近越高。
      - `novelty`：未購買過的新商品加權 1.0，已出現過則降至 0.3，會員身份再額外帶入 0.8 的基礎值。
-   - 將上述分數送入 softmax 取得 `probability`，並四捨五入至 0.1% 輸出 `probability_percent`；查閱率亦以 0.1% 顯示。
+   - 將上述分數送入 softmax 取得 `probability`，並四捨五入至 0.1% 輸出 `probability_percent`；查閱率亦以 0.1% 顯示在 UI 上。
 
 9. 驗證介面：
 
@@ -196,6 +217,23 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
 
    若 Vertex AI 或 GCS 暫時無法連線，API 會返回 `503` 及預設模板，
    `image_url` 會指向 `/static/images/ads/ME0000.jpg`，方便持續驗證前後台 UI。
+
+### 風險與失敗 fallback
+
+- **Vertex AI 模型初始化失敗**：回傳 `503` 並改用固定文案與 `ME0000.jpg`。
+- **GCS 無法寫入**：記錄錯誤並顯示 fallback 圖片，後台可透過 `/healthz` 檢查 bucket 狀態。
+- **服務帳號權限不足**：請確認 `GOOGLE_APPLICATION_CREDENTIALS` 指向的帳號擁有 Vertex AI 及 Storage 權限。
+- **超過 10 秒 SLA**：後端會在日誌輸出警告，可藉此調整 prompt、模型或網路設定。
+
+### Vertex AI 生成流程與效能追蹤
+
+1. **取得推薦上下文**：`POST /adgen` 接收 `sku` 與可選 `member_profile`，由推薦模組提供七筆 SKU 與對應機率。
+2. **Gemini 文案生成**：呼叫 `gemini-2.5-pro`，回傳 `title`、`subline`、`cta`。失敗時退回模板字串。
+3. **Imagen 海報繪製**：以文案與客群特徵組合 prompt，使用 `imagen-3.0-generate-001` 產出 1080x1080 PNG。
+4. **GCS 儲存**：檔案上傳至 `gs://<ASSET_BUCKET>/adgen/<SKU>/<date>/<uuid>.png`，並回傳 12 小時簽名網址。
+5. **效能紀錄**：後端會在日誌中輸出 copy / image / upload 各階段耗時，若超過 10 秒會額外顯示警告方便排查。
+
+上述流程遇到任一階段失敗即回傳 `503` 及 `ME0000.jpg`，確保前台仍有素材可播。
 
 ## 前端展示（電視棒 / 螢幕）
 
