@@ -29,38 +29,40 @@
         <div class="customer-layout">
             <article id="customer-information">
                 <h2 class="hide">顧客資料</h2>
-                <figure class="customer-photo {% if not profile_image_url %}placeholder{% endif %}">
-                    {% set fallback_photo = url_for('static', filename='images/face.jpg') %}
-                    <img src="{{ profile_image_url or fallback_photo }}" alt="{{ display_name }} 的照片">
-                </figure>
-                <section class="customer-infolist">
-                    <ul class="customer-basic-info">
-                        <li class="customer-name">{{ display_name }}</li>
-                        {% set membership_status = profile.member_status or '尚未提供' %}
-                        <li class="customer-level {% if membership_status == '有效' %}general{% endif %}">{{ membership_status }}</li>
-                        <li>Face ID：{{ profile.member_id or '尚未指派' }}</li>
-                        <li>會員編號：{{ profile.mall_member_id or '尚未提供' }}</li>
-                        <li>會員狀態：{{ membership_status }}</li>
-                        <li>入會日期：{{ joined_at_display or profile.joined_at or '尚未提供' }}</li>
-                        <li>點數餘額：
-                            {% if points_balance_display %}
-                                {{ points_balance_display }} 點
-                            {% elif profile.points_balance is not none %}
-                                {{ '%.0f'|format(profile.points_balance) }} 點
-                            {% else %}
-                                尚未提供
-                            {% endif %}
-                        </li>
-                    </ul>
-                    <ul class="customer-contact-info">
-                        <li>性別：{{ profile.gender or '尚未提供' }}</li>
-                        <li>出生年月：{{ profile.birth_date or '未填寫' }}</li>
-                        <li>聯絡電話：{{ profile.phone or '尚未提供' }}</li>
-                        <li>電子郵件：{{ profile.email or '尚未提供' }}</li>
-                        <li>郵遞地址：{{ profile.address or '未填寫' }}</li>
-                        <li>職業 / 產業別：{{ profile.occupation or '未填寫' }}</li>
-                    </ul>
-                </section>
+                <div class="customer-panel">
+                    <figure class="customer-photo {% if not profile_image_url %}placeholder{% endif %}">
+                        {% set fallback_photo = url_for('static', filename='images/face.jpg') %}
+                        <img src="{{ profile_image_url or fallback_photo }}" alt="{{ display_name }} 的照片">
+                    </figure>
+                    <section class="customer-infolist">
+                        <ul class="customer-basic-info">
+                            <li class="customer-name">{{ display_name }}</li>
+                            {% set membership_status = profile.member_status or '尚未提供' %}
+                            <li class="customer-level {% if membership_status == '有效' %}general{% endif %}">{{ membership_status }}</li>
+                            <li>Face ID：{{ profile.member_id or '尚未指派' }}</li>
+                            <li>會員編號：{{ profile.mall_member_id or '尚未提供' }}</li>
+                            <li>會員狀態：{{ membership_status }}</li>
+                            <li>入會日期：{{ joined_at_display or profile.joined_at or '尚未提供' }}</li>
+                            <li>點數餘額：
+                                {% if points_balance_display %}
+                                    {{ points_balance_display }} 點
+                                {% elif profile.points_balance is not none %}
+                                    {{ '%.0f'|format(profile.points_balance) }} 點
+                                {% else %}
+                                    尚未提供
+                                {% endif %}
+                            </li>
+                        </ul>
+                        <ul class="customer-contact-info">
+                            <li>性別：{{ profile.gender or '尚未提供' }}</li>
+                            <li>出生年月：{{ profile.birth_date or '未填寫' }}</li>
+                            <li>聯絡電話：{{ profile.phone or '尚未提供' }}</li>
+                            <li>電子郵件：{{ profile.email or '尚未提供' }}</li>
+                            <li>郵遞地址：{{ profile.address or '未填寫' }}</li>
+                            <li>職業 / 產業別：{{ profile.occupation or '未填寫' }}</li>
+                        </ul>
+                    </section>
+                </div>
             </article>
             <article id="customer-details">
                 <section id="customer-tags">
