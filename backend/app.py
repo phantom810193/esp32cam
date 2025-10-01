@@ -43,6 +43,14 @@ DB_PATH = DATA_DIR / "mvp.sqlite3"
 UPLOAD_DIR = DATA_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+PERSONA_LABELS = {
+    "dessert-lover": "甜點收藏家",
+    "family-groceries": "幼兒園家長",
+    "fitness-enthusiast": "健身族",
+    "home-manager": "家庭主婦",
+    "wellness-gourmet": "健康食品愛好者",
+}
+
 app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
 app.config["JSON_AS_ASCII"] = False
 
@@ -96,6 +104,15 @@ class _LatestAdHub:
 
 
 _latest_ad_hub = _LatestAdHub()
+
+
+def _persona_label_display(profile_label: str | None) -> str | None:
+    if not profile_label:
+        return None
+    return PERSONA_LABELS.get(
+        profile_label,
+        profile_label.replace("-", " ").title(),
+    )
 
 
 def _serialize_ad_context(context: AdContext) -> dict[str, object]:
@@ -179,19 +196,13 @@ def dashboard() -> str:
         else:
             joined_at_display = profile.joined_at
 
-    persona_map = {
-        "dessert-lover": "甜點收藏家",
-        "family-groceries": "幼兒園家長",
-        "fitness-enthusiast": "健身族",
-        "home-manager": "家庭主婦",
-        "wellness-gourmet": "健康食品愛好者",
-    }
-    persona_name: str | None = None
+    persona_label: str | None = None
+    display_name: str | None = None
     if profile:
-        persona_name = persona_map.get(
-            profile.profile_label,
-            profile.profile_label.replace("-", " ").title() if profile.profile_label else None,
-        )
+        persona_label = _persona_label_display(profile.profile_label)
+        display_name = profile.name or persona_label
+    if display_name is None:
+        display_name = "尚未命名會員"
 
     profile_image_url: str | None = None
     if profile and profile.first_image_filename:
@@ -211,7 +222,8 @@ def dashboard() -> str:
         "dashboard.html",
         profile=profile,
         purchases=purchases,
-        persona_name=persona_name,
+        persona_label=persona_label,
+        display_name=display_name,
         points_balance_display=points_balance_display,
         joined_at_display=joined_at_display,
         profile_image_url=profile_image_url,
@@ -423,11 +435,22 @@ def latest_upload_dashboard():
             "latest_upload.html",
             event=None,
             members_url=url_for("member_directory"),
+            display_name=None,
+            persona_label=None,
         )
 
     image_url = None
     if event.image_filename:
         image_url = url_for("serve_upload_image", filename=event.image_filename)
+
+    profile = database.get_member_profile(event.member_id)
+    persona_label: str | None = None
+    display_name: str | None = None
+    if profile:
+        persona_label = _persona_label_display(profile.profile_label)
+        display_name = profile.name or persona_label
+    if display_name is None:
+        display_name = "尚未命名會員"
 
     return render_template(
         "latest_upload.html",
@@ -435,6 +458,8 @@ def latest_upload_dashboard():
         image_url=image_url,
         ad_url=url_for("render_ad", member_id=event.member_id, _external=True),
         members_url=url_for("member_directory"),
+        display_name=display_name,
+        persona_label=persona_label,
     )
 
 
@@ -448,7 +473,17 @@ def member_directory():
         if profile.member_id:
             purchases = database.get_purchase_history(profile.member_id)
 
-        directory.append({"profile": profile, "purchases": purchases})
+        persona_label = _persona_label_display(profile.profile_label)
+        display_name = profile.name or persona_label or "尚未命名會員"
+
+        directory.append(
+            {
+                "profile": profile,
+                "purchases": purchases,
+                "persona_label": persona_label,
+                "display_name": display_name,
+            }
+        )
 
     return render_template("members.html", members=directory)
 
