@@ -94,24 +94,39 @@ header h1{
 }
 
 #customer-profile {
+    display: block;
+}
+
+
+.customer-layout {
     display: flex;
-    flex-direction: row;
+    align-items: stretch;
+    gap: 24px;
 }
 
 #customer-information {
-    width: 30%;
-    padding-right: 16px;
+    flex: 0 0 30%;
+    max-width: 30%;
     box-sizing: border-box;
-    /* height: calc(100vh - 84px); */
     overflow: hidden;
     position: relative;
     display: flex;
+}
+
+#customer-information .customer-panel {
+    display: flex;
     flex-direction: column;
-    align-items: flex-start;
+    width: 100%;
+    background: white;
+    border-radius: 32px;
+    overflow: hidden;
+    position: relative;
+    flex: 1 1 auto;
+    height: 100%;
 }
 
 
-#customer-information::after {
+#customer-information .customer-panel::after {
     position: absolute;
     right: 16px;
     bottom: 0;
@@ -123,19 +138,21 @@ header h1{
     height: 78px;
     background-image: url('images/botton-links.svg');
 }
+
 .customer-infolist{
     width: 100%;
-    max-width: 300px;
+    flex: 1 1 70%;
+    display: flex;
+    flex-direction: column;
     background: white;
-    border-radius: 0 0 32px 32px;
-    overflow: hidden;
-    height: calc(100vh - 345px);
-    min-height: 493px;
+    height: 70%;
+    overflow-y: auto;
 }
 
 /* 右欄位列表 */
 #customer-details{
-    width: 70%;
+    flex: 1 1 70%;
+    min-width: 0;
     box-sizing: border-box;
 }
 
@@ -147,8 +164,9 @@ header h1{
     border-radius: 32px 32px 0 0;
     overflow: hidden;
     width: 100%;
-    max-width: 300px;
-    height: 300px;
+    flex: 0 0 30%;
+    min-height: 30%;
+    height: 30%;
 }
 
 .customer-photo img{
@@ -391,6 +409,39 @@ text-decoration: none;
 #tab>ul>li>a:hover,
 #tab>ul>li>a:focus {
     background-color: #e6e6e6;
+}
+
+@media (max-width: 960px) {
+    .customer-layout {
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    #customer-information {
+        flex: 1 1 auto;
+        max-width: 100%;
+        padding-right: 0;
+    }
+
+    #customer-information .customer-panel {
+        height: auto;
+    }
+
+    .customer-photo {
+        flex: 0 0 auto;
+        min-height: 240px;
+        height: auto;
+    }
+
+    .customer-infolist {
+        height: auto;
+    }
+
+    #customer-details {
+        flex: 1 1 auto;
+        min-width: 100%;
+        width: 100%;
+    }
 }
 
 /*頁籤div內容*/

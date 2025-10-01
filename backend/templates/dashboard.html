@@ -26,97 +26,100 @@
                 <p>請稍候再試，或上傳新照片以建立會員紀錄。</p>
             </section>
         {% else %}
-        <article id="customer-information">
-            <h2 class="hide">顧客資料</h2>
-            <figure class="customer-photo {% if not profile_image_url %}placeholder{% endif %}">
-                {% set fallback_photo = url_for('static', filename='images/face.jpg') %}
-                <img src="{{ profile_image_url or fallback_photo }}" alt="{{ display_name }} 的照片">
-            </figure>
-            <section class="customer-infolist">
-                <ul class="customer-basic-info">
-                    <li class="customer-name">{{ display_name }}</li>
-                    {% set membership_status = profile.member_status or '尚未提供' %}
-                    <li class="customer-level {% if membership_status == '有效' %}general{% endif %}">{{ membership_status }}</li>
-                    <li>Face ID：{{ profile.member_id or '尚未指派' }}</li>
-                    <li>會員編號：{{ profile.mall_member_id or '尚未提供' }}</li>
-                    <li>會員狀態：{{ membership_status }}</li>
-                    <li>入會日期：{{ joined_at_display or profile.joined_at or '尚未提供' }}</li>
-                    <li>點數餘額：
-                        {% if points_balance_display %}
-                            {{ points_balance_display }} 點
-                        {% elif profile.points_balance is not none %}
-                            {{ '%.0f'|format(profile.points_balance) }} 點
-                        {% else %}
-                            尚未提供
-                        {% endif %}
-                    </li>
-                </ul>
-                <ul class="customer-contact-info">
-                    <li>性別：{{ profile.gender or '尚未提供' }}</li>
-                    <li>出生年月：{{ profile.birth_date or '未填寫' }}</li>
-                    <li>聯絡電話：{{ profile.phone or '尚未提供' }}</li>
-                    <li>電子郵件：{{ profile.email or '尚未提供' }}</li>
-                    <li>郵遞地址：{{ profile.address or '未填寫' }}</li>
-                    <li>職業 / 產業別：{{ profile.occupation or '未填寫' }}</li>
-                </ul>
-            </section>
-        </article>
-        <article id="customer-details">
-            <section id="customer-tags">
-                <h2>顧客標籤</h2>
-                <ul class="customer-taglist">
-                    {% if persona_label %}
-                    <li>#{{ persona_label }}</li>
-                    {% endif %}
-                    <li>#健身族群</li>
-                    <li>#保健食品</li>
-                    <li>#蛋白粉</li>
-                    <li>#水果</li>
-                    <li>#美妝愛好</li>
-                </ul>
-            </section>
-            <section id="customer-preferences">
-                <h2 class="hide">顧客偏好</h2>
-                <ul class="customer-preferencelist">
-                    <!-- <li><span>偏好品牌</span>Adidas, New Balance</li> -->
-                    <li><span>偏好商品類別</span>穀物 / 早餐、健康飲品</li>
-                    <li><span>最近消費時間</span><i>2天前</i> 2025/09/25</li>
-                    <li><span>本季消費頻率</span>每月 <i>4</i>次</li>
-                    <li><span>平均消費金額</span>NT$ <i>8,320</i></li>
-                </ul>
-            </section>
-            <section id="customer-purchase-history">
-                <h2 class="hide">顧客購買歷史</h2>
-                <span id="tab-1">1</span>
-                <span id="tab-2">2</span>
-                <span id="tab-3">3</span>
-                <span id="tab-4">4</span>
-                <div id="tab">
-                    <ul>
-                        <li><a href="#tab-1" title="感興趣商品推估">感興趣商品推估</a></li>
-                        <li><a href="#tab-2" title="歷史消費紀錄">歷史消費紀錄</a></li>
-                        <li><a href="#tab-3" title="動線區域停留時間">動線區域停留時間</a></li>
-                        <li><a href="#tab-4" title="參與活動紀錄">參與活動紀錄</a></li>
-                    </ul>
-                    <div class="tab-content-1">
-                        <h3 class="hide">感興趣商品推估</h3>
-                        <ul class="tool">
-                            <li><a href="" class="search">搜尋</a></li>
-                            <li><a href="" class="filter">篩選</a></li>
+        <div class="customer-layout">
+            <article id="customer-information">
+                <h2 class="hide">顧客資料</h2>
+                <div class="customer-panel">
+                    <figure class="customer-photo {% if not profile_image_url %}placeholder{% endif %}">
+                        {% set fallback_photo = url_for('static', filename='images/face.jpg') %}
+                        <img src="{{ profile_image_url or fallback_photo }}" alt="{{ display_name }} 的照片">
+                    </figure>
+                    <section class="customer-infolist">
+                        <ul class="customer-basic-info">
+                            <li class="customer-name">{{ display_name }}</li>
+                            {% set membership_status = profile.member_status or '尚未提供' %}
+                            <li class="customer-level {% if membership_status == '有效' %}general{% endif %}">{{ membership_status }}</li>
+                            <li>Face ID：{{ profile.member_id or '尚未指派' }}</li>
+                            <li>會員編號：{{ profile.mall_member_id or '尚未提供' }}</li>
+                            <li>會員狀態：{{ membership_status }}</li>
+                            <li>入會日期：{{ joined_at_display or profile.joined_at or '尚未提供' }}</li>
+                            <li>點數餘額：
+                                {% if points_balance_display %}
+                                    {{ points_balance_display }} 點
+                                {% elif profile.points_balance is not none %}
+                                    {{ '%.0f'|format(profile.points_balance) }} 點
+                                {% else %}
+                                    尚未提供
+                                {% endif %}
+                            </li>
                         </ul>
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>內部商品編號</th>
-                                    <th>商品名稱</th>
-                                    <th>商品類別</th>
-                                    <th>商品價格</th>
-                                    <th>商品<br/>查閱率</th>
-                                    <!--th>廣告<br/>查閱率</th>
-                                    <th>相似紀錄<br/>符合率</th-->
-                                    <th>預估購買機率</th>
-                                </tr>
-                            </thead>
+                        <ul class="customer-contact-info">
+                            <li>性別：{{ profile.gender or '尚未提供' }}</li>
+                            <li>出生年月：{{ profile.birth_date or '未填寫' }}</li>
+                            <li>聯絡電話：{{ profile.phone or '尚未提供' }}</li>
+                            <li>電子郵件：{{ profile.email or '尚未提供' }}</li>
+                            <li>郵遞地址：{{ profile.address or '未填寫' }}</li>
+                            <li>職業 / 產業別：{{ profile.occupation or '未填寫' }}</li>
+                        </ul>
+                    </section>
+                </div>
+            </article>
+            <article id="customer-details">
+                <section id="customer-tags">
+                    <h2>顧客標籤</h2>
+                    <ul class="customer-taglist">
+                        {% if persona_label %}
+                        <li>#{{ persona_label }}</li>
+                        {% endif %}
+                        <li>#健身族群</li>
+                        <li>#保健食品</li>
+                        <li>#蛋白粉</li>
+                        <li>#水果</li>
+                        <li>#美妝愛好</li>
+                    </ul>
+                </section>
+                <section id="customer-preferences">
+                    <h2 class="hide">顧客偏好</h2>
+                    <ul class="customer-preferencelist">
+                        <!-- <li><span>偏好品牌</span>Adidas, New Balance</li> -->
+                        <li><span>偏好商品類別</span>穀物 / 早餐、健康飲品</li>
+                        <li><span>最近消費時間</span><i>2天前</i> 2025/09/25</li>
+                        <li><span>本季消費頻率</span>每月 <i>4</i>次</li>
+                        <li><span>平均消費金額</span>NT$ <i>8,320</i></li>
+                    </ul>
+                </section>
+                <section id="customer-purchase-history">
+                    <h2 class="hide">顧客購買歷史</h2>
+                    <span id="tab-1">1</span>
+                    <span id="tab-2">2</span>
+                    <span id="tab-3">3</span>
+                    <span id="tab-4">4</span>
+                    <div id="tab">
+                        <ul>
+                            <li><a href="#tab-1" title="感興趣商品推估">感興趣商品推估</a></li>
+                            <li><a href="#tab-2" title="歷史消費紀錄">歷史消費紀錄</a></li>
+                            <li><a href="#tab-3" title="動線區域停留時間">動線區域停留時間</a></li>
+                            <li><a href="#tab-4" title="參與活動紀錄">參與活動紀錄</a></li>
+                        </ul>
+                        <div class="tab-content-1">
+                            <h3 class="hide">感興趣商品推估</h3>
+                            <ul class="tool">
+                                <li><a href="" class="search">搜尋</a></li>
+                                <li><a href="" class="filter">篩選</a></li>
+                            </ul>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>內部商品編號</th>
+                                        <th>商品名稱</th>
+                                        <th>商品類別</th>
+                                        <th>商品價格</th>
+                                        <th>商品<br/>查閱率</th>
+                                        <!--th>廣告<br/>查閱率</th>
+                                        <th>相似紀錄<br/>符合率</th-->
+                                        <th>預估購買機率</th>
+                                    </tr>
+                                </thead>
                             <tbody>
                                 <tr>
                                     <td>100234</td>
@@ -265,6 +268,7 @@
             </section>
             
         </article>
+        </div>
         {% endif %}
     </main>
     <!-- <footer>
