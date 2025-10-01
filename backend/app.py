@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 
 import json
+import math
 import mimetypes
 from io import BytesIO
 
@@ -157,6 +158,12 @@ def dashboard() -> str:
     requested_member_id = request.args.get("member_id")
     member_id = requested_member_id or None
 
+    try:
+        requested_page = int(request.args.get("page", "1"))
+    except ValueError:
+        requested_page = 1
+    requested_page = max(1, requested_page)
+
     profile = None
     if member_id:
         profile = database.get_member_profile(member_id)
@@ -176,8 +183,32 @@ def dashboard() -> str:
                 break
 
     purchases = []
+    page = 1
+    page_count = 1
+    has_prev = False
+    has_next = False
+    total_purchases = 0
     if profile and member_id:
-        purchases = database.get_purchase_history(member_id)
+        limit = 7
+        total_purchases = database.count_purchase_history(member_id)
+        if total_purchases:
+            page_count = max(1, math.ceil(total_purchases / limit))
+            page = min(max(1, requested_page), page_count)
+            offset = (page - 1) * limit
+            purchases = database.get_purchase_history_page(
+                member_id, limit=limit, offset=offset
+            )
+        else:
+            page = 1
+            page_count = 1
+            purchases = []
+        has_prev = page > 1
+        has_next = page < page_count
+    else:
+        page = 1
+        page_count = 1
+        has_prev = False
+        has_next = False
 
     points_balance_display: str | None = None
     if profile and profile.points_balance is not None:
@@ -229,6 +260,11 @@ def dashboard() -> str:
         profile_image_url=profile_image_url,
         requested_member_id=requested_member_id,
         resolved_member_id=member_id,
+        page=page,
+        page_count=page_count,
+        has_prev=has_prev,
+        has_next=has_next,
+        total_purchases=total_purchases,
     )
 
 
