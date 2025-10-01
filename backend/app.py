@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 from typing import Iterable, Tuple
+from backend.reco import recommend_for_member
+from backend.ai_gemini import ad_copy_unregistered, ad_copy_registered
 from uuid import uuid4
 
 from flask import (
@@ -544,11 +546,113 @@ def ad_preview(filename: str):
 def health_check():
     return jsonify(_health_payload())
 
-
 @app.get("/healthz")
 def healthz_check():
     return jsonify(_health_payload())
+# backend/app.py（新增段落）
+from flask import jsonify, render_template, request
+from backend.reco import recommend_for_member
+from backend.ai_gemini import ad_copy_unregistered, ad_copy_registered
 
+def _pick_image_for(status: str, dom_cat: str | None) -> str:
+    """
+    依需求選圖：
+    - new: 固定 ME0000.jpg
+    - unregistered: fitness->AD0000.jpg, homemaker->AD0001.jpg
+      homemaker 對應「日用品/食物」偏好
+    - registered: fitness->ME0003.jpg, dessert->ME0001.jpg, kindergarten->ME0002.jpg
+      kindergarten 對應「幼兒用品」
+    其他類別fall back：ME0000.jpg
+    """
+    if status == "new":
+        return "ME0000.jpg"
+    if status == "unregistered":
+        if dom_cat in ("健身", "保健食品"):
+            return "AD0000.jpg"
+        if dom_cat in ("日用品", "食物"):
+            return "AD0001.jpg"
+        return "AD0001.jpg"
+    # registered
+    if dom_cat in ("健身", "保健食品"):
+        return "ME0003.jpg"
+    if dom_cat == "甜點":
+        return "ME0001.jpg"
+    if dom_cat == "幼兒用品":
+        return "ME0002.jpg"
+    return "ME0000.jpg"
+
+@app.get("/recommendations/<member_id>")
+def api_recommendations(member_id: str):
+    """
+    回傳七筆推估 + 機率百分比；同時附上廣告文案與建議圖檔。
+    """
+    data = recommend_for_member(member_id)
+    status = data["status"]
+    dom_cat = data["dominant_category"]
+
+    image = _pick_image_for(status, dom_cat)
+
+    # 文案
+    ad = {"headline": "", "subline": "", "image": image}
+    if status == "new":
+        ad["headline"] = "歡迎光臨！加入會員享驚喜禮"
+    elif status == "unregistered":
+        top = data["top7"][0] if data["top7"] else None
+        if top:
+            ad["headline"] = ad_copy_unregistered(top["product_name"], top["category"])
+        else:
+            ad["headline"] = "加入會員，領限定試用包"
+    else:  # registered
+        top = data["top7"][0] if data["top7"] else None
+        if top:
+            h, s = ad_copy_registered(top["product_name"], top["category"])
+            ad["headline"], ad["subline"] = h, s
+        else:
+            ad["headline"] = "會員專屬驚喜優惠"
+
+    return jsonify({
+        "member": data["member"],
+        "status": status,
+        "period": data["period"],
+        "dominant_category": dom_cat,
+        "top7": data["top7"],
+        "ad": ad
+    })
+
+@app.get("/manager/reco")
+def page_manager_reco():
+    """
+    後台經理驗證頁（100% 依你給的版型配置）。
+    使用方式：
+      /manager/reco?member_id=U001
+      /manager/reco   -> 預設U001
+    """
+    member_id = request.args.get("member_id") or "U001"
+    data = recommend_for_member(member_id)
+    status = data["status"]
+    dom_cat = data["dominant_category"]
+    image = _pick_image_for(status, dom_cat)
+
+    ad_headline, ad_subline = "", ""
+    if status == "new":
+        ad_headline = "歡迎光臨！加入會員享驚喜禮"
+    elif status == "unregistered":
+        top = data["top7"][0] if data["top7"] else None
+        ad_headline = ad_copy_unregistered(top["product_name"], top["category"]) if top else "加入會員，領限定試用包"
+    else:
+        top = data["top7"][0] if data["top7"] else None
+        if top:
+            ad_headline, ad_subline = ad_copy_registered(top["product_name"], top["category"])
+        else:
+            ad_headline = "會員專屬驚喜優惠"
+
+    return render_template(
+        "manager_reco.html",
+        data=data,
+        image=image,
+        ad_headline=ad_headline,
+        ad_subline=ad_subline
+    )
 
 if __name__ == "__main__":
     # 開發模式直接啟動；部署請用 gunicorn / systemd 並確保帶入 ADS_DIR
