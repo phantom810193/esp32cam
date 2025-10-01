@@ -7,229 +7,304 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/manager.css') }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    >
   </head>
   <body>
-    <div class="manager-shell">
-      <header class="manager-header">
-        <div class="header-title">
-          <h1>ESP32-CAM 智慧廣告中控台</h1>
-          <p>依據上一期的消費紀錄，自動推估本月潛在購買清單與專屬廣告資源</p>
+    <div class="dashboard-shell">
+      <header class="dashboard-header">
+        <div class="brand">
+          <h1>你的專屬折扣</h1>
+          <p>ESP32-CAM + Vertex AI 智慧廣告控制台</p>
         </div>
+        <nav class="primary-nav" aria-label="主選單">
+          <a class="nav-item" href="#" data-icon="calendar">促銷活動</a>
+          <a class="nav-item" href="#" data-icon="shop">店舖管理</a>
+          <a class="nav-item" href="#" data-icon="product">商品管理</a>
+          <a class="nav-item" href="#" data-icon="payment">金流管理</a>
+          <a class="nav-item active" href="#" data-icon="customer">顧客資料</a>
+        </nav>
         <form class="member-picker" method="get">
           <label for="member_id">選擇顧客</label>
-          <div class="picker-input">
-            <select id="member_id" name="member_id" onchange="this.form.submit()">
-              {% if members %}
-                {% for profile in members %}
-                  <option value="{{ profile.member_id }}" {% if context and profile.member_id == context.member_id %}selected{% elif not context and profile.member_id == request.args.get('member_id') %}selected{% endif %}>
-                    {{ profile.mall_member_id or profile.member_id }} · {{ profile.profile_label|replace('-', ' ') }}
-                  </option>
-                {% endfor %}
-              {% else %}
-                <option value="" selected>尚無會員資料</option>
-              {% endif %}
-            </select>
-            <noscript><button type="submit">載入</button></noscript>
-          </div>
+          <select id="member_id" name="member_id" onchange="this.form.submit()">
+            {% if members %}
+              {% for profile in members %}
+                <option value="{{ profile.member_id }}" {% if context and profile.member_id == context.member_id %}selected{% endif %}>
+                  {{ profile.mall_member_id or profile.member_id }} · {{ profile.profile_label|replace('-', ' ') }}
+                </option>
+              {% endfor %}
+            {% else %}
+              <option value="" selected>尚無會員資料</option>
+            {% endif %}
+          </select>
+          <noscript><button type="submit">載入</button></noscript>
         </form>
       </header>
 
       {% if error %}
-        <div class="alert">
-          {{ error }}
-        </div>
+        <div class="dashboard-alert" role="status">{{ error }}</div>
       {% endif %}
 
-      <main class="dashboard">
-        <section class="hero-card">
-          <div class="hero-image">
-            {% if context and context.hero_image_url %}
-              <img src="{{ context.hero_image_url }}" alt="顧客影像" loading="lazy">
-            {% else %}
-              <div class="hero-placeholder">等待上傳 ESP32-CAM 圖像</div>
-            {% endif %}
+      <main class="dashboard-grid">
+        <aside class="left-column">
+          <div class="capture-controls">
+            <label class="btn primary" for="photo-upload">
+              <input type="file" id="photo-upload" name="image" accept="image/*" hidden>
+              <span>上傳照片</span>
+            </label>
+            <button type="button" class="btn secondary" id="capture-trigger">ESP32-CAM 拍照</button>
           </div>
-          <div class="hero-info">
-            {% if context %}
-              {% set member_profile = context.member %}
-              {% set display_name = member_profile.mall_member_id if member_profile and member_profile.mall_member_id else (member_profile.member_id if member_profile and member_profile.member_id else context.member_id) %}
-              <div class="hero-meta">
-                <span class="tag scenario">情境：{{ context.scenario_key }}</span>
-                <span class="tag window">分析區間：{{ context.prediction.window_label }}</span>
-              </div>
-              <h2>{{ display_name or '未知顧客' }}</h2>
-              <p class="member-profile">{{ member_profile.profile_label|replace('-', ' ') if member_profile else '尚未辨識' }}</p>
-              <dl class="hero-stats">
+
+          <article class="card photo-card">
+            <header>
+              <h2>最新上傳影像</h2>
+              {% if context and context.prediction.window_label %}
+                <span class="timestamp">分析窗口：{{ context.prediction.window_label }}</span>
+              {% endif %}
+            </header>
+            <figure>
+              {% if context and context.hero_image_url %}
+                <img src="{{ context.hero_image_url }}" alt="顧客影像" loading="lazy">
+              {% else %}
+                <div class="photo-placeholder">等待上傳 ESP32-CAM 圖像</div>
+              {% endif %}
+            </figure>
+          </article>
+
+          <article class="card member-card">
+            <header>
+              <h2>會員資料</h2>
+              {% if context and context.member %}
+                <span class="member-status">{{ context.member.member_status }}</span>
+              {% endif %}
+            </header>
+            {% if context and context.member %}
+              <dl class="member-info">
                 <div>
-                  <dt>核心主打</dt>
-                  <dd>{{ context.analysis.recommended_item or '等待歷史累積' }}</dd>
+                  <dt>會員編號</dt>
+                  <dd>{{ context.member.mall_member_id or '未加入會員' }}</dd>
                 </div>
                 <div>
-                  <dt>預估轉換率</dt>
-                  <dd>{{ context.analysis.probability_percent }}%</dd>
+                  <dt>會員 Face ID</dt>
+                  <dd>{{ context.member.member_id }}</dd>
                 </div>
                 <div>
-                  <dt>歷史訂單數</dt>
-                  <dd>{{ context.analysis.total_purchases }}</dd>
+                  <dt>加入日期</dt>
+                  <dd>{{ context.member.joined_at }}</dd>
+                </div>
+                <div>
+                  <dt>職業 / 產業別</dt>
+                  <dd>{{ context.member.occupation or '—' }}</dd>
+                </div>
+                <div>
+                  <dt>聯絡電話</dt>
+                  <dd>{{ context.member.phone }}</dd>
+                </div>
+                <div>
+                  <dt>電子郵件</dt>
+                  <dd>{{ context.member.email }}</dd>
+                </div>
+                <div>
+                  <dt>郵遞地址</dt>
+                  <dd>{{ context.member.address or '—' }}</dd>
+                </div>
+                <div>
+                  <dt>點數餘額</dt>
+                  <dd>{{ '%.0f'|format(context.member.points_balance) }}</dd>
                 </div>
               </dl>
-              <div class="hero-links">
-                <a class="btn" href="{{ context.ad_url }}" target="_blank" rel="noopener">前往顧客版廣告</a>
+            {% else %}
+              <p class="empty">尚無會員資料</p>
+            {% endif %}
+          </article>
+        </aside>
+
+        <section class="right-column">
+          <article class="card overview-card">
+            {% if context %}
+              {% set display_member = context.member %}
+              {% set display_name = display_member.mall_member_id if display_member and display_member.mall_member_id else (display_member.member_id if display_member and display_member.member_id else context.member_id) %}
+              {% set persona = display_member.profile_label|replace('-', ' ') if display_member else '尚未辨識' %}
+              <header>
+                <div>
+                  <h2>{{ display_name }}</h2>
+                  <p class="persona">{{ persona }}</p>
+                </div>
+                <div class="summary-tags">
+                  <span class="tag scenario">情境：{{ context.scenario_key }}</span>
+                  <span class="tag probability">預估轉換率 {{ context.analysis.probability_percent }}%</span>
+                  <a class="tag link" href="{{ context.ad_url }}" target="_blank" rel="noopener">查看顧客廣告</a>
+                </div>
+              </header>
+              <div class="overview-grid">
+                <div>
+                  <span class="label">本月主打商品</span>
+                  <strong>{{ context.analysis.recommended_item or '等待歷史累積' }}</strong>
+                </div>
+                <div>
+                  <span class="label">歷史訂單數</span>
+                  <strong>{{ context.analysis.total_purchases }}</strong>
+                </div>
+                <div>
+                  <span class="label">近期重複購買</span>
+                  <strong>{{ context.analysis.repeat_count }}</strong>
+                </div>
               </div>
             {% else %}
-              <div class="hero-empty">請先選擇顧客，即可載入預測資訊</div>
+              <p class="empty">請先選擇顧客，即可載入預測資訊。</p>
             {% endif %}
-          </div>
-        </section>
+          </article>
 
-        <section class="insights-card">
-          <header>
-            <div>
-              <h3>本月潛在熱銷清單</h3>
-              <p>依據上一個月的消費紀錄推估尚未購買的商品，並計算購買機率</p>
-            </div>
-            {% if context %}
-              <span class="window-label">分析窗口：{{ context.prediction.window_label }}</span>
+          <article class="card ai-card">
+            <header>
+              <div>
+                <h2>Vertex AI 自動生成廣告</h2>
+                <p>Gemini 2.5 Pro + Imagen 1080x1080 海報（目標 < 10 秒）</p>
+              </div>
+              {% if context and context.top_prediction %}
+                <span class="tag sku">SKU：{{ context.top_prediction.product_code }}</span>
+              {% endif %}
+            </header>
+            {% if context and context.vertex_ad %}
+              <div class="ai-layout">
+                <div class="ai-creative">
+                  <figure>
+                    <img src="{{ context.vertex_ad.image_url }}" alt="AI 生成廣告" loading="lazy">
+                  </figure>
+                  <ul class="timings">
+                    <li><span>總耗時</span>{{ '%.2f'|format(context.vertex_ad.timings.total) }} 秒</li>
+                    <li><span>文案</span>{{ '%.2f'|format(context.vertex_ad.timings.copy) }} 秒</li>
+                    <li><span>圖像</span>{{ '%.2f'|format(context.vertex_ad.timings.image) }} 秒</li>
+                    <li><span>上傳</span>{{ '%.2f'|format(context.vertex_ad.timings.upload) }} 秒</li>
+                  </ul>
+                </div>
+                <div class="ai-copy">
+                  <h3>{{ context.vertex_ad.title }}</h3>
+                  <p>{{ context.vertex_ad.subline }}</p>
+                  <a class="btn primary" href="{{ context.vertex_ad.image_url }}" target="_blank" rel="noopener">{{ context.vertex_ad.cta }}</a>
+                </div>
+              </div>
+            {% elif context and context.vertex_ad_error %}
+              <p class="empty">{{ context.vertex_ad_error }}</p>
+            {% else %}
+              <p class="empty">尚無 Vertex AI 生成資料，請先上傳照片辨識顧客。</p>
             {% endif %}
-          </header>
-          <div class="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>商品編號</th>
-                  <th>商品名稱</th>
-                  <th>商品類別</th>
-                  <th>商品價格</th>
-                  <th>商品查閱率</th>
-                  <th>預估購買機率</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% if context and context.prediction.items %}
-                  {% for item in context.prediction.items %}
-                    <tr>
-                      <td>{{ item.product_code }}</td>
-                      <td>{{ item.product_name }}</td>
-                      <td>{{ item.category_label }}</td>
-                      <td>NT$ {{ '%.0f'|format(item.price) }}</td>
-                      <td>{{ '%.1f'|format(item.view_rate_percent) }}%</td>
-                      <td>{{ '%.1f'|format(item.probability_percent) }}%</td>
-                    </tr>
-                  {% endfor %}
-                {% else %}
+          </article>
+
+          <article class="card prediction-card">
+            <header>
+              <div>
+                <h2>感興趣商品推估</h2>
+                <p>依據上一個月的消費紀錄推估本月可能購買但尚未購買的商品</p>
+              </div>
+              {% if context and context.prediction.window_label %}
+                <span class="tag window">{{ context.prediction.window_label }}</span>
+              {% endif %}
+            </header>
+            <div class="table-wrapper">
+              <table>
+                <thead>
                   <tr>
-                    <td colspan="6" class="empty">尚無可用預測資料</td>
+                    <th scope="col">商品編號</th>
+                    <th scope="col">商品名稱</th>
+                    <th scope="col">商品類別</th>
+                    <th scope="col">商品價格</th>
+                    <th scope="col">商品查閱率</th>
+                    <th scope="col">預估購買機率</th>
                   </tr>
-                {% endif %}
-              </tbody>
-            </table>
-          </div>
-          {% if context and context.prediction.top_products %}
-            <div class="top-products">
-              <h4>上一期熱銷前三名</h4>
-              <ul>
-                {% for product in context.prediction.top_products %}
-                  <li>
-                    <strong>{{ product.item }}</strong>
-                    <span>數量 {{ product.quantity }}</span>
-                    <span>金額 NT$ {{ '%.0f'|format(product.total_price) }}</span>
-                  </li>
-                {% endfor %}
-              </ul>
+                </thead>
+                <tbody>
+                  {% if context and context.prediction.items %}
+                    {% for item in context.prediction.items %}
+                      <tr>
+                        <td>{{ item.product_code }}</td>
+                        <td>{{ item.product_name }}</td>
+                        <td>{{ item.category_label }}</td>
+                        <td>NT$ {{ '%.0f'|format(item.price) }}</td>
+                        <td>{{ '%.1f'|format(item.view_rate_percent) }}%</td>
+                        <td>{{ '%.1f'|format(item.probability_percent) }}%</td>
+                      </tr>
+                    {% endfor %}
+                  {% else %}
+                    <tr>
+                      <td colspan="6" class="empty">尚無預測資料</td>
+                    </tr>
+                  {% endif %}
+                </tbody>
+              </table>
             </div>
-          {% endif %}
-        </section>
+          </article>
 
-        <section class="history-card">
-          <header>
-            <h3>上一個月消費紀錄</h3>
-            {% if context %}
-              <span>{{ context.prediction.window_label }}</span>
-            {% endif %}
-          </header>
-          {% if context and context.prediction.history %}
-            <ul class="history-list">
-              {% for purchase in context.prediction.history %}
-                <li>
-                  <div>
-                    <strong>{{ purchase.item }}</strong>
-                    <span>數量 {{ '%.0f'|format(purchase.quantity) }} · 單價 NT$ {{ '%.0f'|format(purchase.unit_price) }}</span>
-                  </div>
-                  <time>{{ purchase.purchased_at }}</time>
-                </li>
-              {% endfor %}
-            </ul>
-          {% else %}
-            <p class="empty">尚無上一個月的消費資料</p>
-          {% endif %}
-        </section>
+          <div class="dual-columns">
+            <article class="card history-card">
+              <header>
+                <h2>歷史消費紀錄</h2>
+                {% if context and context.prediction.window_label %}
+                  <span>{{ context.prediction.window_label }}</span>
+                {% endif %}
+              </header>
+              {% if context and context.prediction.history %}
+                <ul class="history-list">
+                  {% for purchase in context.prediction.history %}
+                    <li>
+                      <div>
+                        <strong>{{ purchase.item }}</strong>
+                        <span>數量 {{ '%.0f'|format(purchase.quantity) }} · 單價 NT$ {{ '%.0f'|format(purchase.unit_price) }}</span>
+                      </div>
+                      <time>{{ purchase.purchased_at }}</time>
+                    </li>
+                  {% endfor %}
+                </ul>
+              {% else %}
+                <p class="empty">尚無上一個月的消費資料</p>
+              {% endif %}
+            </article>
 
-        <section class="member-card">
-          <header>
-            <h3>會員資料</h3>
-          </header>
-          {% if context and context.member %}
-            <dl class="member-info">
-              <div>
-                <dt>會員編號</dt>
-                <dd>{{ context.member.mall_member_id or '尚未加入會員' }}</dd>
-              </div>
-              <div>
-                <dt>會員狀態</dt>
-                <dd>{{ context.member.member_status }}</dd>
-              </div>
-              <div>
-                <dt>加入日期</dt>
-                <dd>{{ context.member.joined_at }}</dd>
-              </div>
-              <div>
-                <dt>職業 / 產業別</dt>
-                <dd>{{ context.member.occupation or '—' }}</dd>
-              </div>
-              <div>
-                <dt>聯絡電話</dt>
-                <dd>{{ context.member.phone }}</dd>
-              </div>
-              <div>
-                <dt>電子郵件</dt>
-                <dd>{{ context.member.email }}</dd>
-              </div>
-              <div>
-                <dt>郵遞地址</dt>
-                <dd>{{ context.member.address or '—' }}</dd>
-              </div>
-              <div>
-                <dt>點數餘額</dt>
-                <dd>{{ '%.0f'|format(context.member.points_balance) }}</dd>
-              </div>
-            </dl>
-          {% else %}
-            <p class="empty">尚無會員資料</p>
-          {% endif %}
-        </section>
-
-        <section class="activities-card">
-          <header>
-            <h3>參與活動紀錄</h3>
-          </header>
-          {% if context and context.prediction.activities %}
-            <ul class="activity-list">
-              {% for activity in context.prediction.activities %}
-                <li>
-                  <div>
-                    <strong>{{ activity.title }}</strong>
-                    <p>{{ activity.description }}</p>
-                  </div>
-                  <time>{{ activity.timestamp }}</time>
-                </li>
-              {% endfor %}
-            </ul>
-          {% else %}
-            <p class="empty">尚無參與活動紀錄</p>
-          {% endif %}
+            <article class="card activity-card">
+              <header>
+                <h2>參與活動紀錄</h2>
+              </header>
+              {% if context and context.prediction.activities %}
+                <ul class="activity-list">
+                  {% for activity in context.prediction.activities %}
+                    <li>
+                      <div>
+                        <strong>{{ activity.title }}</strong>
+                        <p>{{ activity.description }}</p>
+                      </div>
+                      <time>{{ activity.timestamp }}</time>
+                    </li>
+                  {% endfor %}
+                </ul>
+              {% else %}
+                <p class="empty">（尚無資料）</p>
+              {% endif %}
+            </article>
+          </div>
         </section>
       </main>
     </div>
+
+    <dialog id="camera-dialog">
+      <div class="camera-modal" role="document">
+        <header>
+          <h2>ESP32-CAM 即時拍照</h2>
+          <button type="button" class="btn ghost" data-action="close">關閉</button>
+        </header>
+        <div class="camera-body">
+          <video id="camera-preview" autoplay playsinline></video>
+          <canvas id="camera-canvas" hidden></canvas>
+        </div>
+        <footer>
+          <button type="button" class="btn secondary" data-action="capture">拍照上傳</button>
+        </footer>
+      </div>
+    </dialog>
+
+    <div id="toast" role="status" aria-live="polite"></div>
+
+    <script src="{{ url_for('static', filename='js/manager.js') }}" defer></script>
   </body>
 </html>
