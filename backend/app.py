@@ -304,7 +304,12 @@ def render_ad(member_id: str):
 def latest_ad_stream() -> Response:
     """Server-Sent Events feed with the most recent personalised ad metadata."""
 
-    poll_interval = float(request.args.get("interval", 2.0))
+    interval_arg = request.args.get("interval", "2.0")
+    try:
+        poll_interval = float(interval_arg)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid interval"}), 400
+
     poll_interval = max(0.5, min(10.0, poll_interval))
     send_once = request.args.get("once", "0") == "1"
     last_event_id = request.headers.get("Last-Event-ID") or request.args.get("lastEventId")
