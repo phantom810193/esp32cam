@@ -54,6 +54,7 @@ class Purchase:
 class MemberProfile:
     profile_id: int
     profile_label: str
+    name: str | None
     member_id: str | None
     mall_member_id: str | None
     member_status: str | None
@@ -189,6 +190,7 @@ class Database:
             expected_profile_columns = [
                 "profile_id",
                 "profile_label",
+                "name",
                 "member_id",
                 "mall_member_id",
                 "member_status",
@@ -215,6 +217,7 @@ class Database:
                         "gender",
                         "phone",
                         "email",
+                        "name",
                     }
                     if any(row["name"] in nullable_columns and row["notnull"] for row in profile_meta):
                         conn.execute("DROP TABLE IF EXISTS member_profiles")
@@ -224,6 +227,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS member_profiles (
                     profile_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     profile_label TEXT NOT NULL UNIQUE,
+                    name TEXT,
                     member_id TEXT UNIQUE,
                     mall_member_id TEXT,
                     member_status TEXT DEFAULT '有效',
@@ -551,6 +555,7 @@ class Database:
                 """
                 SELECT profile_id,
                        profile_label,
+                       name,
                        member_id,
                        mall_member_id,
                        member_status,
@@ -575,6 +580,7 @@ class Database:
         return MemberProfile(
             profile_id=int(row["profile_id"]),
             profile_label=str(row["profile_label"]),
+            name=str(row["name"]) if row["name"] else None,
             member_id=str(row["member_id"]) if row["member_id"] else None,
             mall_member_id=str(row["mall_member_id"]) if row["mall_member_id"] else None,
             member_status=str(row["member_status"]) if row["member_status"] else None,
@@ -597,6 +603,7 @@ class Database:
                 """
                 SELECT profile_id,
                        profile_label,
+                       name,
                        member_id,
                        mall_member_id,
                        member_status,
@@ -620,6 +627,7 @@ class Database:
                 MemberProfile(
                     profile_id=int(row["profile_id"]),
                     profile_label=str(row["profile_label"]),
+                    name=str(row["name"]) if row["name"] else None,
                     member_id=str(row["member_id"]) if row["member_id"] else None,
                     mall_member_id=str(row["mall_member_id"]) if row["mall_member_id"] else None,
                     member_status=str(row["member_status"]) if row["member_status"] else None,
@@ -1228,6 +1236,7 @@ class Database:
 
         self._seed_member_profile(
             profile_label="dessert-lover",
+            name="林悅心",
             member_id=None,
             mall_member_id="ME0001",
             member_status="有效",
@@ -1242,6 +1251,7 @@ class Database:
         )
         self._seed_member_profile(
             profile_label="family-groceries",
+            name="陳雅雯",
             member_id=None,
             mall_member_id="ME0002",
             member_status="有效",
@@ -1256,6 +1266,7 @@ class Database:
         )
         self._seed_member_profile(
             profile_label="fitness-enthusiast",
+            name="張智翔",
             member_id=None,
             mall_member_id="ME0003",
             member_status="有效",
@@ -1270,6 +1281,7 @@ class Database:
         )
         self._seed_member_profile(
             profile_label="home-manager",
+            name="黃珮真",
             member_id=None,
             mall_member_id="",
             member_status=None,
@@ -1284,6 +1296,7 @@ class Database:
         )
         self._seed_member_profile(
             profile_label="wellness-gourmet",
+            name="吳品蓉",
             member_id=None,
             mall_member_id="",
             member_status=None,
@@ -1331,6 +1344,7 @@ class Database:
         self,
         *,
         profile_label: str,
+        name: str | None,
         member_id: str | None,
         mall_member_id: str | None,
         member_status: str | None,
@@ -1351,6 +1365,7 @@ class Database:
             ).fetchone()
 
             params = (
+                name,
                 member_id,
                 mall_member_id,
                 member_status,
@@ -1369,6 +1384,7 @@ class Database:
                     """
                     INSERT INTO member_profiles (
                         profile_label,
+                        name,
                         member_id,
                         mall_member_id,
                         member_status,
@@ -1381,7 +1397,7 @@ class Database:
                         address,
                         occupation
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (profile_label, *params),
                 )
@@ -1389,7 +1405,8 @@ class Database:
                 conn.execute(
                     """
                     UPDATE member_profiles
-                    SET member_id = ?,
+                    SET name = ?,
+                        member_id = ?,
                         mall_member_id = ?,
                         member_status = ?,
                         joined_at = ?,
