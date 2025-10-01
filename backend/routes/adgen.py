@@ -21,8 +21,8 @@ _IMAGE_MODEL_NAME = os.environ.get("VERTEX_IMAGE_MODEL", "imagegeneration@002")
 _DEFAULT_REGION = os.environ.get("GCP_REGION", "asia-east1")
 
 _vertex_initialised = False
-_text_model: GenerativeModel | None = None
-_image_model: ImageGenerationModel | None = None
+_text_model_instance: GenerativeModel | None = None
+_image_model_instance: ImageGenerationModel | None = None
 
 
 def _ensure_vertex_initialised() -> tuple[str, str]:
@@ -38,20 +38,20 @@ def _ensure_vertex_initialised() -> tuple[str, str]:
     return project_id, region
 
 
-def _text_model() -> GenerativeModel:
-    global _text_model
-    if _text_model is None:
+def _get_text_model() -> GenerativeModel:
+    global _text_model_instance
+    if _text_model_instance is None:
         _ensure_vertex_initialised()
-        _text_model = GenerativeModel(_TEXT_MODEL_NAME)
-    return _text_model
+        _text_model_instance = GenerativeModel(_TEXT_MODEL_NAME)
+    return _text_model_instance
 
 
-def _image_model() -> ImageGenerationModel:
-    global _image_model
-    if _image_model is None:
+def _get_image_model() -> ImageGenerationModel:
+    global _image_model_instance
+    if _image_model_instance is None:
         _ensure_vertex_initialised()
-        _image_model = ImageGenerationModel.from_pretrained(_IMAGE_MODEL_NAME)
-    return _image_model
+        _image_model_instance = ImageGenerationModel.from_pretrained(_IMAGE_MODEL_NAME)
+    return _image_model_instance
 
 
 def _build_text_prompt(sku: str, member_profile: Dict[str, Any]) -> str:
@@ -87,7 +87,7 @@ def _build_image_prompt(sku: str, copy: Dict[str, str], member_profile: Dict[str
 
 
 def _generate_copy(sku: str, member_profile: Dict[str, Any]) -> Dict[str, str]:
-    model = _text_model()
+    model = _get_text_model()
     prompt = _build_text_prompt(sku, member_profile)
     response = model.generate_content(
         prompt,
@@ -112,7 +112,7 @@ def _generate_copy(sku: str, member_profile: Dict[str, Any]) -> Dict[str, str]:
 
 
 def _generate_image_bytes(sku: str, copy: Dict[str, str], member_profile: Dict[str, Any]) -> bytes:
-    model = _image_model()
+    model = _get_image_model()
     prompt = _build_image_prompt(sku, copy, member_profile)
     result = model.generate_images(prompt=prompt, number_of_images=1, aspect_ratio="1:1")
     if not result.images:
