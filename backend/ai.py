@@ -125,7 +125,7 @@ class GeminiService:
         prompt = f"""
 你是一位零售行銷 AI，目標是根據歷史消費紀錄產生一段動態廣告文案。
 請閱讀以下 JSON 陣列描述的購買紀錄：{prompt_payload}
-每筆包含 member_code、item、purchased_at、unit_price、quantity、total_price 等欄位，金額為新台幣。
+每筆包含 member_code、product_category、internal_item_code、item、purchased_at、unit_price、quantity、total_price 等欄位，金額為新台幣。
 請輸出符合以下格式的 JSON（不要加任何額外說明）：
 {{
   "headline": "...主標...",
