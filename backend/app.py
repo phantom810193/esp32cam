@@ -6,6 +6,7 @@ import json
 import logging
 import mimetypes
 import os
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
@@ -40,6 +41,8 @@ from .database import Database
 from .prediction import predict_next_purchases
 from .recognizer import FaceRecognizer
 from .routes import adgen_blueprint
+from .routes.predict import predict_bp          # ← 新增：機率推薦 API
+from .routes.identify import identify_bp        # ← 新增：辨識/上傳 API
 
 # -----------------------------------------------------------------------------
 # Logging
@@ -77,7 +80,11 @@ app = Flask(
 )
 app.config["JSON_AS_ASCII"] = False
 app.config["ADS_DIR"] = ADS_DIR  # 儲存為字串路徑
+
+# 掛載 Blueprints
 app.register_blueprint(adgen_blueprint)
+app.register_blueprint(predict_bp)     # ← 新增
+app.register_blueprint(identify_bp)    # ← 新增
 
 # -----------------------------------------------------------------------------
 # Services (Vertex AI / AWS Rekognition / DB)
