@@ -1,27 +1,33 @@
-"""Utilities for interacting with Gemini to power the cloud-based MVP."""
+# backend/ai.py
+"""Utilities for interacting with Vertex AI (Gemini/Imagen) to power the cloud-based MVP."""
 from __future__ import annotations
 
 import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Iterable, Sequence
+from typing import TYPE_CHECKING, Iterable
 
-try:  # pragma: no cover - optional dependency for offline development
-    import google.generativeai as genai  # type: ignore
-    from google.api_core import exceptions as google_exceptions  # type: ignore
-except Exception:  # pragma: no cover - guard against missing dependencies
-    genai = None  # type: ignore
-    google_exceptions = None  # type: ignore
+from google.cloud import aiplatform
+
+# Vertex AI SDK (Generative AI)
+from vertexai.generative_models import GenerativeModel, Part
+
+# 影像生成功能命名空間在不同版位於 preview 或正式版，兩個都試。
+try:
+    from vertexai.preview.vision_models import ImageGenerationModel  # type: ignore
+except Exception:  # pragma: no cover
+    from vertexai.vision_models import ImageGenerationModel  # type: ignore
 
 if TYPE_CHECKING:
     from .advertising import PurchaseInsights  # pragma: no cover
 
-_LOGGER = logging.getLogger(__name__)
+# 與你原本的日誌名稱保持一致，方便追蹤
+_LOGGER = logging.getLogger("backend.ai")
 
 
 class GeminiUnavailableError(RuntimeError):
-    """Raised when Gemini features are requested but not configured."""
+    """Raised when Vertex AI generative features are requested but unavailable."""
 
 
 @dataclass
@@ -34,82 +40,107 @@ class AdCreative:
 
 
 class GeminiService:
-    """Thin wrapper around the Gemini Vision + Text APIs used by the MVP."""
+    """
+    Thin wrapper around Vertex AI Gemini (text/vision) + Imagen (image generation).
+
+    差異重點 vs. 舊版：
+    - 不再使用 google-generativeai 與 GEMINI_API_KEY。
+    - 透過 GCE VM 的服務帳號（Application Default Credentials）存取。
+    - 模型、專案、區域皆由環境變數配置：
+        GCP_PROJECT_ID, GCP_REGION
+        ADGEN_TEXT_MODEL (ex: gemini-2.5-flash 或 gemini-2.5-pro)
+        ADGEN_IMAGE_MODEL (ex: imagen-3.0-generate-001 或 imagen-4.0-generate-001)
+    """
 
     def __init__(
         self,
-        api_key: str | None = None,
         *,
-        vision_model: str = "gemini-2.5-flash",
-        text_model: str = "gemini-2.5-flash",
+        project: str | None = None,
+        region: str | None = None,
+        vision_model: str | None = None,
+        text_model: str | None = None,
         timeout: float = 20.0,
     ) -> None:
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
-        self._vision_model_name = vision_model
-        self._text_model_name = text_model
+        self._project = project or os.getenv("GCP_PROJECT_ID", "esp32cam-472912")
+        self._region = region or os.getenv("GCP_REGION", "us-central1")
+        self._vision_model_name = vision_model or os.getenv("ADGEN_TEXT_MODEL", "gemini-2.5-flash")
+        # 上面沿用同一套 Gemini 2.5，能吃影像也能產文案；若你想分開，可另外加 ADGEN_VISION_MODEL
+        self._text_model_name = text_model or os.getenv("ADGEN_TEXT_MODEL", "gemini-2.5-flash")
+        self._image_model_name = os.getenv("ADGEN_IMAGE_MODEL", "imagen-3.0-generate-001")
         self._timeout = timeout
-        self._vision_model = None
-        self._text_model = None
 
-        if self.api_key and genai is not None:
-            genai.configure(api_key=self.api_key)
+        self._vision_model: GenerativeModel | None = None
+        self._text_model: GenerativeModel | None = None
+        self._image_model: ImageGenerationModel | None = None
+
+        self._inited: bool = False
+        self._init_error: str | None = None
+
+        self._init_vertex()
+
+    # ------------------------------------------------------------------
+    def _init_vertex(self) -> None:
+        if self._inited:
+            return
+        try:
+            aiplatform.init(project=self._project, location=self._region)
+            # Gemini（多模/文字）
+            self._vision_model = GenerativeModel(self._vision_model_name)
+            self._text_model = GenerativeModel(self._text_model_name)
+            # Imagen（生成圖片，可選）
             try:
-                self._vision_model = genai.GenerativeModel(self._vision_model_name)
-                self._text_model = genai.GenerativeModel(self._text_model_name)
-                _LOGGER.info(
-                    "Gemini service initialised with models %s (vision) / %s (text)",
-                    self._vision_model_name,
-                    self._text_model_name,
-                )
-            except Exception as exc:  # pragma: no cover - configuration failure
-                _LOGGER.error("Failed to initialise Gemini models: %s", exc)
-                self._vision_model = None
-                self._text_model = None
-        elif self.api_key and genai is None:
-            _LOGGER.warning(
-                "google-generativeai is not installed. Install it to enable Gemini features."
+                self._image_model = ImageGenerationModel.from_pretrained(self._image_model_name)
+            except Exception as e:  # 影像模型非必要，失敗就記錄
+                self._image_model = None
+                _LOGGER.warning("Imagen model init failed (%s): %s", self._image_model_name, e)
+
+            self._inited = True
+            _LOGGER.info(
+                "Gemini service initialised with models %s (vision) / %s (text)",
+                self._vision_model_name,
+                self._text_model_name,
             )
-        else:
-            _LOGGER.info("GEMINI_API_KEY not provided. Gemini-powered features are disabled.")
+        except Exception as exc:
+            self._init_error = str(exc)
+            self._inited = False
+            self._vision_model = None
+            self._text_model = None
+            self._image_model = None
+            _LOGGER.exception("Vertex AI init failed: %s", exc)
 
     # ------------------------------------------------------------------
     @property
     def can_describe_faces(self) -> bool:
-        return self._vision_model is not None
+        return self._vision_model is not None and self._inited and not self._init_error
 
     @property
     def can_generate_ads(self) -> bool:
-        return self._text_model is not None
+        return self._text_model is not None and self._inited and not self._init_error
 
     # ------------------------------------------------------------------
     def describe_face(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
-        """Return a stable textual signature for the supplied face image."""
+        """Return a stable textual signature for the supplied face image using Gemini Vision."""
+        if not self.can_describe_faces or self._vision_model is None:
+            raise GeminiUnavailableError(self._init_error or "Gemini Vision model is not configured")
 
-        if not self.can_describe_faces:
-            raise GeminiUnavailableError("Gemini Vision model is not configured")
-
-        assert self._vision_model is not None  # for the type checker
         prompt = (
-            "你是一個用於匿名會員辨識的生物特徵助手。請用 3~4 個重點描述此照片中人物"\
-            "的臉部特徵（例如：髮型、配件、年齡層、明顯特徵），"\
+            "你是一個用於匿名會員辨識的生物特徵助手。請用 3~4 個重點描述此照片中人物"
+            "的臉部特徵（例如：髮型、配件、年齡層、明顯特徵），"
             "並輸出為單行中文短句，避免包含任何個資或主觀評價。"
         )
-
-        content: Sequence[object] = (
-            {"mime_type": mime_type or "image/jpeg", "data": image_bytes},
-            prompt,
-        )
         try:
-            response = self._vision_model.generate_content(
-                content,
+            parts = [
+                Part.from_data(mime_type=mime_type or "image/jpeg", data=image_bytes),
+                prompt,
+            ]
+            resp = self._vision_model.generate_content(
+                parts,
                 request_options={"timeout": self._timeout},
             )
-        except Exception as exc:  # pragma: no cover - network/runtime errors
-            if google_exceptions and isinstance(exc, google_exceptions.GoogleAPICallError):
-                raise GeminiUnavailableError(f"Gemini Vision API error: {exc}") from exc
+        except Exception as exc:
             raise GeminiUnavailableError(f"Gemini Vision failed: {exc}") from exc
 
-        description = (response.text or "").strip()
+        description = (getattr(resp, "text", None) or "").strip()
         if not description:
             raise GeminiUnavailableError("Gemini Vision returned an empty description")
         _LOGGER.debug("Gemini Vision signature: %s", description)
@@ -124,11 +155,9 @@ class GeminiService:
         insights: "PurchaseInsights | None" = None,
     ) -> AdCreative:
         """Use Gemini Text to produce fresh advertising copy."""
+        if not self.can_generate_ads or self._text_model is None:
+            raise GeminiUnavailableError(self._init_error or "Gemini text model is not configured")
 
-        if not self.can_generate_ads:
-            raise GeminiUnavailableError("Gemini text model is not configured")
-
-        assert self._text_model is not None  # for the type checker
         purchase_list = list(purchases)
         prompt_payload = json.dumps(purchase_list, ensure_ascii=False)
         insight_summary = self._describe_insights(insights)
@@ -147,20 +176,19 @@ class GeminiService:
 會員 ID：{member_id}
 """
         try:
-            response = self._text_model.generate_content(
+            resp = self._text_model.generate_content(
                 prompt,
                 request_options={"timeout": self._timeout},
             )
-        except Exception as exc:  # pragma: no cover - network/runtime errors
-            if google_exceptions and isinstance(exc, google_exceptions.GoogleAPICallError):
-                raise GeminiUnavailableError(f"Gemini Text API error: {exc}") from exc
+        except Exception as exc:
             raise GeminiUnavailableError(f"Gemini Text generation failed: {exc}") from exc
 
-        text = (response.text or "").strip()
+        text = (getattr(resp, "text", None) or "").strip()
         if not text:
             raise GeminiUnavailableError("Gemini Text returned an empty response")
         return self._parse_ad_response(text)
 
+    # ------------------------------------------------------------------
     def _describe_insights(self, insights: "PurchaseInsights | None") -> str:
         if not insights:
             return ""
@@ -184,7 +212,7 @@ class GeminiService:
         if scenario == "returning_member" and recommended:
             probability_pct = probability_percent
             if probability_pct is None:
-                probability_pct = round(max(0.0, probability) * 100)
+                probability_pct = round(max(0.0, float(probability)) * 100)
             return (
                 f"老會員累積 {total_orders} 筆消費，AI 預測對 {recommended} 的購買機率約 "
                 f"{probability_pct}% ，請強調會員專屬優惠。"
@@ -215,11 +243,22 @@ class GeminiService:
         text = text.strip()
         if text.startswith("```"):
             lines = text.splitlines()
-            # drop first fence
             lines = lines[1:]
-            # drop closing fence if present
             if lines and lines[-1].strip().startswith("```"):
                 lines = lines[:-1]
             return "\n".join(lines).strip()
         return text
 
+    # ------------------------------------------------------------------
+    def health_probe(self) -> dict:
+        """Expose init + model info to /healthz."""
+        return {
+            "vertexai": "initialized" if self._inited and not self._init_error else "init_failed",
+            "project": self._project,
+            "region": self._region,
+            "text_model": self._text_model_name,
+            "vision_model": self._vision_model_name,
+            "image_model": self._image_model_name,
+            "error": self._init_error,
+            "has_image_model": bool(self._image_model),
+        }
