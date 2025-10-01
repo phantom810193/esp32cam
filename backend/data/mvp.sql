@@ -2,6 +2,7 @@ BEGIN TRANSACTION;
 CREATE TABLE member_profiles (
                     profile_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     profile_label TEXT NOT NULL UNIQUE,
+                    name TEXT,
                     member_id TEXT UNIQUE,
                     mall_member_id TEXT,
                     member_status TEXT DEFAULT '有效',
@@ -16,11 +17,11 @@ CREATE TABLE member_profiles (
                     first_image_filename TEXT,
                     FOREIGN KEY(member_id) REFERENCES members(member_id)
                 );
-INSERT INTO "member_profiles" VALUES(1,'dessert-lover','MEME0383FE3AA','ME0001','有效','2021-06-12',1520.0,'女','1988-07-12','0912-345-678','dessertlover@example.com','台北市信義區松壽路10號','甜點教室講師',NULL);
-INSERT INTO "member_profiles" VALUES(2,'family-groceries','MEM692FFD0824','ME0002','有效','2020-09-01',980.0,'女','1990-02-08','0923-556-789','familybuyer@example.com','新北市板橋區文化路100號','幼兒園老師',NULL);
-INSERT INTO "member_profiles" VALUES(3,'fitness-enthusiast','MEMFITNESS2025','ME0003','有效','2019-11-20',2040.0,'男','1985-04-19','0955-112-233','fitgoer@example.com','台中市西屯區市政北二路88號','企業健身顧問',NULL);
-INSERT INTO "member_profiles" VALUES(4,'home-manager','MEMHOMECARE2025','',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL);
-INSERT INTO "member_profiles" VALUES(5,'wellness-gourmet','MEMHEALTH2025','',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL);
+INSERT INTO "member_profiles" VALUES(1,'dessert-lover','林悅心','MEME0383FE3AA','ME0001','有效','2021-06-12',1520.0,'女','1988-07-12','0912-345-678','dessertlover@example.com','台北市信義區松壽路10號','甜點教室講師',NULL);
+INSERT INTO "member_profiles" VALUES(2,'family-groceries','陳雅雯','MEM692FFD0824','ME0002','有效','2020-09-01',980.0,'女','1990-02-08','0923-556-789','familybuyer@example.com','新北市板橋區文化路100號','幼兒園老師',NULL);
+INSERT INTO "member_profiles" VALUES(3,'fitness-enthusiast','張智翔','MEMFITNESS2025','ME0003','有效','2019-11-20',2040.0,'男','1985-04-19','0955-112-233','fitgoer@example.com','台中市西屯區市政北二路88號','企業健身顧問',NULL);
+INSERT INTO "member_profiles" VALUES(4,'home-manager','黃珮真','MEMHOMECARE2025','',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL);
+INSERT INTO "member_profiles" VALUES(5,'wellness-gourmet','吳品蓉','MEMHEALTH2025','',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL);
 CREATE TABLE members (
                     member_id TEXT PRIMARY KEY,
                     encoding_json TEXT NOT NULL
