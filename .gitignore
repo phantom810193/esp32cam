@@ -1,15 +1,25 @@
-__pycache__/
-*.pyc
-*.pyo
-*.sqlite3
-*.db
-backend/data/*.db
-backend/data/*.sqlite
-backend/data/*.sqlite3
-backend/data/encodings/*.json
-firmware/esp32cam_mvp/include/secrets.h
+# env / secrets
+.env
+*.json
+*.pem
+
+# local data & uploads
+backend/data/
+uploads/
+**/*.tmp
+
+# editor / os
+.DS_Store
 .vscode/
 .idea/
-.DS_Store
 
-.venv/
+# backups / misc
+*.bak
+*.bak.*
+U001
+U004
+
+# node/python cache
+node_modules/
+__pycache__/
+*.pyc
