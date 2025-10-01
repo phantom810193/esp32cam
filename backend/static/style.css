@@ -94,12 +94,18 @@ header h1{
 }
 
 #customer-profile {
+    display: block;
+}
+
+.customer-layout {
     display: flex;
-    flex-direction: row;
+    align-items: flex-start;
+    gap: 24px;
 }
 
 #customer-information {
-    width: 30%;
+    flex: 0 0 28%;
+    max-width: 30%;
     padding-right: 16px;
     box-sizing: border-box;
     /* height: calc(100vh - 84px); */
@@ -125,7 +131,6 @@ header h1{
 }
 .customer-infolist{
     width: 100%;
-    max-width: 300px;
     background: white;
     border-radius: 0 0 32px 32px;
     overflow: hidden;
@@ -135,7 +140,8 @@ header h1{
 
 /* 右欄位列表 */
 #customer-details{
-    width: 70%;
+    flex: 1 1 0;
+    min-width: 0;
     box-sizing: border-box;
 }
 
@@ -147,8 +153,7 @@ header h1{
     border-radius: 32px 32px 0 0;
     overflow: hidden;
     width: 100%;
-    max-width: 300px;
-    height: 300px;
+    aspect-ratio: 1 / 1;
 }
 
 .customer-photo img{
@@ -391,6 +396,25 @@ text-decoration: none;
 #tab>ul>li>a:hover,
 #tab>ul>li>a:focus {
     background-color: #e6e6e6;
+}
+
+@media (max-width: 960px) {
+    .customer-layout {
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    #customer-information {
+        flex: 1 1 auto;
+        max-width: 100%;
+        padding-right: 0;
+    }
+
+    #customer-details {
+        flex: 1 1 auto;
+        min-width: 100%;
+        width: 100%;
+    }
 }
 
 /*頁籤div內容*/
