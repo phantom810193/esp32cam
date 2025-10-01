@@ -1,235 +1,134 @@
 <!doctype html>
 <html lang="zh-Hant">
-  <head>
+<head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>智慧廣告管理後台</title>
+    <title>智慧廣告管理後台 / 你的專屬折扣</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/manager.css') }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
-  </head>
-  <body>
+</head>
+<body>
+    <!-- Header Section -->
+    <header>
+        <h1>智慧廣告管理後台 / 你的專屬折扣</h1>
+        <nav>
+            <ul id="nav-links">
+                <li class="event"><a href="#" title="促銷活動">促銷活動</a></li>
+                <li class="shop"><a href="#" title="店舖管理">店舖管理</a></li>
+                <li class="product"><a href="#" title="商品管理">商品管理</a></li>
+                <li class="payment"><a href="#" title="金流管理">金流管理</a></li>
+                <li class="customer active"><a href="#" title="顧客資料">顧客資料</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <!-- Main Content -->
     <div class="manager-shell">
-      <header class="manager-header">
-        <div class="header-title">
-          <h1>ESP32-CAM 智慧廣告中控台</h1>
-          <p>依據上一期的消費紀錄，自動推估本月潛在購買清單與專屬廣告資源</p>
-        </div>
-        <form class="member-picker" method="get">
-          <label for="member_id">選擇顧客</label>
-          <div class="picker-input">
-            <select id="member_id" name="member_id" onchange="this.form.submit()">
-              {% if members %}
-                {% for profile in members %}
-                  <option value="{{ profile.member_id }}" {% if context and profile.member_id == context.member_id %}selected{% elif not context and profile.member_id == request.args.get('member_id') %}selected{% endif %}>
-                    {{ profile.mall_member_id or profile.member_id }} · {{ profile.profile_label|replace('-', ' ') }}
-                  </option>
-                {% endfor %}
-              {% else %}
-                <option value="" selected>尚無會員資料</option>
-              {% endif %}
-            </select>
-            <noscript><button type="submit">載入</button></noscript>
-          </div>
-        </form>
-      </header>
+        <section class="customer-profile">
+            <!-- 顧客資料 -->
+            <article id="customer-information">
+                <h2>顧客資料</h2>
+                <figure class="customer-photo">
+                    <img src="{{ context.hero_image_url if context and context.hero_image_url else 'images/face.jpg' }}" alt="顧客影像" loading="lazy">
+                </figure>
+                <section class="customer-infolist">
+                    <ul class="customer-basic-info">
+                        <li class="customer-name">{{ context.member.profile_label if context and context.member else '未知顧客' }}</li>
+                        <li class="customer-level general">一般會員</li>
+                        <li>Face ID：{{ context.member.face_id if context and context.member else '無資料' }}</li>
+                        <li>會員編號：{{ context.member.mall_member_id if context and context.member else '無資料' }}</li>
+                        <li>會員狀態：{{ context.member.member_status if context and context.member else '無資料' }}</li>
+                        <li>入會日期：{{ context.member.joined_at if context and context.member else '無資料' }}</li>
+                        <li>點數餘額：{{ context.member.points_balance if context and context.member else '無資料' }}</li>
+                    </ul>
+                    <ul class="customer-contact-info">
+                        <li>性別：{{ context.member.gender if context and context.member else '無資料' }}</li>
+                        <li>出生年月：{{ context.member.dob if context and context.member else '無資料' }}</li>
+                        <li>聯絡電話：{{ context.member.phone if context and context.member else '無資料' }}</li>
+                        <li>電子郵件：{{ context.member.email if context and context.member else '無資料' }}</li>
+                        <li>郵遞地址：{{ context.member.address if context and context.member else '無資料' }}</li>
+                        <li>職業 / 產業別：{{ context.member.occupation if context and context.member else '無資料' }}</li>
+                    </ul>
+                </section>
+            </article>
+        </section>
 
-      {% if error %}
-        <div class="alert">
-          {{ error }}
-        </div>
-      {% endif %}
-
-      <main class="dashboard">
-        <section class="hero-card">
-          <div class="hero-image">
-            {% if context and context.hero_image_url %}
-              <img src="{{ context.hero_image_url }}" alt="顧客影像" loading="lazy">
-            {% else %}
-              <div class="hero-placeholder">等待上傳 ESP32-CAM 圖像</div>
-            {% endif %}
-          </div>
-          <div class="hero-info">
-            {% if context %}
-              {% set member_profile = context.member %}
-              {% set display_name = member_profile.mall_member_id if member_profile and member_profile.mall_member_id else (member_profile.member_id if member_profile and member_profile.member_id else context.member_id) %}
-              <div class="hero-meta">
-                <span class="tag scenario">情境：{{ context.scenario_key }}</span>
-                <span class="tag window">分析區間：{{ context.prediction.window_label }}</span>
-              </div>
-              <h2>{{ display_name or '未知顧客' }}</h2>
-              <p class="member-profile">{{ member_profile.profile_label|replace('-', ' ') if member_profile else '尚未辨識' }}</p>
-              <dl class="hero-stats">
-                <div>
-                  <dt>核心主打</dt>
-                  <dd>{{ context.analysis.recommended_item or '等待歷史累積' }}</dd>
+        <section class="dashboard">
+            <!-- 顧客相關資訊 -->
+            <section class="hero-card">
+                <div class="hero-info">
+                    {% if context %}
+                        <div class="hero-meta">
+                            <span class="tag scenario">情境：{{ context.scenario_key }}</span>
+                            <span class="tag window">分析區間：{{ context.prediction.window_label }}</span>
+                        </div>
+                        <h2>{{ context.member.mall_member_id if context.member else '未知顧客' }}</h2>
+                    {% else %}
+                        <div class="hero-empty">請先選擇顧客，即可載入預測資訊</div>
+                    {% endif %}
                 </div>
-                <div>
-                  <dt>預估轉換率</dt>
-                  <dd>{{ context.analysis.probability_percent }}%</dd>
+            </section>
+
+            <!-- 潛在熱銷清單 -->
+            <section class="insights-card">
+                <header>
+                    <div>
+                        <h3>本月潛在熱銷清單</h3>
+                        <p>依據上一個月的消費紀錄推估尚未購買的商品，並計算購買機率</p>
+                    </div>
+                    {% if context %}
+                        <span class="window-label">分析窗口：{{ context.prediction.window_label }}</span>
+                    {% endif %}
+                </header>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>商品編號</th>
+                                <th>商品名稱</th>
+                                <th>商品類別</th>
+                                <th>商品價格</th>
+                                <th>商品查閱率</th>
+                                <th>預估購買機率</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if context and context.prediction.items %}
+                                {% for item in context.prediction.items %}
+                                    <tr>
+                                        <td>{{ item.product_code }}</td>
+                                        <td>{{ item.product_name }}</td>
+                                        <td>{{ item.category_label }}</td>
+                                        <td>NT$ {{ '%.0f'|format(item.price) }}</td>
+                                        <td>{{ '%.1f'|format(item.view_rate_percent) }}%</td>
+                                        <td>{{ '%.1f'|format(item.probability_percent) }}%</td>
+                                    </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr>
+                                    <td colspan="6" class="empty">尚無可用預測資料</td>
+                                </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
                 </div>
-                <div>
-                  <dt>歷史訂單數</dt>
-                  <dd>{{ context.analysis.total_purchases }}</dd>
-                </div>
-              </dl>
-              <div class="hero-links">
-                <a class="btn" href="{{ context.ad_url }}" target="_blank" rel="noopener">前往顧客版廣告</a>
-              </div>
-            {% else %}
-              <div class="hero-empty">請先選擇顧客，即可載入預測資訊</div>
-            {% endif %}
-          </div>
-        </section>
+            </section>
 
-        <section class="insights-card">
-          <header>
-            <div>
-              <h3>本月潛在熱銷清單</h3>
-              <p>依據上一個月的消費紀錄推估尚未購買的商品，並計算購買機率</p>
-            </div>
-            {% if context %}
-              <span class="window-label">分析窗口：{{ context.prediction.window_label }}</span>
-            {% endif %}
-          </header>
-          <div class="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>商品編號</th>
-                  <th>商品名稱</th>
-                  <th>商品類別</th>
-                  <th>商品價格</th>
-                  <th>商品查閱率</th>
-                  <th>預估購買機率</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% if context and context.prediction.items %}
-                  {% for item in context.prediction.items %}
-                    <tr>
-                      <td>{{ item.product_code }}</td>
-                      <td>{{ item.product_name }}</td>
-                      <td>{{ item.category_label }}</td>
-                      <td>NT$ {{ '%.0f'|format(item.price) }}</td>
-                      <td>{{ '%.1f'|format(item.view_rate_percent) }}%</td>
-                      <td>{{ '%.1f'|format(item.probability_percent) }}%</td>
-                    </tr>
-                  {% endfor %}
-                {% else %}
-                  <tr>
-                    <td colspan="6" class="empty">尚無可用預測資料</td>
-                  </tr>
-                {% endif %}
-              </tbody>
-            </table>
-          </div>
-          {% if context and context.prediction.top_products %}
-            <div class="top-products">
-              <h4>上一期熱銷前三名</h4>
-              <ul>
-                {% for product in context.prediction.top_products %}
-                  <li>
-                    <strong>{{ product.item }}</strong>
-                    <span>數量 {{ product.quantity }}</span>
-                    <span>金額 NT$ {{ '%.0f'|format(product.total_price) }}</span>
-                  </li>
-                {% endfor %}
-              </ul>
-            </div>
-          {% endif %}
+            <!-- 顧客標籤 -->
+            <section id="customer-tags">
+                <h2>顧客標籤</h2>
+                <ul class="customer-taglist">
+                    <li>#甜點收藏家</li>
+                    <li>#健身族群</li>
+                    <li>#保健食品</li>
+                    <li>#蛋白粉</li>
+                    <li>#水果</li>
+                    <li>#美妝愛好</li>
+                </ul>
+            </section>
         </section>
-
-        <section class="history-card">
-          <header>
-            <h3>上一個月消費紀錄</h3>
-            {% if context %}
-              <span>{{ context.prediction.window_label }}</span>
-            {% endif %}
-          </header>
-          {% if context and context.prediction.history %}
-            <ul class="history-list">
-              {% for purchase in context.prediction.history %}
-                <li>
-                  <div>
-                    <strong>{{ purchase.item }}</strong>
-                    <span>數量 {{ '%.0f'|format(purchase.quantity) }} · 單價 NT$ {{ '%.0f'|format(purchase.unit_price) }}</span>
-                  </div>
-                  <time>{{ purchase.purchased_at }}</time>
-                </li>
-              {% endfor %}
-            </ul>
-          {% else %}
-            <p class="empty">尚無上一個月的消費資料</p>
-          {% endif %}
-        </section>
-
-        <section class="member-card">
-          <header>
-            <h3>會員資料</h3>
-          </header>
-          {% if context and context.member %}
-            <dl class="member-info">
-              <div>
-                <dt>會員編號</dt>
-                <dd>{{ context.member.mall_member_id or '尚未加入會員' }}</dd>
-              </div>
-              <div>
-                <dt>會員狀態</dt>
-                <dd>{{ context.member.member_status }}</dd>
-              </div>
-              <div>
-                <dt>加入日期</dt>
-                <dd>{{ context.member.joined_at }}</dd>
-              </div>
-              <div>
-                <dt>職業 / 產業別</dt>
-                <dd>{{ context.member.occupation or '—' }}</dd>
-              </div>
-              <div>
-                <dt>聯絡電話</dt>
-                <dd>{{ context.member.phone }}</dd>
-              </div>
-              <div>
-                <dt>電子郵件</dt>
-                <dd>{{ context.member.email }}</dd>
-              </div>
-              <div>
-                <dt>郵遞地址</dt>
-                <dd>{{ context.member.address or '—' }}</dd>
-              </div>
-              <div>
-                <dt>點數餘額</dt>
-                <dd>{{ '%.0f'|format(context.member.points_balance) }}</dd>
-              </div>
-            </dl>
-          {% else %}
-            <p class="empty">尚無會員資料</p>
-          {% endif %}
-        </section>
-
-        <section class="activities-card">
-          <header>
-            <h3>參與活動紀錄</h3>
-          </header>
-          {% if context and context.prediction.activities %}
-            <ul class="activity-list">
-              {% for activity in context.prediction.activities %}
-                <li>
-                  <div>
-                    <strong>{{ activity.title }}</strong>
-                    <p>{{ activity.description }}</p>
-                  </div>
-                  <time>{{ activity.timestamp }}</time>
-                </li>
-              {% endfor %}
-            </ul>
-          {% else %}
-            <p class="empty">尚無參與活動紀錄</p>
-          {% endif %}
-        </section>
-      </main>
     </div>
-  </body>
+</body>
 </html>
