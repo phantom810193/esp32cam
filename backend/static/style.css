@@ -105,6 +105,9 @@ header h1{
     /* height: calc(100vh - 84px); */
     overflow: hidden;
     position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
 }
 
 
@@ -122,6 +125,7 @@ header h1{
 }
 .customer-infolist{
     width: 100%;
+    max-width: 300px;
     background: white;
     border-radius: 0 0 32px 32px;
     overflow: hidden;
@@ -142,11 +146,16 @@ header h1{
     margin: 0;
     border-radius: 32px 32px 0 0;
     overflow: hidden;
+    width: 100%;
+    max-width: 300px;
+    height: 300px;
 }
 
 .customer-photo img{
     width: 100%;
-    float: left;
+    height: 100%;
+    object-fit: cover;
+    display: block;
 }
 .customer-photo figcaption {
     position: absolute;
@@ -489,23 +498,83 @@ span~#tab>div:first-of-type,
 #tab-4:target~#tab>div.tab-content-4 {
     border-radius: 32px 0 32px 32px;
 }
-.tab-content-1 table{
+.tab-content-1 table,
+.purchase-history {
     width: 100%;
     border-collapse: collapse;
 }
-.tab-content-1 table th{
+.tab-content-1 table th,
+.purchase-history th {
     font-weight: bold;
     border-bottom: #7C7C7C 1px solid;
 }
-.tab-content-1 table tr:nth-child(even){
+.tab-content-1 table tr:nth-child(even),
+.purchase-history tbody tr:nth-child(even) {
     background-color: #f2f2f2;
 }
-.tab-content-1 table th, .tab-content-1 table td{
+.tab-content-1 table th,
+.tab-content-1 table td,
+.purchase-history th,
+.purchase-history td {
     padding: 12px 8px;
     text-align: center;
 }
-.tab-content-1 table td:nth-child(2){
+.tab-content-1 table td:nth-child(2) {
     text-align: left
+}
+.purchase-history th.datetime,
+.purchase-history th.item,
+.purchase-history th.category,
+.purchase-history td.datetime,
+.purchase-history td.item,
+.purchase-history td.category {
+    text-align: left;
+}
+.purchase-history td.numeric,
+.purchase-history th.numeric {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+.purchase-history .empty-message {
+    text-align: center;
+}
+.history-pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 16px;
+    gap: 12px;
+}
+.history-pagination .page-status {
+    font-size: 0.95em;
+    color: #555;
+}
+.history-pagination .pagination-links {
+    display: flex;
+    gap: 12px;
+}
+.history-pagination .pagination-links a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 14px;
+    border-radius: 20px;
+    background-color: #1B6F15;
+    color: white;
+    text-decoration: none;
+    transition: background-color 0.2s ease-in-out;
+}
+.history-pagination .pagination-links a:hover,
+.history-pagination .pagination-links a:focus {
+    background-color: #14500f;
+}
+.history-pagination .pagination-links a.disabled {
+    background-color: #a4a4a4;
+    cursor: default;
+    pointer-events: none;
+}
+.history-pagination .pagination-links a.disabled[tabindex="-1"] {
+    outline: none;
 }
 .hight{
     padding: 4px 16px;
