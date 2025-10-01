@@ -196,7 +196,10 @@
                                 <li><span>辨識速度</span>0.6秒</li>
                                 <li><span>廣告生成</span>0.8秒</li>
                                 <li><span>總計耗時</span>0.8秒</li> -->
-                                <li class="btn"><a href="" title="檢視生成廣告">檢視生成廣告</a></li>
+                                {% set ad_link = resolved_member_id and 'http://34.80.216.88:8000/ad/' ~ resolved_member_id %}
+                                <li class="btn">
+                                    <a href="{{ ad_link or '#' }}" title="檢視生成廣告"{% if not ad_link %} aria-disabled="true" tabindex="-1"{% endif %}>檢視生成廣告</a>
+                                </li>
                             </ul>
                         </div>
                         <ul class="page">
