@@ -41,6 +41,8 @@ _TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 class Purchase:
     member_id: str
     member_code: str
+    product_category: str
+    internal_item_code: str
     item: str
     purchased_at: str
     unit_price: float
@@ -81,12 +83,33 @@ class UploadEvent:
 
 def _build_seed_purchases(
     start_timestamp: str,
-    items: list[tuple[str, float, float]],
+    items: list[tuple[str, float, float] | tuple[str, float, float, str] | tuple[str, float, float, str, str]],
     member_code: str | None = None,
+    *,
+    default_category: str = "一般商品",
+    code_prefix: str = "SKU",
 ) -> list[dict[str, float | str]]:
     base = datetime.fromisoformat(start_timestamp)
     purchases: list[dict[str, float | str]] = []
-    for index, (name, unit_price, quantity) in enumerate(items):
+    for index, spec in enumerate(items, start=1):
+        name: str
+        unit_price: float
+        quantity: float
+        category: str
+        internal_code: str
+
+        if len(spec) == 3:
+            name, unit_price, quantity = spec  # type: ignore[misc]
+            category = default_category
+            internal_code = f"{code_prefix}-{index:03d}"
+        elif len(spec) == 4:
+            name, unit_price, quantity, category = spec  # type: ignore[misc]
+            internal_code = f"{code_prefix}-{index:03d}"
+        else:
+            name, unit_price, quantity, category, internal_code = spec  # type: ignore[misc]
+            if not internal_code:
+                internal_code = f"{code_prefix}-{index:03d}"
+
         scheduled = base + timedelta(days=index * 3 + (index % 4), hours=index % 5, minutes=(index * 11) % 60)
         purchases.append(
             {
@@ -96,6 +119,8 @@ def _build_seed_purchases(
                 "unit_price": float(unit_price),
                 "quantity": float(quantity),
                 "total_price": round(unit_price * quantity, 2),
+                "product_category": category,
+                "internal_item_code": internal_code,
             }
         )
     return purchases
@@ -221,6 +246,8 @@ class Database:
                 "id",
                 "member_id",
                 "member_code",
+                "product_category",
+                "internal_item_code",
                 "purchased_at",
                 "item",
                 "unit_price",
@@ -236,6 +263,8 @@ class Database:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     member_id TEXT NOT NULL,
                     member_code TEXT NOT NULL,
+                    product_category TEXT NOT NULL DEFAULT '',
+                    internal_item_code TEXT NOT NULL DEFAULT '',
                     purchased_at TEXT NOT NULL,
                     item TEXT NOT NULL,
                     unit_price REAL NOT NULL,
@@ -639,6 +668,8 @@ class Database:
         member_id: str,
         *,
         member_code: str | None = None,
+        product_category: str | None = None,
+        internal_item_code: str | None = None,
         item: str,
         purchased_at: str,
         unit_price: float,
@@ -649,23 +680,29 @@ class Database:
             resolved_code = self.get_member_code(member_id)
         else:
             resolved_code = member_code
+        resolved_category = product_category or ""
+        resolved_internal_code = internal_item_code or ""
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO purchases (
                     member_id,
                     member_code,
+                    product_category,
+                    internal_item_code,
                     purchased_at,
                     item,
                     unit_price,
                     quantity,
                     total_price
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     member_id,
                     resolved_code,
+                    resolved_category,
+                    resolved_internal_code,
                     purchased_at,
                     item,
                     float(unit_price),
@@ -678,7 +715,7 @@ class Database:
     def get_purchase_history(self, member_id: str) -> list[Purchase]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT member_id, member_code, purchased_at, item, unit_price, quantity, total_price"
+                "SELECT member_id, member_code, product_category, internal_item_code, purchased_at, item, unit_price, quantity, total_price"
                 " FROM purchases WHERE member_id = ? ORDER BY purchased_at DESC, id DESC",
                 (member_id,),
             ).fetchall()
@@ -686,6 +723,8 @@ class Database:
             Purchase(
                 member_id=row["member_id"],
                 member_code=row["member_code"],
+                product_category=str(row["product_category"] or ""),
+                internal_item_code=str(row["internal_item_code"] or ""),
                 item=row["item"],
                 purchased_at=row["purchased_at"],
                 unit_price=float(row["unit_price"]),
@@ -1145,23 +1184,36 @@ class Database:
         dessert_history = _build_seed_purchases(
             "2025-01-04 10:30",
             dessert_specs,
+            "ME0001",
+            default_category="甜點與烘焙",
+            code_prefix="DES",
         )
         kids_history = _build_seed_purchases(
             "2025-01-05 09:20",
             kids_specs,
+            "ME0002",
+            default_category="親子成長與家庭",
+            code_prefix="FAM",
         )
 
         fitness_history = _build_seed_purchases(
             "2025-01-06 07:30",
             fitness_specs,
+            "ME0003",
+            default_category="運動與體能",
+            code_prefix="FIT",
         )
         homemaker_history = _build_seed_purchases(
             "2025-01-08 08:45",
             homemaker_specs,
+            default_category="居家生活",
+            code_prefix="HOM",
         )
         health_history = _build_seed_purchases(
             "2025-01-09 09:10",
             health_specs,
+            default_category="健康食尚",
+            code_prefix="HLT",
         )
 
         self._profile_purchase_templates = {

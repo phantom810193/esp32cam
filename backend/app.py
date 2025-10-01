@@ -109,6 +109,8 @@ def _serialize_ad_context(context: AdContext) -> dict[str, object]:
             {
                 "item": purchase.item,
                 "purchased_at": purchase.purchased_at,
+                "product_category": purchase.product_category,
+                "internal_item_code": purchase.internal_item_code,
                 "unit_price": purchase.unit_price,
                 "quantity": purchase.quantity,
                 "total_price": purchase.total_price,
@@ -261,6 +263,8 @@ def upload_face():
                 [
                     {
                         "member_code": purchase.member_code,
+                        "product_category": purchase.product_category,
+                        "internal_item_code": purchase.internal_item_code,
                         "item": purchase.item,
                         "purchased_at": purchase.purchased_at,
                         "unit_price": purchase.unit_price,
@@ -364,6 +368,8 @@ def render_ad(member_id: str):
                     [
                         {
                             "member_code": purchase.member_code,
+                            "product_category": purchase.product_category,
+                            "internal_item_code": purchase.internal_item_code,
                             "item": purchase.item,
                             "purchased_at": purchase.purchased_at,
                             "unit_price": purchase.unit_price,
@@ -479,6 +485,8 @@ def _create_welcome_purchase(member_id: str) -> None:
     database.add_purchase(
         member_id,
         item="歡迎禮盒",
+        product_category="迎新禮遇",
+        internal_item_code="WELCOME-001",
         purchased_at=now.strftime("%Y-%m-%d %H:%M"),
         unit_price=880.0,
         quantity=1,
