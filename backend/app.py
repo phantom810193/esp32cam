@@ -32,7 +32,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from .advertising import AdContext, build_ad_context
 from .ai import GeminiService, GeminiUnavailableError
 from .aws import RekognitionService
-from .database import Database
+from .database import Database, SEED_MEMBER_IDS
 from .recognizer import FaceRecognizer
 
 logging.basicConfig(level=logging.INFO)
@@ -135,7 +135,87 @@ def index() -> str:
 @app.get("/dashboard")
 def dashboard() -> str:
     """Render the customer dashboard demo page."""
-    return render_template("dashboard.html")
+    requested_member_id = request.args.get("member_id")
+    member_id = requested_member_id or None
+
+    profile = None
+    if member_id:
+        profile = database.get_member_profile(member_id)
+
+    if profile is None:
+        latest_event = database.get_latest_upload_event()
+        if latest_event:
+            member_id = latest_event.member_id
+            profile = database.get_member_profile(member_id)
+
+    if profile is None:
+        for seed_member_id in SEED_MEMBER_IDS:
+            seeded_profile = database.get_member_profile(seed_member_id)
+            if seeded_profile is not None:
+                member_id = seed_member_id
+                profile = seeded_profile
+                break
+
+    purchases = []
+    if profile and member_id:
+        purchases = database.get_purchase_history(member_id)
+
+    points_balance_display: str | None = None
+    if profile and profile.points_balance is not None:
+        points_balance_display = f"{profile.points_balance:,.0f}"
+
+    joined_at_display: str | None = None
+    if profile and profile.joined_at:
+        for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+            try:
+                joined_dt = datetime.strptime(profile.joined_at, fmt)
+            except ValueError:
+                continue
+            else:
+                joined_at_display = joined_dt.strftime("%Y-%m-%d")
+                break
+        else:
+            joined_at_display = profile.joined_at
+
+    persona_map = {
+        "dessert-lover": "甜點收藏家",
+        "family-groceries": "幼兒園家長",
+        "fitness-enthusiast": "健身族",
+        "home-manager": "家庭主婦",
+        "wellness-gourmet": "健康食品愛好者",
+    }
+    persona_name: str | None = None
+    if profile:
+        persona_name = persona_map.get(
+            profile.profile_label,
+            profile.profile_label.replace("-", " ").title() if profile.profile_label else None,
+        )
+
+    profile_image_url: str | None = None
+    if profile and profile.first_image_filename:
+        static_upload_path = Path(app.static_folder or "") / "uploads" / profile.first_image_filename
+        if static_upload_path.exists():
+            profile_image_url = url_for(
+                "static", filename=f"uploads/{profile.first_image_filename}"
+            )
+        else:
+            upload_file = UPLOAD_DIR / profile.first_image_filename
+            if upload_file.exists():
+                profile_image_url = url_for(
+                    "serve_upload_image", filename=profile.first_image_filename
+                )
+
+    return render_template(
+        "dashboard.html",
+        profile=profile,
+        purchases=purchases,
+        persona_name=persona_name,
+        points_balance_display=points_balance_display,
+        joined_at_display=joined_at_display,
+        profile_image_url=profile_image_url,
+        requested_member_id=requested_member_id,
+        resolved_member_id=member_id,
+    )
 
 
 @app.post("/upload_face")

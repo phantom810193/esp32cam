@@ -20,29 +20,44 @@
         </nav>
     </header>
     <main id="customer-profile">
+        {% if not profile %}
+            <section class="customer-empty">
+                <p>目前找不到符合的會員資料{% if requested_member_id %}（查詢 ID：{{ requested_member_id }}）{% endif %}。</p>
+                <p>請稍候再試，或上傳新照片以建立會員紀錄。</p>
+            </section>
+        {% else %}
         <article id="customer-information">
             <h2 class="hide">顧客資料</h2>
-            <figure class="customer-photo">
-                <img src="{{ url_for('static', filename='images/face.jpg') }}" alt="Customer Photo">
-                <!-- <figcaption>2025-09-26T07:53:51</figcaption> -->
+            <figure class="customer-photo {% if not profile_image_url %}placeholder{% endif %}">
+                {% set fallback_photo = url_for('static', filename='images/face.jpg') %}
+                <img src="{{ profile_image_url or fallback_photo }}" alt="{{ persona_name or profile.profile_label or '會員' }} 的照片">
             </figure>
             <section class="customer-infolist">
                 <ul class="customer-basic-info">
-                    <li class="customer-name">王小美</li>
-                    <li class="customer-level general">一般會員</li>
-                    <li>Face ID：ME0001</li>
-                    <li>會員編號：MEME0383FE3AA</li>
-                    <li>會員狀態：有效</li>
-                    <li>入會日期：2021-06-12</li>
-                    <li>點數餘額：1,2840 點</li>
+                    <li class="customer-name">{{ persona_name or profile.profile_label or '尚未命名會員' }}</li>
+                    {% set membership_status = profile.member_status or '尚未提供' %}
+                    <li class="customer-level {% if membership_status == '有效' %}general{% endif %}">{{ membership_status }}</li>
+                    <li>Face ID：{{ profile.member_id or '尚未指派' }}</li>
+                    <li>會員編號：{{ profile.mall_member_id or '尚未提供' }}</li>
+                    <li>會員狀態：{{ membership_status }}</li>
+                    <li>入會日期：{{ joined_at_display or profile.joined_at or '尚未提供' }}</li>
+                    <li>點數餘額：
+                        {% if points_balance_display %}
+                            {{ points_balance_display }} 點
+                        {% elif profile.points_balance is not none %}
+                            {{ '%.0f'|format(profile.points_balance) }} 點
+                        {% else %}
+                            尚未提供
+                        {% endif %}
+                    </li>
                 </ul>
                 <ul class="customer-contact-info">
-                    <li>性別：女性</li>
-                    <li>出生年月：未填寫</li>
-                    <li>聯絡電話：0912-345678</li>
-                    <li>電子郵件：mingming@example.com</li>
-                    <li>郵遞地址：台北市信義區松壽路10號</li>
-                    <li>職業 / 產業別：甜點教室講師</li>
+                    <li>性別：{{ profile.gender or '尚未提供' }}</li>
+                    <li>出生年月：{{ profile.birth_date or '未填寫' }}</li>
+                    <li>聯絡電話：{{ profile.phone or '尚未提供' }}</li>
+                    <li>電子郵件：{{ profile.email or '尚未提供' }}</li>
+                    <li>郵遞地址：{{ profile.address or '未填寫' }}</li>
+                    <li>職業 / 產業別：{{ profile.occupation or '未填寫' }}</li>
                 </ul>
             </section>
         </article>
@@ -191,10 +206,38 @@
                     <div class="tab-content-2">
                         <h3 class="hide">歷史消費紀錄</h3>
                         <ul class="tool">
-                            <li><a href="" class="search">搜尋</a></li>
-                            <li><a href="" class="filter">篩選</a></li>
+                            <li><a href="#" class="search" aria-disabled="true">搜尋</a></li>
+                            <li><a href="#" class="filter" aria-disabled="true">篩選</a></li>
                         </ul>
-                        <p>內容-2<br/>內容-2</p>
+                        <table class="purchase-history">
+                            <thead>
+                                <tr>
+                                    <th scope="col">消費日期時間</th>
+                                    <th scope="col">項目</th>
+                                    <th scope="col">單價</th>
+                                    <th scope="col">數量</th>
+                                    <th scope="col">總價</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% if purchases %}
+                                    {% for purchase in purchases %}
+                                        <tr>
+                                            <td>{{ purchase.purchased_at }}</td>
+                                            <td>{{ purchase.item }}</td>
+                                            <td>${{ '%.0f'|format(purchase.unit_price) }}</td>
+                                            {% set qty_text = ('%.2f'|format(purchase.quantity)).rstrip('0').rstrip('.') %}
+                                            <td>{{ qty_text }}</td>
+                                            <td>${{ '%.0f'|format(purchase.total_price) }}</td>
+                                        </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    <tr>
+                                        <td colspan="5" class="empty-message">尚未有消費紀錄。</td>
+                                    </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
                     </div>
                     <div class="tab-content-3"><p>內容-3</p>
                     </div>
@@ -204,6 +247,7 @@
             </section>
             
         </article>
+        {% endif %}
     </main>
     <!-- <footer>
         <p>2025 &copy;  你的專屬折扣
