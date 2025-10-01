@@ -132,3 +132,11 @@ def test_latest_stream_emits_latest_event(client):
     assert payload["member_id"] == member_id
     assert payload["ad_url"].endswith(f"/ad/{member_id}")
     assert payload["event_id"] == database.get_latest_upload_event().id
+
+
+def test_latest_stream_rejects_invalid_interval(client):
+    response = client.get("/ad/latest/stream?interval=abc&once=1")
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload == {"error": "Invalid interval"}
