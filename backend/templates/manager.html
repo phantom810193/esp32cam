@@ -1,231 +1,285 @@
-<!-- backend/templates/manager.html -->
 <!doctype html>
 <html lang="zh-Hant">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>智慧廣告管理後台</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/manager.css') }}">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
-</head>
-<body>
-<div class="manager-shell">
-  <!-- 頂部：標題 + 兩顆按鈕（上傳／ESP32-CAM） -->
-  <header class="manager-header">
-    <h1>你的專屬折扣</h1>
-    <nav class="nav-actions">
-      <button id="btn-upload" class="btn">上傳照片</button>
-      <input id="file-input" type="file" accept="image/*" class="hide" />
-      <button id="btn-esp32" class="btn secondary">ESP32-CAM 拍照</button>
-    </nav>
-  </header>
-
-  <!-- 主格局（固定版面：左 560px × 上 260px） -->
-  <main class="grid-wrap">
-    <!-- 左上：廣告／人物照片 -->
-    <section class="panel banner">
-      {% set default_banner = url_for('static', filename='ads/ME0000.jpg') if 'static' in globals() else '/static/ads/ME0000.jpg' %}
-      <img id="banner" src="{{ context.hero_image_url if context and context.hero_image_url else default_banner }}" alt="廣告" />
-      <div class="banner-badges">
-        <span class="chip">上傳辨識</span>
-        <span class="chip">ESP32-CAM</span>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>智慧廣告管理後台</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/manager.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar__left">
+        <h1 class="brand">ESP32-CAM 智慧廣告中控台</h1>
+        <p class="brand-sub">依據上一期消費紀錄推估本月潛在清單與專屬廣告</p>
       </div>
-    </section>
-
-    <!-- 右上：四張資訊卡 -->
-    <section class="panel kpis">
-      <div class="kpi">最近來店時間<div id="kpi-last-visit" class="kpi-v">—</div></div>
-      <div class="kpi">本月消費頻率<div id="kpi-freq" class="kpi-v">—</div></div>
-      <div class="kpi">平均消費金額<div id="kpi-avg" class="kpi-v">—</div></div>
-      <div class="kpi">會員等級<div id="kpi-level" class="kpi-v">—</div></div>
-    </section>
-
-    <!-- 左下：會員區塊 -->
-    <section class="panel member">
-      {% set member_profile = context.member if context else None %}
-      {% set display_mid = (member_profile.mall_member_id if member_profile and member_profile.mall_member_id else (member_profile.member_id if member_profile and member_profile.member_id else (context.member_id if context else 'ME0000'))) %}
-      <h2 id="mid">{{ display_mid }}</h2>
-      <ul class="meta">
-        <li>Face ID：<span id="faceid">{{ member_profile.face_id if member_profile and member_profile.face_id else '—' }}</span></li>
-        <li>會員狀態：<span id="mstatus">{{ member_profile.member_status if member_profile else '—' }}</span></li>
-        <li>入會日期：<span id="mjoin">{{ member_profile.joined_at if member_profile else '—' }}</span></li>
-        <li>點數餘額：<span id="mpoint">{{ ('%.0f'|format(member_profile.points_balance)) if member_profile and member_profile.points_balance is not none else '—' }}</span></li>
-        <li>性別：<span id="mgender">{{ member_profile.gender if member_profile else '—' }}</span></li>
-        <li>出生年月：<span id="mdob">{{ member_profile.birth_month if member_profile else '—' }}</span></li>
-        <li>聯絡電話：<span id="mphone">{{ member_profile.phone if member_profile else '—' }}</span></li>
-        <li>電子郵件：<span id="memail">{{ member_profile.email if member_profile else '—' }}</span></li>
-        <li>郵遞地址：<span id="maddr">{{ member_profile.address if member_profile else '—' }}</span></li>
-        <li>職業／產業別：<span id="mjob">{{ member_profile.occupation if member_profile else '—' }}</span></li>
-      </ul>
-      <button id="btn-main-ad" class="btn solid" onclick="if(window.currentMID){window.open('/ad/'+encodeURIComponent(window.currentMID),'_blank');}">檢視主視覺廣告</button>
-    </section>
-
-    <!-- 右下：兩個表格（推估 / 歷史） -->
-    <section class="panel tables">
-      <div class="tabs">
-        <button class="tab active" data-tab="pred">感興趣商品推估</button>
-        <button class="tab" data-tab="hist">歷史消費紀錄</button>
-      </div>
-
-      <div id="tab-pred" class="tabpane active">
-        <table class="tbl">
-          <thead><tr>
-            <th>內部商品編號</th><th>商品名稱</th><th>商品類別</th>
-            <th>商品價格</th><th>商品查閱率</th><th>預估購買機率</th>
-          </tr></thead>
-          <tbody id="pred-body">
-            {% if context and context.prediction and context.prediction.items %}
-              {% for item in context.prediction.items %}
-              <tr>
-                <td>{{ item.product_code }}</td>
-                <td class="ell">{{ item.product_name }}</td>
-                <td>{{ item.category_label }}</td>
-                <td>NT$ {{ '%.0f'|format(item.price) }}</td>
-                <td>{{ '%.1f'|format(item.view_rate_percent) }}%</td>
-                <td><span class="pill">{{ '%.1f'|format(item.probability_percent) }}%</span></td>
-              </tr>
+      <div class="topbar__right">
+        <button id="btn-upload" class="btn btn-primary">上傳照片</button>
+        <button id="btn-camera" class="btn btn-ghost">ESP32-CAM 拍照</button>
+        <form id="memberPicker" class="member-picker" method="get">
+          <label for="member_id" class="sr-only">選擇顧客</label>
+          <select id="member_id" name="member_id" onchange="this.form.submit()">
+            {% if members %}
+              {% for profile in members %}
+                <option value="{{ profile.member_id }}" {% if context and profile.member_id == context.member_id %}selected{% elif not context and profile.member_id == request.args.get('member_id') %}selected{% endif %}>
+                  {{ profile.mall_member_id or profile.member_id }} · {{ profile.profile_label|replace('-', ' ') }}
+                </option>
               {% endfor %}
+            {% else %}
+              <option value="" selected>尚無會員資料</option>
             {% endif %}
-          </tbody>
-        </table>
+          </select>
+          <noscript><button type="submit" class="btn">載入</button></noscript>
+        </form>
       </div>
+      <!-- 隱藏檔案選擇 -->
+      <input id="file-input" class="sr-only" type="file" accept="image/*">
+    </header>
 
-      <div id="tab-hist" class="tabpane">
-        <table class="tbl">
-          <thead><tr>
-            <th>日期</th><th>商品編號</th><th>商品名稱</th><th>商品類別</th>
-            <th>單價</th><th>數量</th><th>小計</th>
-          </tr></thead>
-          <tbody id="hist-body">
-            {% if context and context.prediction and context.prediction.history %}
-              {% for p in context.prediction.history %}
+    {% if error %}
+      <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+
+    <main class="grid">
+      <!-- Hero -->
+      <section class="card card-hero">
+        <div class="hero-left">
+          <div class="hero-image">
+            {% if context and context.hero_image_url %}
+              <img src="{{ context.hero_image_url }}" alt="顧客影像" loading="lazy">
+            {% else %}
+              <div class="hero-placeholder">等待上傳 ESP32-CAM 圖像</div>
+            {% endif %}
+          </div>
+        </div>
+        <div class="hero-right">
+          {% if context %}
+            {% set member_profile = context.member %}
+            {% set display_name = member_profile.mall_member_id if member_profile and member_profile.mall_member_id else (member_profile.member_id if member_profile and member_profile.member_id else context.member_id) %}
+            <div class="hero-meta">
+              <span class="chip">情境：{{ context.scenario_key }}</span>
+              <span class="chip">分析區間：{{ context.prediction.window_label }}</span>
+            </div>
+            <h2 class="hero-title">{{ display_name or '未知顧客' }}</h2>
+            <p class="hero-sub">{{ member_profile.profile_label|replace('-', ' ') if member_profile else '尚未辨識' }}</p>
+            <dl class="hero-stats">
+              <div>
+                <dt>核心主打</dt>
+                <dd>{{ context.analysis.recommended_item or '等待歷史累積' }}</dd>
+              </div>
+              <div>
+                <dt>預估轉換率</dt>
+                <dd>{{ context.analysis.probability_percent }}%</dd>
+              </div>
+              <div>
+                <dt>歷史訂單數</dt>
+                <dd>{{ context.analysis.total_purchases }}</dd>
+              </div>
+            </dl>
+            <div class="hero-actions">
+              <a class="btn btn-primary" href="{{ context.ad_url }}" target="_blank" rel="noopener">檢視主視覺廣告</a>
+            </div>
+          {% else %}
+            <div class="hero-empty">請先選擇顧客或上傳照片，即可載入預測資訊</div>
+          {% endif %}
+        </div>
+      </section>
+
+      <!-- 四格 KPI -->
+      <section class="card kpi">
+        <h4>最近來店時間</h4>
+        <p>—</p>
+      </section>
+      <section class="card kpi">
+        <h4>本月消費頻率</h4>
+        <p>—</p>
+      </section>
+      <section class="card kpi">
+        <h4>平均消費金額</h4>
+        <p>—</p>
+      </section>
+      <section class="card kpi">
+        <h4>會員等級</h4>
+        <p>—</p>
+      </section>
+
+      <!-- 會員資料 -->
+      <section class="card span-6">
+        <h3>會員資料</h3>
+        {% if context and context.member %}
+          <dl class="info-grid">
+            <div>
+              <dt>會員編號</dt><dd>{{ context.member.mall_member_id or '尚未加入會員' }}</dd>
+            </div>
+            <div>
+              <dt>會員狀態</dt><dd>{{ context.member.member_status }}</dd>
+            </div>
+            <div>
+              <dt>加入日期</dt><dd>{{ context.member.joined_at }}</dd>
+            </div>
+            <div>
+              <dt>職業 / 產業別</dt><dd>{{ context.member.occupation or '—' }}</dd>
+            </div>
+            <div>
+              <dt>聯絡電話</dt><dd>{{ context.member.phone }}</dd>
+            </div>
+            <div>
+              <dt>電子郵件</dt><dd>{{ context.member.email }}</dd>
+            </div>
+            <div>
+              <dt>郵遞地址</dt><dd>{{ context.member.address or '—' }}</dd>
+            </div>
+            <div>
+              <dt>點數餘額</dt><dd>{{ '%.0f'|format(context.member.points_balance) }}</dd>
+            </div>
+          </dl>
+        {% else %}
+          <p class="empty">尚無會員資料</p>
+        {% endif %}
+      </section>
+
+      <!-- 潛在熱銷清單 -->
+      <section class="card span-6">
+        <header class="section-head">
+          <div>
+            <h3>本月潛在熱銷清單</h3>
+            <p class="muted">依據上一個月的消費紀錄推估尚未購買的商品（七筆），並計算購買機率</p>
+          </div>
+          {% if context %}
+            <span class="chip chip-accent">分析窗口：{{ context.prediction.window_label }}</span>
+          {% endif %}
+        </header>
+
+        <div class="table-wrapper">
+          <table>
+            <thead>
               <tr>
-                <td>{{ p.purchased_at[:10] if p.purchased_at }}</td>
-                <td>{{ p.sku or '' }}</td>
-                <td class="ell">{{ p.item }}</td>
-                <td>{{ p.category }}</td>
-                <td>NT$ {{ '%.0f'|format(p.unit_price) }}</td>
-                <td>{{ '%.0f'|format(p.quantity) }}</td>
-                <td>NT$ {{ '%.0f'|format(p.total_price) }}</td>
+                <th>商品編號</th>
+                <th>商品名稱</th>
+                <th>商品類別</th>
+                <th>商品價格</th>
+                <th>商品查閱率</th>
+                <th>預估購買機率</th>
               </tr>
+            </thead>
+            <tbody>
+              {% if context and context.prediction.items %}
+                {% for item in context.prediction.items %}
+                  <tr>
+                    <td>{{ item.product_code }}</td>
+                    <td>{{ item.product_name }}</td>
+                    <td>{{ item.category_label }}</td>
+                    <td>NT$ {{ '%.0f'|format(item.price) }}</td>
+                    <td>{{ '%.1f'|format(item.view_rate_percent) }}%</td>
+                    <td>{{ '%.1f'|format(item.probability_percent) }}%</td>
+                  </tr>
+                {% endfor %}
+              {% else %}
+                <tr><td colspan="6" class="empty">尚無可用預測資料</td></tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+
+        {% if context and context.prediction.top_products %}
+          <div class="top-products">
+            <h4>上一期熱銷前三名</h4>
+            <ul>
+              {% for product in context.prediction.top_products %}
+                <li>
+                  <strong>{{ product.item }}</strong>
+                  <span>數量 {{ product.quantity }}</span>
+                  <span>金額 NT$ {{ '%.0f'|format(product.total_price) }}</span>
+                </li>
               {% endfor %}
-            {% endif %}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  </main>
-</div>
+            </ul>
+          </div>
+        {% endif %}
+      </section>
 
-<script>
-/* ===== 固定 API 位址 ===== */
-const API = {
-  identify: "/identify",
-  pred: (mid)=>`/members/${encodeURIComponent(mid)}/predictions`,
-  hist: (mid)=>`/members/${encodeURIComponent(mid)}/history`,
-  adgen: "/adgen"
-};
+      <!-- 歷史紀錄 -->
+      <section class="card span-12">
+        <header class="section-head">
+          <h3>上一個月消費紀錄</h3>
+          {% if context %}<span class="muted">{{ context.prediction.window_label }}</span>{% endif %}
+        </header>
+        {% if context and context.prediction.history %}
+          <ul class="history-list">
+            {% for purchase in context.prediction.history %}
+              <li>
+                <div>
+                  <strong>{{ purchase.item }}</strong>
+                  <span>數量 {{ '%.0f'|format(purchase.quantity) }} · 單價 NT$ {{ '%.0f'|format(purchase.unit_price) }}</span>
+                </div>
+                <time>{{ purchase.purchased_at }}</time>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="empty">尚無上一個月的消費資料</p>
+        {% endif %}
+      </section>
+    </main>
 
-/* ===== 工具 ===== */
-const $ = (s)=>document.querySelector(s);
-function fmtPct(x){ return (Number(x)||0).toFixed(1) + "%"; }
-function fmtCur(x){ return "NT$ " + (Number(x)||0).toLocaleString(); }
+    <!-- Toast/Spinner -->
+    <div id="toast" class="toast" hidden>
+      <div class="spinner"></div>
+      <span id="toast-text">上傳中…</span>
+    </div>
 
-/* ===== 狀態 ===== */
-window.currentMID = "{{ display_mid if display_mid else 'ME0000' }}";
+    <script>
+      const $ = (sel) => document.querySelector(sel);
+      const btnUpload = $('#btn-upload');
+      const btnCam = $('#btn-camera');
+      const input = $('#file-input');
+      const toast = $('#toast');
+      const toastText = $('#toast-text');
 
-/* ===== 切換分頁 ===== */
-document.querySelectorAll(".tab").forEach(btn=>{
-  btn.addEventListener("click",()=>{
-    document.querySelectorAll(".tab").forEach(b=>b.classList.remove("active"));
-    document.querySelectorAll(".tabpane").forEach(p=>p.classList.remove("active"));
-    btn.classList.add("active");
-    document.querySelector("#tab-"+btn.dataset.tab).classList.add("active");
-  });
-});
+      function showToast(text) {
+        toastText.textContent = text || '處理中…';
+        toast.hidden = false;
+      }
+      function hideToast() {
+        toast.hidden = true;
+      }
+      async function postUpload(file) {
+        const fd = new FormData();
+        fd.append('image', file, file.name);
+        showToast('上傳中…');
+        try {
+          const res = await fetch('{{ url_for("upload_face") }}', { method: 'POST', body: fd });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const data = await res.json();
+          hideToast();
+          if (data && (data.member_id || data.member_code)) {
+            const mid = data.member_id || '';
+            // 導向當前後台頁，並帶上 member_id；同時可在背景開啟顧客版廣告
+            if (data.ad_url) { try { window.open(data.ad_url, '_blank'); } catch (e) {} }
+            const url = new URL(location.href);
+            url.searchParams.set('member_id', mid);
+            location.href = url.toString();
+          } else {
+            alert('上傳成功但未取得 member_id，請檢查後端日誌。');
+          }
+        } catch (err) {
+          hideToast();
+          alert('上傳失敗：' + (err && err.message ? err.message : err));
+        }
+      }
 
-/* ===== 呼叫後端 ===== */
-async function loadPred(mid){
-  try{
-    const r = await fetch(API.pred(mid));
-    const j = await r.json();
-    $("#kpi-level").textContent = j.member_level || "—";
-    const tb = $("#pred-body"); tb.innerHTML="";
-    (j.rows||[]).forEach(o=>{
-      const tr=document.createElement("tr");
-      tr.innerHTML = `
-        <td>${o.sku}</td>
-        <td class="ell">${o.name||""}</td>
-        <td>${o.category||""}</td>
-        <td>${fmtCur(o.price)}</td>
-        <td>${fmtPct(o.view_rate)}</td>
-        <td><span class="pill">${fmtPct(o.probability_percent)}</span></td>`;
-      tb.appendChild(tr);
-    });
-    // 取機率最高的一筆打 /adgen 更新 Banner
-    if ((j.rows||[]).length){
-      const top = j.rows[0];
-      const body = {sku: top.sku, member_profile:{membership: j.member_level||"general", top_pick_name: top.name, top_pick_price: "NT$ "+top.price}};
-      const a = await fetch(API.adgen,{method:"POST", headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-      const ad = await a.json();
-      if (ad.image_url) $("#banner").src = ad.image_url;
-      $("#kpi-freq").textContent = "—";
-      $("#kpi-avg").textContent = "—";
-      $("#kpi-last-visit").textContent = "—";
-    }
-  }catch(e){ console.error(e); }
-}
-async function loadHist(mid){
-  try{
-    const r = await fetch(API.hist(mid));
-    const j = await r.json();
-    const tb = $("#hist-body"); tb.innerHTML="";
-    (j.rows||[]).forEach(o=>{
-      const tr=document.createElement("tr");
-      tr.innerHTML = `
-        <td>${(o.purchased_at||"").substring(0,10)}</td>
-        <td>${o.sku||""}</td>
-        <td class="ell">${o.name||o.item||""}</td>
-        <td>${o.category||""}</td>
-        <td>${fmtCur(o.price||o.unit_price)}</td>
-        <td>${o.quantity||1}</td>
-        <td>${fmtCur(o.total_price||0)}</td>`;
-      tb.appendChild(tr);
-    });
-  }catch(e){ console.error(e); }
-}
-async function identifyByUpload(file){
-  const fd = new FormData(); fd.append("file", file);
-  const r = await fetch(API.identify,{method:"POST", body:fd});
-  const j = await r.json();
-  return j.member_id || "ME0000";
-}
+      btnUpload?.addEventListener('click', () => input.click());
+      input?.addEventListener('change', () => {
+        const file = input.files && input.files[0];
+        if (file) postUpload(file);
+        input.value = '';
+      });
 
-/* ===== 事件：上傳／ESP32-CAM ===== */
-$("#btn-upload").addEventListener("click",()=>$("#file-input").click());
-$("#file-input").addEventListener("change", async e=>{
-  if (!e.target.files.length) return;
-  const mid = await identifyByUpload(e.target.files[0]);
-  window.currentMID = mid;
-  $("#mid").textContent = mid;
-  $("#mstatus").textContent = (mid==="ME0000"?"新顧客/未入會":"已入會");
-  await loadPred(mid);
-  await loadHist(mid);
-});
-
-$("#btn-esp32").addEventListener("click", async ()=>{
-  // 這裡預留：若你有 VM 的即時拍照 API，可改成 fetch 該端點
-  // 目前用 identify JSON 直傳來觸發流程
-  const r = await fetch(API.identify,{method:"POST", headers:{'Content-Type':'application/json'}, body: JSON.stringify({member_id: window.currentMID})});
-  await loadPred(window.currentMID);
-  await loadHist(window.currentMID);
-});
-
-/* ===== 初始載入（若模板已有 context，依然會再補齊資料） ===== */
-loadPred(window.currentMID);
-loadHist(window.currentMID);
-</script>
-</body>
+      // 預留：若你有拍照 API，可在這裡呼叫
+      btnCam?.addEventListener('click', async () => {
+        alert('請接上 ESP32-CAM 拍照 API 後於此處呼叫，再回傳影像至 /upload_face。');
+      });
+    </script>
+  </body>
 </html>
