@@ -30,11 +30,11 @@
             <h2 class="hide">顧客資料</h2>
             <figure class="customer-photo {% if not profile_image_url %}placeholder{% endif %}">
                 {% set fallback_photo = url_for('static', filename='images/face.jpg') %}
-                <img src="{{ profile_image_url or fallback_photo }}" alt="{{ persona_name or profile.profile_label or '會員' }} 的照片">
+                <img src="{{ profile_image_url or fallback_photo }}" alt="{{ display_name }} 的照片">
             </figure>
             <section class="customer-infolist">
                 <ul class="customer-basic-info">
-                    <li class="customer-name">{{ persona_name or profile.profile_label or '尚未命名會員' }}</li>
+                    <li class="customer-name">{{ display_name }}</li>
                     {% set membership_status = profile.member_status or '尚未提供' %}
                     <li class="customer-level {% if membership_status == '有效' %}general{% endif %}">{{ membership_status }}</li>
                     <li>Face ID：{{ profile.member_id or '尚未指派' }}</li>
@@ -65,7 +65,9 @@
             <section id="customer-tags">
                 <h2>顧客標籤</h2>
                 <ul class="customer-taglist">
-                    <li>#甜點收藏家</li>
+                    {% if persona_label %}
+                    <li>#{{ persona_label }}</li>
+                    {% endif %}
                     <li>#健身族群</li>
                     <li>#保健食品</li>
                     <li>#蛋白粉</li>
