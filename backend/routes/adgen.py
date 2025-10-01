@@ -1,3 +1,4 @@
+# backend/routes/adgen.py
 """Vertex AI powered advertisement generation endpoints."""
 from __future__ import annotations
 
@@ -11,23 +12,34 @@ from uuid import uuid4
 
 from flask import Blueprint, jsonify, request, url_for
 from google.cloud import storage
+
 import vertexai
 from vertexai.generative_models import GenerationConfig, GenerativeModel
-from vertexai.preview.vision_models import ImageGenerationModel
+
+# 兼容新版與舊版套件的匯入位置
+try:
+    # 新版
+    from vertexai.vision_models import ImageGenerationModel  # type: ignore
+except Exception:  # pragma: no cover
+    # 舊版（preview 路徑）
+    from vertexai.preview.vision_models import ImageGenerationModel  # type: ignore
 
 adgen_blueprint = Blueprint("adgen", __name__)
 
-_TEXT_MODEL_NAME = os.environ.get("VERTEX_TEXT_MODEL", "gemini-2.5-pro")
+# ── 可由環境變數覆寫的參數 ───────────────────────────────────────────────
+_TEXT_MODEL_NAME = os.environ.get("VERTEX_TEXT_MODEL", "gemini-2.5-flash")
 _IMAGE_MODEL_NAME = os.environ.get("VERTEX_IMAGE_MODEL", "imagen-3.0-generate-001")
-_IMAGE_SIZE = os.environ.get("VERTEX_IMAGE_SIZE", "1080x1080")
+_IMAGE_SIZE = os.environ.get("VERTEX_IMAGE_SIZE", "1080x1080")  # e.g. "1080x1080"
 _DEFAULT_REGION = os.environ.get("GCP_REGION", "asia-east1")
 
+# ── 內部單例 ─────────────────────────────────────────────────────────────
 _vertex_initialised = False
 _text_model_instance: GenerativeModel | None = None
 _image_model_instance: ImageGenerationModel | None = None
 
 
 def _ensure_vertex_initialised() -> tuple[str, str]:
+    """Lazy-init Vertex AI with project/region."""
     global _vertex_initialised
     project_id = os.environ.get("GCP_PROJECT_ID")
     if not project_id:
@@ -37,10 +49,12 @@ def _ensure_vertex_initialised() -> tuple[str, str]:
     if not _vertex_initialised:
         vertexai.init(project=project_id, location=region)
         _vertex_initialised = True
+        logging.info("Vertex AI initialized (project=%s, region=%s)", project_id, region)
     return project_id, region
 
 
 def _get_text_model() -> GenerativeModel:
+    """Return an instantiated GenerativeModel (NOT a class/function)."""
     global _text_model_instance
     if _text_model_instance is None:
         _ensure_vertex_initialised()
@@ -49,6 +63,7 @@ def _get_text_model() -> GenerativeModel:
 
 
 def _get_image_model() -> ImageGenerationModel:
+    """Return an instantiated ImageGenerationModel."""
     global _image_model_instance
     if _image_model_instance is None:
         _ensure_vertex_initialised()
@@ -56,87 +71,112 @@ def _get_image_model() -> ImageGenerationModel:
     return _image_model_instance
 
 
+# ── Prompt helpers ───────────────────────────────────────────────────────
 def _build_text_prompt(sku: str, member_profile: Dict[str, Any]) -> str:
-    persona = json.dumps(member_profile, ensure_ascii=False) if member_profile else "{}"
+    persona = json.dumps(member_profile or {}, ensure_ascii=False)
     return (
         "你是一位商場的廣告行銷策劃師，正在為會員製作 1:1 的推播文案。\n"
-        "請針對下列資訊，輸出一段 JSON，鍵值必須包含 title、subline、cta 三項，"
-        "內容需使用繁體中文且適合數位看板，保持 6~18 個字且富有行動力。\n"
-        "\nSKU: "
-        f"{sku}\n"
-        "會員資料(JSON)："
-        f"{persona}\n"
-        "若資訊不足，請以吸引新客為目標設計文案，仍須輸出 JSON。"
+        "請以 JSON 格式輸出，鍵值必須包含：title、subline、cta。\n"
+        "文案限制：繁體中文、適合數位看板、每段約 6~18 字、具行動力。\n"
+        f"SKU：{sku}\n"
+        f"會員資料（JSON）：{persona}\n"
+        "若資訊不足，以吸引新客為目標設計文案，但仍須輸出 JSON。"
     )
 
 
 def _build_image_prompt(sku: str, copy: Dict[str, str], member_profile: Dict[str, Any]) -> str:
-    persona_bits = ", ".join(
-        f"{key}:{value}" for key, value in member_profile.items() if value
-    )
-    headline = copy.get("title") or sku
-    description = copy.get("subline") or ""
+    persona_bits = ", ".join(f"{k}:{v}" for k, v in (member_profile or {}).items() if v)
+    headline = (copy or {}).get("title") or sku
+    description = (copy or {}).get("subline") or ""
     prompt = (
-        "生成一張 1:1 比例、充滿活力的商場活動宣傳海報。"
-        "畫面需加入代表商品或服務的視覺元素，避免文字擁擠。"
-        "以高端百貨風格呈現，色彩明亮吸睛，適合 1080x1080 LED 看板。"
-        f"主標題靈感：{headline}. 副標語靈感：{description}."
+        "生成一張 1:1 比例、明亮吸睛的商場活動宣傳海報；"
+        "具高端百貨視覺風格、畫面乾淨，主視覺聚焦於商品/服務意象，避免浮水印與品牌 logo。"
+        f" 主標題靈感：{headline}。副標語靈感：{description}。"
+        f" 針對品項 {sku}。"
     )
     if persona_bits:
-        prompt += f" 目標客群特徵：{persona_bits}."
-    prompt += f" 針對品項 {sku} 打造，避免浮水印與品牌 logo。"
+        prompt += f" 目標客群線索：{persona_bits}。"
     return prompt
+
+
+# ── Model wrappers ───────────────────────────────────────────────────────
+def _extract_text(resp: Any) -> str:
+    """Robustly extract text from Vertex responses across SDK versions."""
+    if not resp:
+        return ""
+    # 新版通常有 .text
+    text = getattr(resp, "text", None)
+    if isinstance(text, str) and text.strip():
+        return text
+    # 或從 candidates 結構中取
+    try:
+        cands = getattr(resp, "candidates", None) or []
+        if cands and getattr(cands[0], "content", None):
+            parts = getattr(cands[0].content, "parts", None) or []
+            # 找第一段文字
+            for p in parts:
+                val = getattr(p, "text", None)
+                if isinstance(val, str) and val.strip():
+                    return val
+    except Exception:  # pragma: no cover
+        pass
+    return ""
 
 
 def _generate_copy(sku: str, member_profile: Dict[str, Any]) -> Dict[str, str]:
     model = _get_text_model()
     prompt = _build_text_prompt(sku, member_profile)
-    response = model.generate_content(
+    resp = model.generate_content(
         prompt,
         generation_config=GenerationConfig(temperature=0.6, max_output_tokens=256),
     )
-    text = getattr(response, "text", None) or ""
+    text = _extract_text(resp)
     try:
         parsed = json.loads(text)
-    except json.JSONDecodeError:
-        logging.warning("Vertex AI Gemini response is not JSON, fallback to template: %s", text)
+        return {
+            "title": str(parsed.get("title") or f"{sku} 精選活動").strip(),
+            "subline": str(parsed.get("subline") or "加入會員即可領取驚喜好禮").strip(),
+            "cta": str(parsed.get("cta") or "立即參加").strip(),
+        }
+    except Exception:
+        logging.warning("Gemini response not JSON, fallback copy. raw=%r", text[:200])
         return {
             "title": f"{sku} 限時禮遇",
             "subline": "專屬禮遇即刻開啟，加入會員解鎖驚喜。",
-            "cta": "立即了解活動"
+            "cta": "立即了解活動",
         }
-    result = {
-        "title": str(parsed.get("title") or f"{sku} 精選活動").strip(),
-        "subline": str(parsed.get("subline") or "加入會員即可領取驚喜好禮").strip(),
-        "cta": str(parsed.get("cta") or "立即參加").strip(),
-    }
-    return result
 
 
 def _generate_image_bytes(sku: str, copy: Dict[str, str], member_profile: Dict[str, Any]) -> bytes:
     model = _get_image_model()
     prompt = _build_image_prompt(sku, copy, member_profile)
-    request_kwargs = {"prompt": prompt, "number_of_images": 1}
+
+    # 嘗試使用 image_size（如 1080x1080），若舊版 SDK 不支援則退回 aspect_ratio
+    kwargs: Dict[str, Any] = {"prompt": prompt, "number_of_images": 1}
     if _IMAGE_SIZE:
-        request_kwargs["image_size"] = _IMAGE_SIZE
+        kwargs["image_size"] = _IMAGE_SIZE
     else:
-        request_kwargs["aspect_ratio"] = "1:1"
+        kwargs["aspect_ratio"] = "1:1"
 
     try:
-        result = model.generate_images(**request_kwargs)
+        result = model.generate_images(**kwargs)
     except TypeError:
-        # 舊版 SDK 不支援 image_size，退回使用 aspect_ratio 參數
-        request_kwargs.pop("image_size", None)
-        request_kwargs["aspect_ratio"] = "1:1"
-        result = model.generate_images(**request_kwargs)
-    if not result.images:
-        raise RuntimeError("Vertex AI Images did not return any image data")
-    image = result.images[0]
-    if hasattr(image, "as_bytes"):
-        return image.as_bytes()
-    if hasattr(image, "bytes_data"):
-        return image.bytes_data
-    raise RuntimeError("Unsupported image response format from Vertex AI Images")
+        kwargs.pop("image_size", None)
+        kwargs["aspect_ratio"] = "1:1"
+        result = model.generate_images(**kwargs)
+
+    if not getattr(result, "images", None):
+        raise RuntimeError("Vertex Images returned no images")
+
+    img = result.images[0]
+    # 兼容不同 SDK 欄位
+    if hasattr(img, "as_bytes") and callable(img.as_bytes):
+        return img.as_bytes()
+    if hasattr(img, "_image_bytes"):
+        return img._image_bytes  # type: ignore[attr-defined]
+    if hasattr(img, "bytes_data"):
+        return img.bytes_data  # type: ignore[attr-defined]
+    raise RuntimeError("Unsupported image object from Vertex Images")
 
 
 def _upload_to_gcs(image_bytes: bytes, sku: str) -> str:
@@ -151,7 +191,7 @@ def _upload_to_gcs(image_bytes: bytes, sku: str) -> str:
     blob.upload_from_string(image_bytes, content_type="image/png")
 
     expires = datetime.utcnow() + timedelta(hours=12)
-    return blob.generate_signed_url(expiration=expires, method="GET")
+    return blob.generate_signed_url(version="v4", expiration=expires, method="GET")
 
 
 def _fallback_payload(sku: str) -> Dict[str, str]:
@@ -164,10 +204,10 @@ def _fallback_payload(sku: str) -> Dict[str, str]:
     }
 
 
+# ── Route ────────────────────────────────────────────────────────────────
 @adgen_blueprint.post("/adgen")
 def create_generated_ad():
-    """Generate an advertisement asset via Vertex AI Gemini + Imagen."""
-
+    """Generate an advertisement asset via Vertex AI (Gemini + Imagen)."""
     payload = request.get_json(silent=True) or {}
     sku = str(payload.get("sku") or "").strip()
     if not sku:
@@ -180,33 +220,30 @@ def create_generated_ad():
     started_at = perf_counter()
     try:
         _ensure_vertex_initialised()
-        copy_started_at = perf_counter()
+
+        t0 = perf_counter()
         copy = _generate_copy(sku, member_profile)
-        copy_duration = perf_counter() - copy_started_at
+        t_copy = perf_counter() - t0
 
-        image_started_at = perf_counter()
+        t1 = perf_counter()
         image_bytes = _generate_image_bytes(sku, copy, member_profile)
-        image_duration = perf_counter() - image_started_at
+        t_img = perf_counter() - t1
 
-        upload_started_at = perf_counter()
+        t2 = perf_counter()
         image_url = _upload_to_gcs(image_bytes, sku)
-        upload_duration = perf_counter() - upload_started_at
+        t_up = perf_counter() - t2
+
     except Exception as exc:  # pylint: disable=broad-except
         logging.exception("Ad generation pipeline failed for SKU %s: %s", sku, exc)
-        fallback = _fallback_payload(sku)
-        return jsonify(fallback), 503
+        return jsonify(_fallback_payload(sku)), 503
 
-    total_duration = perf_counter() - started_at
+    total = perf_counter() - started_at
     logging.info(
         "Ad generation for %s completed in %.2fs (copy=%.2fs, image=%.2fs, upload=%.2fs)",
-        sku,
-        total_duration,
-        copy_duration,
-        image_duration,
-        upload_duration,
+        sku, total, t_copy, t_img, t_up,
     )
-    if total_duration > 10:
-        logging.warning("Ad generation for %s exceeded 10s SLA (%.2fs)", sku, total_duration)
+    if total > 10:
+        logging.warning("Ad generation for %s exceeded 10s SLA (%.2fs)", sku, total)
 
     return jsonify(
         {
