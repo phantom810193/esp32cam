@@ -90,6 +90,7 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
 
     - `POST /upload_face`：接受 `image/jpeg` 或 `multipart/form-data` 影像。回傳 JSON，內含 `member_id`、`member_code`（僅在已有商場註冊代號時帶值）、`new_member` 旗標與廣告頁 URL。
     - `GET /ad/<member_id>`：根據 SQLite + Gemini Text 的輸出生成廣告頁，內建 `<meta http-equiv="refresh" content="5">`，適合放在電視棒上自動輪播。
+    - `GET /ad/latest/stream`：透過 Server-Sent Events 形式推送最新的上傳事件與廣告頁連結，前端或電視棒可直接串流更新。若僅需單次查詢，可加上 `?once=1` 取得最新事件後立即結束連線。
     - `GET /latest_upload`：顯示最新上傳影像、辨識結果、個人化廣告連結與各階段耗時分析，方便除錯與現場展示。後端會保留最新一張上傳影像，並為每位會員留存首次辨識的照片，以避免佔用過多空間又能在名單頁回溯影像。
     - `GET /members`：瀏覽預寫會員的個人資料、首次辨識影像與 2025 年消費紀錄，也可從最新上傳儀表板的「會員資料」按鈕快速進入。
     - `POST /adgen`：呼叫 Vertex AI Gemini + Imagen 生成標題、副標、CTA 與海報圖。

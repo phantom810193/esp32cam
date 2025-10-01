@@ -2,9 +2,11 @@
 """Flask backend for the ESP32-CAM retail advertising MVP."""
 from __future__ import annotations
 
+import json
 import logging
-import os
 import mimetypes
+import os
+import time
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
@@ -18,7 +20,9 @@ from flask import (
     jsonify,
     render_template,
     request,
+    Response,
     send_from_directory,
+    stream_with_context,
     url_for,
 )
 from google.cloud import storage
@@ -294,6 +298,74 @@ def render_ad(member_id: str):
         hero_image_url=hero_image_url,
         scenario_key=context.scenario_key,
     )
+
+
+@app.get("/ad/latest/stream")
+def latest_ad_stream() -> Response:
+    """Server-Sent Events feed with the most recent personalised ad metadata."""
+
+    poll_interval = float(request.args.get("interval", 2.0))
+    poll_interval = max(0.5, min(10.0, poll_interval))
+    send_once = request.args.get("once", "0") == "1"
+    last_event_id = request.headers.get("Last-Event-ID") or request.args.get("lastEventId")
+
+    def _event_payload(event) -> tuple[dict[str, object], str]:
+        if event is None:
+            return {
+                "status": "idle",
+                "message": "No uploads have been recorded yet.",
+            }, "0"
+
+        ad_url = url_for("render_ad", member_id=event.member_id, _external=True)
+        image_url = (
+            url_for("serve_upload_image", filename=event.image_filename, _external=True)
+            if event.image_filename
+            else None
+        )
+
+        payload = {
+            "status": "ok",
+            "event_id": event.id,
+            "created_at": event.created_at,
+            "member_id": event.member_id,
+            "member_code": event.member_code,
+            "ad_url": ad_url,
+        }
+        if image_url:
+            payload["image_url"] = image_url
+        return payload, str(event.id)
+
+    def _format_sse(event_id: str, payload: dict[str, object]) -> str:
+        data = json.dumps(payload, ensure_ascii=False)
+        return f"id: {event_id}\nevent: latest-ad\ndata: {data}\n\n"
+
+    @stream_with_context
+    def _generate():
+        last_sent_id = last_event_id or ""
+
+        while True:
+            event = database.get_latest_upload_event()
+            payload, event_id = _event_payload(event)
+
+            if not send_once and last_sent_id == event_id and event is not None:
+                time.sleep(poll_interval)
+                continue
+
+            chunk = _format_sse(event_id, payload)
+            yield chunk
+            last_sent_id = event_id
+
+            if send_once:
+                break
+
+            time.sleep(poll_interval)
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "X-Accel-Buffering": "no",
+    }
+    return Response(_generate(), headers=headers)
 
 
 @app.get("/latest_upload")
