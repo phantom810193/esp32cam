@@ -37,18 +37,34 @@ from .prediction import predict_next_purchases
 from .recognizer import FaceRecognizer
 from .routes import adgen_blueprint
 
-logging.basicConfig(level=logging.INFO)
+# -----------------------------------------------------------------------------
+# Logging
+# -----------------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
 
+# -----------------------------------------------------------------------------
+# Paths & Config
+# -----------------------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
-DB_PATH = DATA_DIR / "mvp.sqlite3"
-UPLOAD_DIR = DATA_DIR / "uploads"
+# 允許用環境變數覆蓋 DB 位置（預設為 repo 內 data/mvp.sqlite3）
+DB_PATH = Path(os.environ.get("DB_PATH", str(DATA_DIR / "mvp.sqlite3")))
+UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", str(DATA_DIR / "uploads")))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-# === VM 外部圖庫設定（可透過環境變數覆蓋） ===
+# VM 外部圖庫（可透過環境變數覆蓋）
 ADS_DIR = os.environ.get("ADS_DIR", "/srv/esp32-ads")
 Path(ADS_DIR).mkdir(parents=True, exist_ok=True)
 
+# Rekognition 開關（預設不 reset；只有顯式設 1 才做）
+REKOG_RESET = os.environ.get("REKOG_RESET", "0") == "1"
+
+# -----------------------------------------------------------------------------
+# Flask App
+# -----------------------------------------------------------------------------
 app = Flask(
     __name__,
     template_folder=str(BASE_DIR / "templates"),
@@ -59,21 +75,43 @@ app.config["JSON_AS_ASCII"] = False
 app.config["ADS_DIR"] = ADS_DIR  # 儲存為字串路徑
 app.register_blueprint(adgen_blueprint)
 
-# --- 服務初始化（Vertex AI / AWS / DB）
+# -----------------------------------------------------------------------------
+# Services (Vertex AI / AWS Rekognition / DB)
+# -----------------------------------------------------------------------------
 gemini = GeminiService()
+
 rekognition = RekognitionService()
-if rekognition.can_describe_faces:
-    if rekognition.reset_collection():
-        logging.info("Amazon Rekognition collection reset for a clean start")
-    else:
-        logging.warning(
-            "Amazon Rekognition collection reset failed; continuing with existing entries"
-        )
+
+def _maybe_prepare_rekognition() -> None:
+    """預設不重置；只有 REKOG_RESET=1 時才清空重建。否則僅確保存在。"""
+    if not getattr(rekognition, "can_describe_faces", False):
+        logging.info("Rekognition not available; face features disabled")
+        return
+    try:
+        if REKOG_RESET:
+            if rekognition.reset_collection():
+                logging.warning("Amazon Rekognition collection reset for a clean start (REKOG_RESET=1)")
+            else:
+                logging.warning("Amazon Rekognition collection reset requested but failed; continuing")
+        else:
+            # 輕量動作：確保 collection 存在即可（若你的 service 沒有 ensure_*，可安全略過）
+            ensure_fn = getattr(rekognition, "ensure_collection", None)
+            if callable(ensure_fn):
+                ensure_fn()
+                logging.info("Amazon Rekognition collection ensured (no reset)")
+    except Exception as exc:  # 安全防護，避免啟動因雲端初始化失敗而崩潰
+        logging.warning("Rekognition prepare step failed: %s", exc)
+
+_maybe_prepare_rekognition()
+
 recognizer = FaceRecognizer(rekognition)
+
 database = Database(DB_PATH)
 database.ensure_demo_data()
 
-
+# -----------------------------------------------------------------------------
+# Routes
+# -----------------------------------------------------------------------------
 @app.get("/")
 def index() -> str:
     return render_template("index.html")
@@ -442,7 +480,6 @@ def extended_health_check():
 # Helpers
 # ---------------------------------------------------------------------------
 
-
 def _manager_hero_image(profile, scenario_key: str) -> str | None:
     if profile and profile.first_image_filename:
         return url_for("serve_upload_image", filename=profile.first_image_filename)
@@ -518,5 +555,5 @@ def _purge_upload_images(filenames: Iterable[str]) -> None:
 
 
 if __name__ == "__main__":
-    # 開發模式直接啟動；部署請用 gunicorn / systemd 並確保帶入 ADS_DIR
+    # 開發模式直接啟動；部署請用 gunicorn / systemd 並確保帶入 ADS_DIR / DB_PATH 等
     app.run(host="0.0.0.0", port=8000, debug=True)
