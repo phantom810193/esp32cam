@@ -112,6 +112,9 @@ def _serialize_ad_context(context: AdContext) -> dict[str, object]:
                 "unit_price": purchase.unit_price,
                 "quantity": purchase.quantity,
                 "total_price": purchase.total_price,
+                "product_category": purchase.product_category,
+                "product_code": purchase.product_code,
+                "product_view_rate": purchase.product_view_rate,
             }
             for purchase in context.purchases
         ],
@@ -186,6 +189,9 @@ def upload_face():
                         "unit_price": purchase.unit_price,
                         "quantity": purchase.quantity,
                         "total_price": purchase.total_price,
+                        "product_category": purchase.product_category,
+                        "product_code": purchase.product_code,
+                        "product_view_rate": purchase.product_view_rate,
                     }
                     for purchase in purchases
                 ],
