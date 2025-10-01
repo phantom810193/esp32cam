@@ -6,14 +6,15 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING, Iterable, Optional
 
 from google.cloud import aiplatform
+from google.api_core import exceptions as gapi_exceptions
 
 # Vertex AI SDK (Generative AI)
 from vertexai.generative_models import GenerativeModel, Part
 
-# 影像生成功能命名空間在不同版位於 preview 或正式版，兩個都試。
+# 影像生成功能命名空間在不同版位於 preview 或正式版；兩個都試。
 try:
     from vertexai.preview.vision_models import ImageGenerationModel  # type: ignore
 except Exception:  # pragma: no cover
@@ -22,7 +23,6 @@ except Exception:  # pragma: no cover
 if TYPE_CHECKING:
     from .advertising import PurchaseInsights  # pragma: no cover
 
-# 與你原本的日誌名稱保持一致，方便追蹤
 _LOGGER = logging.getLogger("backend.ai")
 
 
@@ -41,72 +41,125 @@ class AdCreative:
 
 class GeminiService:
     """
-    Thin wrapper around Vertex AI Gemini (text/vision) + Imagen (image generation).
+    Wrapper around Vertex AI Gemini (text/vision) + Imagen (image generation).
 
-    差異重點 vs. 舊版：
-    - 不再使用 google-generativeai 與 GEMINI_API_KEY。
-    - 透過 GCE VM 的服務帳號（Application Default Credentials）存取。
-    - 模型、專案、區域皆由環境變數配置：
+    - 使用 GCE VM 的服務帳號（Application Default Credentials）。
+    - 模型/專案/區域由環境變數配置（可帶預設）：
         GCP_PROJECT_ID, GCP_REGION
-        ADGEN_TEXT_MODEL (ex: gemini-2.5-flash 或 gemini-2.5-pro)
-        ADGEN_IMAGE_MODEL (ex: imagen-3.0-generate-001 或 imagen-4.0-generate-001)
+        ADGEN_TEXT_MODEL（如：gemini-1.5-pro 或 gemini-2.5-flash）
+        ADGEN_VISION_MODEL（預設同 ADGEN_TEXT_MODEL）
+        ADGEN_IMAGE_MODEL（如：imagen-3.0 或 imagen-4.0-generate-001）
+    - 內建「區域自動回退」：第一優先用 GCP_REGION；若該區域找不到模型，改用 us-central1。
     """
 
     def __init__(
         self,
         *,
-        project: str | None = None,
-        region: str | None = None,
-        vision_model: str | None = None,
-        text_model: str | None = None,
+        project: Optional[str] = None,
+        region: Optional[str] = None,
+        vision_model: Optional[str] = None,
+        text_model: Optional[str] = None,
         timeout: float = 20.0,
     ) -> None:
-        self._project = project or os.getenv("GCP_PROJECT_ID", "esp32cam-472912")
-        self._region = region or os.getenv("GCP_REGION", "us-central1")
-        self._vision_model_name = vision_model or os.getenv("ADGEN_TEXT_MODEL", "gemini-2.5-flash")
-        # 上面沿用同一套 Gemini 2.5，能吃影像也能產文案；若你想分開，可另外加 ADGEN_VISION_MODEL
-        self._text_model_name = text_model or os.getenv("ADGEN_TEXT_MODEL", "gemini-2.5-flash")
-        self._image_model_name = os.getenv("ADGEN_IMAGE_MODEL", "imagen-3.0-generate-001")
+        # ---- 基本設定（含預設值，避免少設參數時阻斷啟動）----
+        self._project_cfg = project or os.getenv("GCP_PROJECT_ID", "esp32cam-472912")
+        self._region_cfg = region or os.getenv("GCP_REGION", "asia-east1")
+
+        # 文字/視覺模型（可分開設定，未提供視覺時沿用文字模型）
+        default_text = os.getenv("ADGEN_TEXT_MODEL", "gemini-1.5-pro")
+        self._text_model_name = text_model or default_text
+        self._vision_model_name = vision_model or os.getenv("ADGEN_VISION_MODEL", default_text)
+
+        # Imagen 影像模型（不一定要用到）
+        self._image_model_name = os.getenv("ADGEN_IMAGE_MODEL", "imagen-3.0")
+
         self._timeout = timeout
 
-        self._vision_model: GenerativeModel | None = None
-        self._text_model: GenerativeModel | None = None
-        self._image_model: ImageGenerationModel | None = None
+        # 實際生效的區域（可能因回退而不同於 _region_cfg）
+        self._active_region: Optional[str] = None
 
+        # 實際模型實例
+        self._vision_model: Optional[GenerativeModel] = None
+        self._text_model: Optional[GenerativeModel] = None
+        self._image_model: Optional[ImageGenerationModel] = None
+
+        # 狀態
         self._inited: bool = False
-        self._init_error: str | None = None
+        self._init_error: Optional[str] = None
 
-        self._init_vertex()
+        self._init_vertex_with_region_fallback()
 
     # ------------------------------------------------------------------
-    def _init_vertex(self) -> None:
-        if self._inited:
-            return
-        try:
-            aiplatform.init(project=self._project, location=self._region)
-            # Gemini（多模/文字）
-            self._vision_model = GenerativeModel(self._vision_model_name)
-            self._text_model = GenerativeModel(self._text_model_name)
-            # Imagen（生成圖片，可選）
-            try:
-                self._image_model = ImageGenerationModel.from_pretrained(self._image_model_name)
-            except Exception as e:  # 影像模型非必要，失敗就記錄
-                self._image_model = None
-                _LOGGER.warning("Imagen model init failed (%s): %s", self._image_model_name, e)
+    def _try_init_for_region(self, region: str) -> bool:
+        """嘗試在指定區域初始化 Vertex 與模型；若模型不存在，拋出 NotFound 讓上層決定是否回退。"""
+        _LOGGER.info("Initializing Vertex AI in region %s for project %s", region, self._project_cfg)
+        aiplatform.init(project=self._project_cfg, location=region)
 
-            self._inited = True
-            _LOGGER.info(
-                "Gemini service initialised with models %s (vision) / %s (text)",
-                self._vision_model_name,
-                self._text_model_name,
-            )
+        # 建立 Gemini（多模/文字）
+        try:
+            vision_model = GenerativeModel(self._vision_model_name)
+            text_model = GenerativeModel(self._text_model_name)
+        except gapi_exceptions.NotFound as nf:
+            # 區域有啟但這個型號不存在 -> 讓上層做回退
+            raise
         except Exception as exc:
-            self._init_error = str(exc)
-            self._inited = False
-            self._vision_model = None
-            self._text_model = None
-            self._image_model = None
-            _LOGGER.exception("Vertex AI init failed: %s", exc)
+            # 其他錯誤（權限/網路等）=> 不中斷回退，直接讓上層判斷
+            raise
+
+        # 建立 Imagen（可選）
+        image_model: Optional[ImageGenerationModel]
+        try:
+            image_model = ImageGenerationModel.from_pretrained(self._image_model_name)
+        except Exception as e:  # 影像模型非關鍵，記錄但不阻擋
+            image_model = None
+            _LOGGER.warning("Imagen model init failed in %s (%s): %s", region, self._image_model_name, e)
+
+        # 一切 OK，寫回狀態
+        self._active_region = region
+        self._vision_model = vision_model
+        self._text_model = text_model
+        self._image_model = image_model
+        self._inited = True
+        self._init_error = None
+
+        _LOGGER.info(
+            "Gemini service initialised in %s with models %s (vision) / %s (text)",
+            region,
+            self._vision_model_name,
+            self._text_model_name,
+        )
+        return True
+
+    def _init_vertex_with_region_fallback(self) -> None:
+        """優先用 GCP_REGION，若該區域模型不存在則回退 us-central1。"""
+        # 依序嘗試：指定區域 -> us-central1（除非兩者相同）
+        candidates = [self._region_cfg]
+        if self._region_cfg != "us-central1":
+            candidates.append("us-central1")
+
+        last_error: Optional[Exception] = None
+        for region in candidates:
+            try:
+                if self._try_init_for_region(region):
+                    return
+            except gapi_exceptions.NotFound as nf:
+                last_error = nf
+                _LOGGER.warning(
+                    "Model not found in region %s (text=%s, vision=%s). Will try next region if any.",
+                    region,
+                    self._text_model_name,
+                    self._vision_model_name,
+                )
+            except Exception as exc:  # 其他初始化失敗
+                last_error = exc
+                _LOGGER.exception("Vertex AI init failed in region %s: %s", region, exc)
+
+        # 全部失敗
+        self._inited = False
+        self._init_error = str(last_error) if last_error else "Unknown init error"
+        self._vision_model = None
+        self._text_model = None
+        self._image_model = None
 
     # ------------------------------------------------------------------
     @property
@@ -254,8 +307,9 @@ class GeminiService:
         """Expose init + model info to /healthz."""
         return {
             "vertexai": "initialized" if self._inited and not self._init_error else "init_failed",
-            "project": self._project,
-            "region": self._region,
+            "project": self._project_cfg,
+            "configured_region": self._region_cfg,
+            "active_region": self._active_region or "",
             "text_model": self._text_model_name,
             "vision_model": self._vision_model_name,
             "image_model": self._image_model_name,
