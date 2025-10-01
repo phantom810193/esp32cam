@@ -1,3 +1,4 @@
+
 """Static product catalogue used for purchase predictions."""
 from __future__ import annotations
 
@@ -16,8 +17,11 @@ CATEGORY_LABELS: dict[str, str] = {
 }
 
 
+
 @dataclass(frozen=True)
 class Product:
+
+
     code: str
     name: str
     category: str
@@ -68,6 +72,7 @@ def infer_category_from_item(item: str) -> str:
             return product.category
     for category, keywords in _CATEGORY_KEYWORDS.items():
         if any(keyword in normalized for keyword in keywords):
+
             return category
     return "general"
 
@@ -89,4 +94,5 @@ def purchased_product_codes(items: Iterable[str]) -> set[str]:
             if name in normalized or normalized in name:
                 codes.add(product.code)
                 break
+
     return codes

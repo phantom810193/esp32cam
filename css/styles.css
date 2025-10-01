@@ -1,0 +1,588 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 16px;
+    box-sizing: border-box;
+    background-color: #D8D8D8;
+}
+
+.hide {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+    opacity: 0;
+}
+
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 56px;
+    margin-bottom: 12px;
+}
+header h1{
+    padding: 0;
+    margin: 0;
+    font-size: 1.6em;
+}
+#nav-links{
+    display: flex;
+    justify-content: flex-end;
+    padding: 0;
+    margin: 0;
+}
+#nav-links li {
+    list-style: none;
+}
+#nav-links li a{
+    opacity: 0.8;
+    text-decoration: none;
+    color: #3d3d3d;
+    font-size: 1em;
+    line-height: 1.6em;
+    height: 48px;
+    position: relative;
+    padding: 0 16px 0 8px;
+    margin: 0 8px;
+    display: flex;
+    background-color: #F3F3F3;
+    align-items: center;
+    justify-content: center;
+    border-radius: 16px;
+    box-shadow: rgba(0, 0, 0, 0.14) 0 2px 2px 0, rgba(0, 0, 0, 0.12) 0 3px 1px -2px, rgba(0, 0, 0, 0.2) 0 1px 5px 0px;
+}
+#nav-links li a::before{
+    content: "";
+    display: block;
+    width: 40px;
+    height: 40px;
+    background-size: cover;
+}
+#nav-links li.event a::before{
+    background-image: url('../images/icon-calendar.svg');
+}
+#nav-links li.shop a::before{
+    background-image: url('../images/icon-shop.svg');
+}
+#nav-links li.product a::before{
+    background-image: url('../images/icon-pickup.svg');
+}
+#nav-links li.payment a::before{
+    background-image: url('../images/icon-money.svg');
+}
+#nav-links li.customer a::before{
+    background-image: url('../images/icon-account.svg');
+}
+#nav-links li.active a{
+    opacity: 1;
+    background-color: white;
+    color: black;
+}
+#nav-links li a:hover,
+#nav-links li a:focus{
+    background-color: #1B6F15;
+    color: white;
+}
+#nav-links li a:hover::before,
+#nav-links li a:focus::before{
+    filter: brightness(0) invert(1);
+}
+
+#customer-profile {
+    display: flex;
+    flex-direction: row;
+}
+
+#customer-information {
+    width: 30%;
+    padding-right: 16px;
+    box-sizing: border-box;
+    /* height: calc(100vh - 84px); */
+    overflow: hidden;
+    position: relative;
+}
+
+
+#customer-information::after {
+    position: absolute;
+    right: 16px;
+    bottom: 0;
+    content: "";
+    display: block;
+    margin: 0;
+    padding: 0;
+    width: 78px;
+    height: 78px;
+    background-image: url('../images/botton-links.svg');
+}
+.customer-infolist{
+    width: 100%;
+    background: white;
+    border-radius: 0 0 32px 32px;
+    overflow: hidden;
+    height: calc(100vh - 345px);
+    min-height: 493px;
+}
+
+/* 右欄位列表 */
+#customer-details{
+    width: 70%;
+    box-sizing: border-box;
+}
+
+/* 右欄位列表 顧客照片 */
+.customer-photo{
+    position: relative;
+    padding: 0;
+    margin: 0;
+    border-radius: 32px 32px 0 0;
+    overflow: hidden;
+}
+
+.customer-photo img{
+    width: 100%;
+    float: left;
+}
+.customer-photo figcaption {
+    position: absolute;
+    display: inline-block;
+    bottom: 8px;
+    left: 8px;
+    background: rgba(0, 0, 0, 0.6);
+    color: white;
+    padding: 4px 16px;
+    border-radius: 50px;
+    line-height: 1.6em;
+    box-sizing: border-box;
+}
+
+/* 右欄位列表 顧客資料 */
+.customer-basic-info{
+    padding: 18px 24px 22px 24px;
+    margin: 0;
+    position: relative;
+}
+.customer-basic-info li{
+    padding: 2px 0;
+    margin: 0;
+    list-style: none;
+    font-size: 1.1em;
+    line-height: 1.8em;
+}
+.customer-basic-info li.customer-name{
+    font-size: 2em;
+    font-weight: bold;
+    list-style-type: none;
+}
+
+.customer-basic-info li.customer-level{
+    position: absolute;
+    right: 24px;
+    top: 24px;
+    display: inline-block;
+    padding: 4px 16px;
+    margin-top: 8px;
+    border-radius: 8px;
+    font-size: 0.9em;
+    font-weight: bold;
+    background: #F1D800;
+}
+.customer-contact-info{
+    padding: 22px 24px;
+    margin: 0;
+    border-top: solid 1px #E2E2E2;
+}
+.customer-contact-info li{
+    padding: 2px 0;
+    margin: 0;
+    list-style: none;
+    font-size: 1.1em;
+    line-height: 1.8em;
+}
+#customer-tags{
+    float: left;
+    width: 360px;
+    background-color: white;
+    height: 148px;
+    border-radius: 32px 0 0 32px;
+    padding: 16px;
+    box-sizing: border-box;
+}
+#customer-tags h2{
+    padding: 0;
+    margin: 0 0 4px 8px;
+    font-size: 1em;
+}
+.customer-taglist{
+    padding: 0;
+    margin: 0;
+}
+.customer-taglist li{
+    display: inline-block;
+    list-style: none;
+    margin: 8px 4px;
+    padding: 4px 16px;
+    background-color: #EEEAE9;
+    border-radius: 8px;
+    font-size: 0.9em;
+}
+
+
+#customer-preferences{
+    float: left;
+    width: calc(100% - 360px);
+    background-color: white;
+    height: 148px;
+    border-radius: 0 32px 32px 0;
+    padding: 16px;
+    box-sizing: border-box;
+}
+.customer-preferencelist{
+    padding: 0;
+    margin: 0;
+    display: flex;
+    height: 100%;
+    justify-content: space-evenly;
+}
+.customer-preferencelist li{
+    display: block;
+    list-style: none;
+    float: left;
+    width: 20%;
+    background-color: #F3F3F3;
+    border-radius: 8px;
+    padding: 16px 8px;
+    font-size: 1.1em;
+    /* font-weight: lighter; */
+    font-family: sans-serif;
+    word-break: keep-all;
+    text-align: center;
+}
+.customer-preferencelist li i{
+    font-size: 1.3em;
+    font-style: normal;
+    font-weight: normal;
+    padding: 0 4px 0 0px;
+}
+.customer-preferencelist li span{
+    display: block;
+    font-weight: bold;
+    width: 100%;
+    text-align: center;
+    font-size: 0.9em;
+    margin: 0 0 4px 0;
+}
+#customer-purchase-history{
+    clear: both;
+    padding-top: 16px;
+}
+
+/* span:target */
+#tab-1:target,
+#tab-2:target,
+#tab-3:target,
+#tab-4:target {
+    
+}
+
+/*頁籤變換*/
+#tab-1:target~#tab>ul li a[href$="#tab-1"],
+#tab-2:target~#tab>ul li a[href$="#tab-2"],
+#tab-3:target~#tab>ul li a[href$="#tab-3"],
+#tab-4:target~#tab>ul li a[href$="#tab-4"] {
+    
+}
+
+/*頁籤內容顯示*/
+#tab-1:target~#tab>div.tab-content-1,
+#tab-2:target~#tab>div.tab-content-2,
+#tab-3:target~#tab>div.tab-content-3,
+#tab-4:target~#tab>div.tab-content-4 {
+    
+}
+
+#tab {
+    width: 100%;
+    position: relative;
+    border-radius: 32px;
+    overflow: hidden;
+    min-height: 573px;
+    background-color: white;
+    /* box-shadow: rgba(0, 0, 0, 0.14) 0 2px 2px 0, rgba(0, 0, 0, 0.12) 0 3px 1px -2px, rgba(0, 0, 0, 0.2) 0 1px 5px 0px; */
+}
+#tab::before {
+    content: "";
+    display: block;
+    clear: both;
+    position: absolute;
+    right: 200px;
+    top: 0;
+    width: 120px;
+    height: 72px;
+    background-position: bottom right;
+    background-repeat: no-repeat;
+    background-size: cover;
+    background-image: url('../images/tab-bg.svg');
+    z-index: 2;
+}
+#tab::after {
+    content: "";
+    display: block;
+    clear: both;
+    position: absolute;
+    right: 0px;
+    top: 0;
+    width: 320px;
+    height: 72px;
+    border-radius: 0 32px 0 0 ;
+    background-color: white;
+    z-index: 1;
+}
+/* 頁籤ul */
+#tab>ul {
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
+    background-color: #D8D8D8;
+}
+
+#tab>ul>li {
+    list-style-type: none;
+    position: relative;
+    display: inline-block;
+    float: left;
+}
+
+
+#tab>ul>li>a {
+text-decoration: none;
+    font-size: 1em;
+    line-height: 1.6em;
+    color: #333;
+    float: left;
+    padding: 16px 24px 8px 24px;
+    font-weight: bold;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 24px 24px 0 0;
+}
+
+#tab>ul>li>a:hover,
+#tab>ul>li>a:focus {
+    background-color: #e6e6e6;
+}
+
+/*頁籤div內容*/
+#tab>div {
+    clear: both;
+    padding: 0 15px;
+    height: 0;
+    overflow: hidden;
+    visibility: hidden;
+    -webkit-transition: all .4s ease-in-out;
+    -moz-transition: all .4s ease-in-out;
+    -ms-transition: all .4s ease-in-out;
+    -o-transition: all .4s ease-in-out;
+    transition: all .4s ease-in-out;
+}
+#tab-1,
+#tab-2,
+#tab-3,
+#tab-4 {
+    opacity: 0;
+    position: absolute;
+}
+/* span:target */
+#tab-1:target,
+#tab-2:target,
+#tab-3:target,
+#tab-4:target {
+    opacity: 0;
+    position: absolute;
+}
+
+/*第一筆的底色*/
+span:target~#tab>ul li:first-child a {
+    background: #D8D8D8;
+}
+
+span:target~#tab>ul li:first-child a:hover,
+span:target~#tab>ul li:first-child a:focus {
+    background-color: #e6e6e6;
+}
+
+span:target~#tab>div:first-of-type {
+    visibility: hidden;
+    height: 0;
+    padding: 0 15px;
+}
+
+/*頁籤變換&第一筆*/
+span~#tab>ul li:first-child a,
+#tab-1:target~#tab>ul li a[href$="#tab-1"],
+#tab-2:target~#tab>ul li a[href$="#tab-2"],
+#tab-3:target~#tab>ul li a[href$="#tab-3"],
+#tab-4:target~#tab>ul li a[href$="#tab-4"] {
+    background: #fff;
+}
+
+
+#tab-1:target~#tab>ul li a[href$="#tab-1"]::after,
+#tab-2:target~#tab>ul li a[href$="#tab-2"]::after,
+#tab-3:target~#tab>ul li a[href$="#tab-3"]::after,
+#tab-4:target~#tab>ul li a[href$="#tab-4"]::after{
+    position: absolute;
+    z-index: 2;
+    content: "";
+    display: block;
+    clear: both;
+    width: 24px;
+    height: 24px;
+    right: -24px;
+    bottom: 0;
+    background-image: url('../images/tab-li-bg.svg');
+}
+
+#tab-2:target~#tab>ul li a[href$="#tab-2"]::before,
+#tab-3:target~#tab>ul li a[href$="#tab-3"]::before,
+#tab-4:target~#tab>ul li a[href$="#tab-4"]::before{
+    position: absolute;
+    content: "";
+    display: block;
+    clear: both;
+    width: 24px;
+    height: 24px;
+    left: -24px;
+    bottom: 0;
+    background-image: url('../images/tab-li-bg.svg');
+    transform: rotateY(180deg);
+}
+
+
+/*頁籤內容顯示&第一筆*/
+span~#tab>div:first-of-type,
+#tab-1:target~#tab>div.tab-content-1,
+#tab-2:target~#tab>div.tab-content-2,
+#tab-3:target~#tab>div.tab-content-3,
+#tab-4:target~#tab>div.tab-content-4 {
+    visibility: visible;
+    height: calc(100vh - 360px);
+    background: #fff;
+    padding: 8px 20px;
+    border-radius: 0 0 32px 32px;
+    /* min-height: 462px; */
+}
+#tab-2:target~#tab>div.tab-content-2,
+#tab-3:target~#tab>div.tab-content-3,
+#tab-4:target~#tab>div.tab-content-4 {
+    border-radius: 32px 0 32px 32px;
+}
+.tab-content-1 table{
+    width: 100%;
+    border-collapse: collapse;
+}
+.tab-content-1 table th{
+    font-weight: bold;
+    border-bottom: #7C7C7C 1px solid;
+}
+.tab-content-1 table tr:nth-child(even){
+    background-color: #f2f2f2;
+}
+.tab-content-1 table th, .tab-content-1 table td{
+    padding: 12px 8px;
+    text-align: center;
+}
+.tab-content-1 table td:nth-child(2){
+    text-align: left
+}
+.hight{
+    padding: 4px 16px;
+    border-radius: 8px;
+    color: white;
+    background-color: #54B37F;
+}
+.medium{
+        padding: 4px 16px;
+    border-radius: 8px;
+    color: white;
+    background-color: #EC9E5E;
+}
+.advertising{
+    position: absolute;
+    bottom: 16px;
+    display: flex;
+    height: 52px;
+    padding-right: 148px;
+}
+.advertising_info{
+    list-style: none;
+    padding: 0;
+    /* margin: 16px 0 0 0; */
+    display: flex;
+    justify-content: space-between;
+}
+.advertising_info li{
+    font-size: 0.9em;
+    line-height: 1.6em;
+    color: #6d6d6d;
+    margin-right: 16px;
+    border-right: #333 solid 1px;
+    padding-right: 16px;
+}
+
+.advertising_info li span{
+    padding-right: 8px;
+}
+
+.btn a{
+    position: absolute;
+    z-index: 2;
+    opacity: 1;
+    text-decoration: none;
+    font-size: 1.1em;
+    line-height: 1.6em;
+    height: 48px;
+    width: 160px;
+    bottom: 0;
+    right: 0;
+    margin: 0 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 16px;
+    box-shadow: rgba(0, 0, 0, 0.14) 0 2px 2px 0, rgba(0, 0, 0, 0.12) 0 3px 1px -2px, rgba(0, 0, 0, 0.2) 0 1px 5px 0px;
+    background-color: #1B6F15;
+    color: white;
+}
+
+.page{
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    text-align: center;
+    margin-top: 24px;
+}
+.page li{
+    display: inline-block;
+    list-style: none;
+    margin: 0;
+}
+.page li a{
+    font-size: 1em;
+    color: #333;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background-color: #ededed;
+    text-decoration: none;
+    display: block;
+}
+.page li.active a{
+    background-color: #dfdfdf;
+}
