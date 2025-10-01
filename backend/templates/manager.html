@@ -10,6 +10,7 @@
   </head>
   <body>
     <div class="manager-shell">
+      <!-- 頂部：顧客選擇與視窗資訊 -->
       <header class="manager-header">
         <div class="header-title">
           <h1>ESP32-CAM 智慧廣告中控台</h1>
@@ -39,9 +40,12 @@
       {% endif %}
 
       <main class="dashboard">
+        <!-- 1) 視覺主卡：左側為廣告圖/照片 + LLM 生成文案 -->
         <section class="hero-card">
           <div class="hero-image">
-            {% if context and context.hero_image_url %}
+            {% if context and context.ad_image_url %}
+              <img src="{{ context.ad_image_url }}" alt="廣告/顧客影像" loading="lazy">
+            {% elif context and context.hero_image_url %}
               <img src="{{ context.hero_image_url }}" alt="顧客影像" loading="lazy">
             {% else %}
               <div class="hero-placeholder">等待上傳 ESP32-CAM 圖像</div>
@@ -54,26 +58,51 @@
               <div class="hero-meta">
                 <span class="tag scenario">情境：{{ context.scenario_key }}</span>
                 <span class="tag window">分析區間：{{ context.prediction.window_label }}</span>
+                <span class="tag status">
+                  身分：
+                  {% if context.member_status == 'new' %}新顧客
+                  {% elif context.member_status == 'unregistered' %}未註冊會員
+                  {% else %}已註冊會員{% endif %}
+                </span>
               </div>
+
               <h2>{{ display_name or '未知顧客' }}</h2>
-              <p class="member-profile">{{ member_profile.profile_label|replace('-', ' ') if member_profile else '尚未辨識' }}</p>
+              <p class="member-profile">
+                {{ member_profile.profile_label|replace('-', ' ') if member_profile else '尚未辨識' }}
+              </p>
+
+              <!-- LLM 生成廣告文案：headline / subline -->
+              {% if context.ad_copy %}
+                <div class="ad-copy">
+                  {% if context.ad_copy.headline %}<h3 class="headline">{{ context.ad_copy.headline }}</h3>{% endif %}
+                  {% if context.ad_copy.subline %}<p class="subline">{{ context.ad_copy.subline }}</p>{% endif %}
+                </div>
+              {% endif %}
+
               <dl class="hero-stats">
                 <div>
                   <dt>核心主打</dt>
-                  <dd>{{ context.analysis.recommended_item or '等待歷史累積' }}</dd>
+                  <dd>{{ context.analysis.recommended_item or (context.prediction.items[0].product_name if context.prediction and context.prediction.items) or '等待歷史累積' }}</dd>
                 </div>
                 <div>
                   <dt>預估轉換率</dt>
-                  <dd>{{ context.analysis.probability_percent }}%</dd>
+                  <dd>
+                    {% if context.prediction and context.prediction.items %}
+                      {{ '%.2f'|format(context.prediction.items[0].probability_percent) }}%
+                    {% else %}
+                      0.00%
+                    {% endif %}
+                  </dd>
                 </div>
                 <div>
                   <dt>歷史訂單數</dt>
-                  <dd>{{ context.analysis.total_purchases }}</dd>
+                  <dd>{{ context.analysis.total_purchases or 0 }}</dd>
                 </div>
               </dl>
+
               <div class="hero-links">
-                <a class="btn" href="{{ context.ad_url }}" target="_blank" rel="noopener">顧客版廣告頁</a>
-                <a class="btn" href="{{ context.ad_image_url }}" target="_blank" rel="noopener">下載疊字廣告圖</a>
+                {% if context.ad_url %}<a class="btn" href="{{ context.ad_url }}" target="_blank" rel="noopener">顧客版廣告頁</a>{% endif %}
+                {% if context.ad_image_url %}<a class="btn" href="{{ context.ad_image_url }}" target="_blank" rel="noopener">下載疊字廣告圖</a>{% endif %}
               </div>
             {% else %}
               <div class="hero-empty">請先選擇顧客，即可載入預測資訊</div>
@@ -81,16 +110,18 @@
           </div>
         </section>
 
+        <!-- 2) 本月潛在熱銷清單（七筆；百分比） -->
         <section class="insights-card">
           <header>
             <div>
               <h3>本月潛在熱銷清單</h3>
-              <p>依據上一個月的消費紀錄推估尚未購買的商品，並計算購買機率</p>
+              <p>依據上一個月的消費紀錄推估「本月尚未購買」的商品（七筆），並計算購買機率</p>
             </div>
             {% if context %}
               <span class="window-label">分析窗口：{{ context.prediction.window_label }}</span>
             {% endif %}
           </header>
+
           <div class="table-wrapper">
             <table>
               <thead>
@@ -104,15 +135,15 @@
                 </tr>
               </thead>
               <tbody>
-                {% if context and context.prediction.items %}
-                  {% for item in context.prediction.items %}
+                {% if context and context.prediction and context.prediction.items %}
+                  {% for item in context.prediction.items[:7] %}
                     <tr>
                       <td>{{ item.product_code }}</td>
                       <td>{{ item.product_name }}</td>
                       <td>{{ item.category_label }}</td>
                       <td>NT$ {{ '%.0f'|format(item.price) }}</td>
-                      <td>{{ '%.1f'|format(item.view_rate_percent) }}%</td>
-                      <td>{{ '%.1f'|format(item.probability_percent) }}%</td>
+                      <td>{{ '%.2f'|format(item.view_rate_percent) }}%</td>
+                      <td><strong>{{ '%.2f'|format(item.probability_percent) }}%</strong></td>
                     </tr>
                   {% endfor %}
                 {% else %}
@@ -121,7 +152,8 @@
               </tbody>
             </table>
           </div>
-          {% if context and context.prediction.top_products %}
+
+          {% if context and context.prediction and context.prediction.top_products %}
             <div class="top-products">
               <h4>上一期熱銷前三名</h4>
               <ul>
@@ -137,12 +169,13 @@
           {% endif %}
         </section>
 
+        <!-- 3) 上一個月消費紀錄（清單） -->
         <section class="history-card">
           <header>
             <h3>上一個月消費紀錄</h3>
             {% if context %}<span>{{ context.prediction.window_label }}</span>{% endif %}
           </header>
-          {% if context and context.prediction.history %}
+          {% if context and context.prediction and context.prediction.history %}
             <ul class="history-list">
               {% for purchase in context.prediction.history %}
                 <li>
@@ -159,27 +192,33 @@
           {% endif %}
         </section>
 
+        <!-- 4) 會員資料（新增「職業 / 產業別」） -->
         <section class="member-card">
           <header><h3>會員資料</h3></header>
           {% if context and context.member %}
             <dl class="member-info">
               <div><dt>會員編號</dt><dd>{{ context.member.mall_member_id or '尚未加入會員' }}</dd></div>
-              <div><dt>會員狀態</dt><dd>{{ context.member.member_status }}</dd></div>
-              <div><dt>加入日期</dt><dd>{{ context.member.joined_at }}</dd></div>
+              <div><dt>會員狀態</dt><dd>
+                {% if context.member_status == 'new' %}新顧客
+                {% elif context.member_status == 'unregistered' %}未註冊會員
+                {% else %}已註冊會員{% endif %}
+              </dd></div>
+              <div><dt>加入日期</dt><dd>{{ context.member.joined_at or '—' }}</dd></div>
               <div><dt>職業 / 產業別</dt><dd>{{ context.member.occupation or '—' }}</dd></div>
-              <div><dt>聯絡電話</dt><dd>{{ context.member.phone }}</dd></div>
-              <div><dt>電子郵件</dt><dd>{{ context.member.email }}</dd></div>
+              <div><dt>聯絡電話</dt><dd>{{ context.member.phone or '—' }}</dd></div>
+              <div><dt>電子郵件</dt><dd>{{ context.member.email or '—' }}</dd></div>
               <div><dt>郵遞地址</dt><dd>{{ context.member.address or '—' }}</dd></div>
-              <div><dt>點數餘額</dt><dd>{{ '%.0f'|format(context.member.points_balance) }}</dd></div>
+              <div><dt>點數餘額</dt><dd>{{ context.member.points_balance is not none and ('%.0f'|format(context.member.points_balance)) or '—' }}</dd></div>
             </dl>
           {% else %}
             <p class="empty">尚無會員資料</p>
           {% endif %}
         </section>
 
+        <!-- 5) 參與活動紀錄（右側欄） -->
         <section class="activities-card">
           <header><h3>參與活動紀錄</h3></header>
-          {% if context and context.prediction.activities %}
+          {% if context and context.prediction and context.prediction.activities %}
             <ul class="activity-list">
               {% for activity in context.prediction.activities %}
                 <li>
@@ -196,6 +235,7 @@
           {% endif %}
         </section>
 
+        <!-- 6) 上傳照片（測試階段可手動上傳） -->
         <section class="uploader-card">
           <h3>上傳照片快速帶出顧客</h3>
           <form class="upload-box" method="post" action="{{ url_for('manager_dashboard_view') }}" enctype="multipart/form-data">
