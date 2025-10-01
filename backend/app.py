@@ -6,7 +6,6 @@ import json
 import logging
 import mimetypes
 import os
-import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
@@ -38,26 +37,33 @@ from .advertising import (
 from .ai import GeminiService, GeminiUnavailableError
 from .aws import RekognitionService
 from .database import Database
-# ⬇︎ 修正：改從 routes.predict 匯入方法與藍圖
-from .routes.predict import predict_next_purchases, predict_bp
-from .routes.identify import identify_bp
-# ⬇︎ adgen blueprint 仍維持
-from .routes import adgen_blueprint
+
+# --- Blueprints ---
+# NOTE: 只註冊 blueprint；不要在這裡引用不存在的舊類別或函式
+from .routes.identify import identify_bp         # 提供 /upload_face 與辨識流程
+from .routes.predict import predict_bp           # 提供 /members/<id>/predictions 等 API
+from .routes import adgen_blueprint              # 提供 /adgen（Vertex 圖文生成）
+
+# 嘗試性匯入可選的 helper（新版可能已移除）
+try:
+    from .routes.predict import predict_next_purchases as _predict_next_purchases  # type: ignore
+except Exception:  # pragma: no cover
+    _predict_next_purchases = None
 
 # -----------------------------------------------------------------------------
 # Logging
 # -----------------------------------------------------------------------------
 logging.basicConfig(
-    level=logging.INFO,
+    level=os.environ.get("LOG_LEVEL", "INFO"),
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
+log = logging.getLogger("backend.app")
 
 # -----------------------------------------------------------------------------
 # Paths & Config
 # -----------------------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
-# 允許用環境變數覆蓋 DB 位置（預設為 repo 內 data/mvp.sqlite3）
 DB_PATH = Path(os.environ.get("DB_PATH", str(DATA_DIR / "mvp.sqlite3")))
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", str(DATA_DIR / "uploads")))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -79,184 +85,51 @@ app = Flask(
     static_url_path="/static",
 )
 app.config["JSON_AS_ASCII"] = False
-app.config["ADS_DIR"] = ADS_DIR  # 儲存為字串路徑
-app.register_blueprint(adgen_blueprint)
-# ⬇︎ 新增的兩個 blueprint
-app.register_blueprint(predict_bp)
+app.config["ADS_DIR"] = ADS_DIR
+
+# 註冊 blueprints
 app.register_blueprint(identify_bp)
+app.register_blueprint(predict_bp)
+app.register_blueprint(adgen_blueprint)
 
 # -----------------------------------------------------------------------------
 # Services (Vertex AI / AWS Rekognition / DB)
 # -----------------------------------------------------------------------------
 gemini = GeminiService()
 rekognition = RekognitionService()
+database = Database(DB_PATH)
+database.ensure_demo_data()
+
 
 def _maybe_prepare_rekognition() -> None:
     """預設不重置；只有 REKOG_RESET=1 時才清空重建。否則僅確保存在。"""
     if not getattr(rekognition, "can_describe_faces", False):
-        logging.info("Rekognition not available; face features disabled")
+        log.info("Rekognition not available; face features disabled")
         return
     try:
         if REKOG_RESET:
             if rekognition.reset_collection():
-                logging.warning("Amazon Rekognition collection reset for a clean start (REKOG_RESET=1)")
+                log.warning("Amazon Rekognition collection reset for a clean start (REKOG_RESET=1)")
             else:
-                logging.warning("Amazon Rekognition collection reset requested but failed; continuing")
+                log.warning("Amazon Rekognition collection reset requested but failed; continuing")
         else:
             ensure_fn = getattr(rekognition, "ensure_collection", None)
             if callable(ensure_fn):
                 ensure_fn()
-                logging.info("Amazon Rekognition collection ensured (no reset)")
-    except Exception as exc:
-        logging.warning("Rekognition prepare step failed: %s", exc)
+                log.info("Amazon Rekognition collection ensured (no reset)")
+    except Exception as exc:  # pragma: no cover
+        log.warning("Rekognition prepare step failed: %s", exc)
+
 
 _maybe_prepare_rekognition()
-
-recognizer = FaceRecognizer(rekognition)
-
-database = Database(DB_PATH)
-database.ensure_demo_data()
 
 # -----------------------------------------------------------------------------
 # Routes
 # -----------------------------------------------------------------------------
 @app.get("/")
 def index() -> str:
-    return render_template("index.html")
-
-
-@app.post("/upload_face")
-def upload_face():
-    """Receive an image from the ESP32-CAM and return the member identifier."""
-    overall_start = perf_counter()
-
-    try:
-        image_bytes, mime_type = _extract_image_payload(request)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
-
-    upload_duration = perf_counter() - overall_start
-
-    recognition_start = perf_counter()
-    try:
-        encoding = recognizer.encode(image_bytes, mime_type=mime_type)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 422
-
-    member_id, distance = database.find_member_by_encoding(encoding, recognizer)
-    new_member = False
-    if member_id is None:
-        member_id = database.create_member(encoding, recognizer.derive_member_id(encoding))
-        _create_welcome_purchase(member_id)
-        new_member = True
-
-    if new_member:
-        indexed_encoding = recognizer.register_face(image_bytes, member_id)
-        if indexed_encoding is not None:
-            database.update_member_encoding(member_id, indexed_encoding)
-
-    recognition_duration = perf_counter() - recognition_start
-
-    ad_generation_start = perf_counter()
-    purchases = database.get_purchase_history(member_id)
-    insights = analyse_purchase_intent(purchases, new_member=new_member)
-    profile = database.get_member_profile(member_id)
-
-    creative = None
-    if gemini.can_generate_ads and insights.scenario != "brand_new":
-        try:
-            creative = gemini.generate_ad_copy(
-                member_id,
-                [
-                    {
-                        "member_code": purchase.member_code,
-                        "item": purchase.item,
-                        "purchased_at": purchase.purchased_at,
-                        "unit_price": purchase.unit_price,
-                        "quantity": purchase.quantity,
-                        "total_price": purchase.total_price,
-                    }
-                    for purchase in purchases
-                ],
-                insights=insights,
-            )
-        except GeminiUnavailableError as exc:
-            logging.warning("Gemini ad generation unavailable: %s", exc)
-    ad_generation_duration = perf_counter() - ad_generation_start
-
-    total_duration = perf_counter() - overall_start
-
-    image_filename = _persist_upload_image(member_id, image_bytes, mime_type)
-    database.record_upload_event(
-        member_id=member_id,
-        image_filename=image_filename,
-        upload_duration=upload_duration,
-        recognition_duration=recognition_duration,
-        ad_duration=ad_generation_duration,
-        total_duration=total_duration,
-    )
-    stale_images = database.cleanup_upload_events(keep_latest=1)
-    _purge_upload_images(stale_images)
-
-    scenario_key = derive_scenario_key(insights, profile=profile)
-    hero_image_url = _resolve_hero_image_url(scenario_key)
-
-    payload = {
-        "status": "ok",
-        "member_id": member_id,
-        "member_code": database.get_member_code(member_id),
-        "new_member": new_member,
-        "ad_url": url_for("render_ad", member_id=member_id, _external=True),
-        "scenario_key": scenario_key,
-        "hero_image_url": hero_image_url,
-    }
-    if distance is not None:
-        payload["distance"] = distance
-    return jsonify(payload), 201 if new_member else 200
-
-
-@app.post("/members/merge")
-def merge_members():
-    """Merge two member identifiers when the same face was duplicated."""
-    payload = request.get_json(silent=True) or {}
-    source_id = str(payload.get("source") or "").strip()
-    target_id = str(payload.get("target") or "").strip()
-    prefer_source = bool(payload.get("prefer_source_encoding", False))
-
-    if not source_id or not target_id:
-        return jsonify({"status": "error", "message": "source 與 target 參數必須提供"}), 400
-
-    try:
-        source_encoding, target_encoding = database.merge_members(source_id, target_id)
-    except ValueError as exc:
-        message = str(exc)
-        status = 400 if "不可相同" in message else 404
-        return jsonify({"status": "error", "message": message}), status
-
-    deleted_faces = recognizer.remove_member_faces(source_id)
-
-    encoding_updated = False
-    if (
-        prefer_source
-        or (not target_encoding.signature and source_encoding.signature)
-        or (
-            source_encoding.signature
-            and source_encoding.source.startswith("rekognition")
-            and not target_encoding.source.startswith("rekognition")
-        )
-    ):
-        database.update_member_encoding(target_id, source_encoding)
-        encoding_updated = True
-
-    return jsonify(
-        {
-            "status": "ok",
-            "merged_member": source_id,
-            "into": target_id,
-            "deleted_cloud_faces": deleted_faces,
-            "encoding_updated": encoding_updated,
-        }
-    ), 200
+    # 直接導到新版後台
+    return render_template("manager.html", context={"prediction": {"window_label": "本月"}})
 
 
 @app.get("/ad/<member_id>")
@@ -272,19 +145,19 @@ def render_ad(member_id: str):
                 member_id,
                 [
                     {
-                        "member_code": purchase.member_code,
-                        "item": purchase.item,
-                        "purchased_at": purchase.purchased_at,
-                        "unit_price": purchase.unit_price,
-                        "quantity": purchase.quantity,
-                        "total_price": purchase.total_price,
+                        "member_code": p.member_code,
+                        "item": p.item,
+                        "purchased_at": p.purchased_at,
+                        "unit_price": p.unit_price,
+                        "quantity": p.quantity,
+                        "total_price": p.total_price,
                     }
-                    for purchase in purchases
+                    for p in purchases
                 ],
                 insights=insights,
             )
         except GeminiUnavailableError as exc:
-            logging.warning("Gemini ad generation unavailable: %s", exc)
+            log.warning("Gemini ad generation unavailable: %s", exc)
 
     context = build_ad_context(
         member_id,
@@ -319,10 +192,7 @@ def latest_ad_stream() -> Response:
 
     def _event_payload(event) -> tuple[dict[str, object], str]:
         if event is None:
-            return {
-                "status": "idle",
-                "message": "No uploads have been recorded yet.",
-            }, "0"
+            return {"status": "idle", "message": "No uploads have been recorded yet."}, "0"
 
         ad_url = url_for("render_ad", member_id=event.member_id, _external=True)
         image_url = (
@@ -330,7 +200,6 @@ def latest_ad_stream() -> Response:
             if event.image_filename
             else None
         )
-
         payload = {
             "status": "ok",
             "event_id": event.id,
@@ -350,7 +219,6 @@ def latest_ad_stream() -> Response:
     @stream_with_context
     def _generate():
         last_sent_id = last_event_id or ""
-
         while True:
             event = database.get_latest_upload_event()
             payload, event_id = _event_payload(event)
@@ -362,10 +230,8 @@ def latest_ad_stream() -> Response:
             chunk = _format_sse(event_id, payload)
             yield chunk
             last_sent_id = event_id
-
             if send_once:
                 break
-
             time.sleep(poll_interval)
 
     headers = {
@@ -403,13 +269,9 @@ def latest_upload_dashboard():
 def member_directory():
     profiles = database.list_member_profiles()
     directory: list[dict[str, object]] = []
-
     for profile in profiles:
-        purchases = []
-        if profile.member_id:
-            purchases = database.get_purchase_history(profile.member_id)
+        purchases = database.get_purchase_history(profile.member_id) if profile.member_id else []
         directory.append({"profile": profile, "purchases": purchases})
-
     return render_template("members.html", members=directory)
 
 
@@ -417,7 +279,7 @@ def member_directory():
 def manager_dashboard_view():
     member_id = (request.args.get("member_id") or "").strip()
     profiles = database.list_member_profiles()
-    selectable_members = [profile for profile in profiles if profile.member_id]
+    selectable_members = [p for p in profiles if p.member_id]
 
     selected_id = member_id or (selectable_members[0].member_id if selectable_members else "")
     context: dict[str, object] | None = None
@@ -429,12 +291,21 @@ def manager_dashboard_view():
         insights = analyse_purchase_intent(purchases)
         scenario_key = derive_scenario_key(insights, profile=profile)
         hero_image_url = _manager_hero_image(profile, scenario_key)
-        prediction = predict_next_purchases(
-            purchases,
-            profile=profile,
-            insights=insights,
-            limit=7,
-        )
+
+        # 預測：優先使用新版 routes.predict 提供的 helper；沒有就使用安全 fallback
+        if callable(_predict_next_purchases):
+            prediction = _predict_next_purchases(
+                purchases,
+                profile=profile,
+                insights=insights,
+                limit=7,
+            )
+        else:
+            prediction = {
+                "window_label": "本月",
+                "items": [],
+                "explain": "fallback: 無 predict_next_purchases，僅顯示基本資料",
+            }
 
         context = {
             "member_id": selected_id,
@@ -500,7 +371,7 @@ def health_check():
     sample: list[str] = []
     if exists:
         try:
-            sample = [entry.name for entry in sorted(ads_path.iterdir())[:10]]
+            sample = [e.name for e in sorted(ads_path.iterdir())[:10]]
         except OSError:
             sample = []
     return jsonify(
@@ -528,7 +399,7 @@ def extended_health_check():
             writable = True
         except OSError as exc:
             write_error = str(exc)
-            logging.warning("Ads directory write test failed for %s: %s", ads_path, exc)
+            log.warning("Ads directory write test failed for %s: %s", ads_path, exc)
         finally:
             try:
                 test_path.unlink(missing_ok=True)
@@ -537,9 +408,9 @@ def extended_health_check():
     sample: list[str] = []
     if exists:
         try:
-            sample = [entry.name for entry in sorted(ads_path.iterdir())[:10]]
+            sample = [e.name for e in sorted(ads_path.iterdir())[:10]]
         except OSError as exc:
-            logging.warning("Failed to inspect ads directory %s: %s", ads_path, exc)
+            log.warning("Failed to inspect ads directory %s: %s", ads_path, exc)
 
     bucket_name = os.environ.get("ASSET_BUCKET", "")
     gcs_status: dict[str, object] = {"bucket": bucket_name, "reachable": False}
@@ -548,7 +419,7 @@ def extended_health_check():
             client = storage.Client()
             bucket = client.bucket(bucket_name)
             gcs_status["reachable"] = bucket.exists()
-        except Exception as exc:
+        except Exception as exc:  # pragma: no cover
             gcs_status["error"] = str(exc)
     else:
         gcs_status["error"] = "ASSET_BUCKET not configured"
@@ -574,7 +445,7 @@ def extended_health_check():
 # ---------------------------------------------------------------------------
 
 def _manager_hero_image(profile, scenario_key: str) -> str | None:
-    if profile and profile.first_image_filename:
+    if profile and getattr(profile, "first_image_filename", None):
         return url_for("serve_upload_image", filename=profile.first_image_filename)
     return _resolve_hero_image_url(scenario_key)
 
@@ -594,6 +465,7 @@ def _resolve_hero_image_url(scenario_key: str) -> str | None:
     return url_for("static", filename=f"images/ads/{filename}")
 
 
+# 下面兩個 helper 目前僅供 /upload 記錄圖用的舊流程（identify_bp 已接手 /upload_face）
 def _extract_image_payload(req) -> Tuple[bytes, str]:
     if req.files:
         for key in ("image", "file", "photo"):
@@ -608,18 +480,6 @@ def _extract_image_payload(req) -> Tuple[bytes, str]:
     return data, req.mimetype or "image/jpeg"
 
 
-def _create_welcome_purchase(member_id: str) -> None:
-    now = datetime.now().replace(second=0, microsecond=0)
-    database.add_purchase(
-        member_id,
-        item="歡迎禮盒",
-        purchased_at=now.strftime("%Y-%m-%d %H:%M"),
-        unit_price=880.0,
-        quantity=1,
-        total_price=880.0,
-    )
-
-
 def _persist_upload_image(member_id: str, image_bytes: bytes, mime_type: str) -> str | None:
     extension = mimetypes.guess_extension(mime_type or "") or ".jpg"
     if extension == ".jpe":
@@ -630,8 +490,8 @@ def _persist_upload_image(member_id: str, image_bytes: bytes, mime_type: str) ->
     path = UPLOAD_DIR / filename
     try:
         path.write_bytes(image_bytes)
-    except OSError as exc:
-        logging.warning("Failed to persist uploaded image %s: %s", path, exc)
+    except OSError as exc:  # pragma: no cover
+        log.warning("Failed to persist uploaded image %s: %s", path, exc)
         return None
     return filename
 
@@ -642,9 +502,10 @@ def _purge_upload_images(filenames: Iterable[str]) -> None:
         try:
             if path.exists():
                 path.unlink()
-        except OSError as exc:
-            logging.warning("Failed to delete old upload image %s: %s", path, exc)
+        except OSError as exc:  # pragma: no cover
+            log.warning("Failed to delete old upload image %s: %s", path, exc)
 
 
 if __name__ == "__main__":
+    # 本地除錯使用；正式以 systemd/gunicorn 啟動
     app.run(host="0.0.0.0", port=8000, debug=True)
