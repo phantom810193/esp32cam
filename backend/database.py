@@ -1,9 +1,17 @@
 """SQLite helper utilities for the ESP32-CAM MVP backend."""
 from __future__ import annotations
 
+if __name__ == "__main__" and __package__ is None:
+    import sys
+    from pathlib import Path as _Path
+
+    sys.path.append(str(_Path(__file__).resolve().parent.parent))
+    __package__ = "backend"
+
 import hashlib
 import json
 import logging
+import random
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -37,6 +45,87 @@ SEED_PROFILE_LABELS: tuple[str, ...] = (
 _TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
 
+_CATEGORY_KEYWORDS: tuple[tuple[str, str], ...] = (
+    ("蛋糕", "甜點烘焙"),
+    ("塔", "甜點烘焙"),
+    ("布丁", "甜點烘焙"),
+    ("餅乾", "甜點烘焙"),
+    ("可麗", "甜點烘焙"),
+    ("乳酪", "甜點烘焙"),
+    ("慕斯", "甜點烘焙"),
+    ("麵包", "烘焙麵食"),
+    ("鬆餅", "甜點烘焙"),
+    ("司康", "甜點烘焙"),
+    ("奶茶", "咖啡茶飲"),
+    ("咖啡", "咖啡茶飲"),
+    ("茶", "咖啡茶飲"),
+    ("果汁", "咖啡茶飲"),
+    ("飲", "咖啡茶飲"),
+    ("鮮奶", "乳製品"),
+    ("優酪", "乳製品"),
+    ("優格", "乳製品"),
+    ("蔬菜", "生鮮蔬果"),
+    ("蔬果", "生鮮蔬果"),
+    ("水果", "生鮮蔬果"),
+    ("莓", "生鮮蔬果"),
+    ("鮭魚", "生鮮水產"),
+    ("牛", "肉品蛋白"),
+    ("雞", "肉品蛋白"),
+    ("蛋白", "營養補給"),
+    ("堅果", "營養補給"),
+    ("油", "烹飪食材"),
+    ("醬", "烹飪食材"),
+    ("米", "糧食雜糧"),
+    ("麥", "糧食雜糧"),
+    ("燕麥", "糧食雜糧"),
+    ("酵", "營養補給"),
+    ("蜂", "營養補給"),
+    ("維他命", "營養補給"),
+    ("禮盒", "禮品與禮盒"),
+    ("香氛", "居家生活"),
+    ("洗", "居家清潔"),
+    ("濾水", "居家生活"),
+    ("鍋", "廚房家電"),
+    ("杯", "餐廚用品"),
+    ("保鮮", "餐廚用品"),
+    ("餐具", "餐廚用品"),
+    ("毛毯", "家用紡織"),
+    ("雨衣", "戶外休閒"),
+    ("運動", "運動健身"),
+    ("瑜伽", "運動健身"),
+    ("健身", "運動健身"),
+    ("能量", "運動健身"),
+)
+
+
+def _infer_product_category(item_name: str, default: str | None = None) -> str:
+    for keyword, category in _CATEGORY_KEYWORDS:
+        if keyword in item_name:
+            return category
+    if default:
+        return default
+    return "綜合商品"
+
+
+def _random_product_code() -> str:
+    return f"{random.randint(100000, 999999):06d}"
+
+
+def _random_product_view_rate() -> float:
+    return round(random.uniform(70.0, 100.0), 2)
+
+
+def _deterministic_purchase_metadata(
+    item_name: str, purchased_at: str, *, salt: str = ""
+) -> tuple[str, float]:
+    seed_source = f"{item_name}|{purchased_at}|{salt}".encode("utf-8")
+    digest = hashlib.sha256(seed_source).digest()
+    rng = random.Random(digest)
+    code = f"{rng.randint(100000, 999999):06d}"
+    view_rate = round(rng.uniform(70.0, 100.0), 2)
+    return code, view_rate
+
+
 @dataclass
 class Purchase:
     member_id: str
@@ -46,6 +135,9 @@ class Purchase:
     unit_price: float
     quantity: float
     total_price: float
+    product_category: str
+    product_code: str
+    product_view_rate: float
 
 
 @dataclass
@@ -83,19 +175,31 @@ def _build_seed_purchases(
     start_timestamp: str,
     items: list[tuple[str, float, float]],
     member_code: str | None = None,
+    *,
+    default_category: str | None = None,
 ) -> list[dict[str, float | str]]:
     base = datetime.fromisoformat(start_timestamp)
     purchases: list[dict[str, float | str]] = []
     for index, (name, unit_price, quantity) in enumerate(items):
         scheduled = base + timedelta(days=index * 3 + (index % 4), hours=index % 5, minutes=(index * 11) % 60)
+        purchased_at = scheduled.strftime("%Y-%m-%d %H:%M")
+        product_category = _infer_product_category(name, default_category)
+        product_code, product_view_rate = _deterministic_purchase_metadata(
+            name,
+            purchased_at,
+            salt=f"{member_code or ''}-{index}",
+        )
         purchases.append(
             {
                 "member_code": member_code,
                 "item": name,
-                "purchased_at": scheduled.strftime("%Y-%m-%d %H:%M"),
+                "purchased_at": purchased_at,
                 "unit_price": float(unit_price),
                 "quantity": float(quantity),
                 "total_price": round(unit_price * quantity, 2),
+                "product_category": product_category,
+                "product_code": product_code,
+                "product_view_rate": product_view_rate,
             }
         )
     return purchases
@@ -137,6 +241,38 @@ class Database:
         ] = {}
         self._profile_history_seeded: set[str] = set()
         self._ensure_schema()
+
+    # ------------------------------------------------------------------
+    def export_sql(
+        self,
+        output_path: Path | str,
+        *,
+        include_data: bool = True,
+    ) -> Path:
+        """Export the current database schema (and optionally data) as SQL.
+
+        Args:
+            output_path: Destination file for the exported SQL script.
+            include_data: When ``True`` (default) include INSERT statements for
+                existing rows.  When ``False`` only schema statements are
+                written.
+
+        Returns:
+            The resolved :class:`~pathlib.Path` to the exported SQL file.
+        """
+
+        destination = Path(output_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+
+        with self._connect() as conn:
+            dump_lines = []
+            for statement in conn.iterdump():
+                if not include_data and statement.startswith("INSERT INTO"):
+                    continue
+                dump_lines.append(f"{statement}\n")
+
+        destination.write_text("".join(dump_lines), encoding="utf-8")
+        return destination
 
     # ------------------------------------------------------------------
     def _connect(self) -> sqlite3.Connection:
@@ -226,6 +362,9 @@ class Database:
                 "unit_price",
                 "quantity",
                 "total_price",
+                "product_category",
+                "product_code",
+                "product_view_rate",
             ]
             if purchase_columns and purchase_columns != expected_columns:
                 conn.execute("DROP TABLE IF EXISTS purchases")
@@ -241,6 +380,9 @@ class Database:
                     unit_price REAL NOT NULL,
                     quantity REAL NOT NULL,
                     total_price REAL NOT NULL,
+                    product_category TEXT NOT NULL,
+                    product_code TEXT NOT NULL,
+                    product_view_rate REAL NOT NULL,
                     FOREIGN KEY(member_id) REFERENCES members(member_id)
                 );
                 """
@@ -403,6 +545,7 @@ class Database:
                 (source_id,),
             )
             conn.commit()
+
 
         _LOGGER.info("Merged member %s into %s", source_id, target_id)
         return source_encoding, target_encoding
@@ -644,11 +787,25 @@ class Database:
         unit_price: float,
         quantity: float,
         total_price: float,
+        product_category: str | None = None,
+        product_code: str | None = None,
+        product_view_rate: float | None = None,
     ) -> None:
         if member_code is None:
-            resolved_code = self.get_member_code(member_id)
+            resolved_member_code = self.get_member_code(member_id)
         else:
-            resolved_code = member_code
+            resolved_member_code = member_code
+        resolved_category = (
+            product_category
+            if product_category
+            else _infer_product_category(item)
+        )
+        resolved_product_code = product_code or _random_product_code()
+        resolved_view_rate = (
+            float(product_view_rate)
+            if product_view_rate is not None
+            else _random_product_view_rate()
+        )
         with self._connect() as conn:
             conn.execute(
                 """
@@ -659,18 +816,24 @@ class Database:
                     item,
                     unit_price,
                     quantity,
-                    total_price
+                    total_price,
+                    product_category,
+                    product_code,
+                    product_view_rate
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     member_id,
-                    resolved_code,
+                    resolved_member_code,
                     purchased_at,
                     item,
                     float(unit_price),
                     float(quantity),
                     float(total_price),
+                    resolved_category,
+                    resolved_product_code,
+                    float(resolved_view_rate),
                 ),
             )
             conn.commit()
@@ -678,7 +841,8 @@ class Database:
     def get_purchase_history(self, member_id: str) -> list[Purchase]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT member_id, member_code, purchased_at, item, unit_price, quantity, total_price"
+                "SELECT member_id, member_code, purchased_at, item, unit_price, quantity, total_price,"
+                "        product_category, product_code, product_view_rate"
                 " FROM purchases WHERE member_id = ? ORDER BY purchased_at DESC, id DESC",
                 (member_id,),
             ).fetchall()
@@ -691,6 +855,9 @@ class Database:
                 unit_price=float(row["unit_price"]),
                 quantity=float(row["quantity"]),
                 total_price=float(row["total_price"]),
+                product_category=row["product_category"],
+                product_code=row["product_code"],
+                product_view_rate=float(row["product_view_rate"]),
             )
             for row in rows
         ]
@@ -1145,23 +1312,28 @@ class Database:
         dessert_history = _build_seed_purchases(
             "2025-01-04 10:30",
             dessert_specs,
+            default_category="甜點烘焙",
         )
         kids_history = _build_seed_purchases(
             "2025-01-05 09:20",
             kids_specs,
+            default_category="親子家庭",
         )
 
         fitness_history = _build_seed_purchases(
             "2025-01-06 07:30",
             fitness_specs,
+            default_category="運動健身",
         )
         homemaker_history = _build_seed_purchases(
             "2025-01-08 08:45",
             homemaker_specs,
+            default_category="居家生活",
         )
         health_history = _build_seed_purchases(
             "2025-01-09 09:10",
             health_specs,
+            default_category="健康養生",
         )
 
         self._profile_purchase_templates = {
@@ -1354,3 +1526,33 @@ class Database:
                 )
             conn.commit()
 
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Export the ESP32-CAM SQLite database as an SQL script."
+    )
+    parser.add_argument(
+        "database",
+        type=Path,
+        help="Path to the SQLite database file (it will be created if missing).",
+    )
+    parser.add_argument(
+        "output",
+        type=Path,
+        help="Destination path for the generated SQL file.",
+    )
+    parser.add_argument(
+        "--schema-only",
+        action="store_true",
+        help="Only export schema definitions (omit INSERT statements).",
+    )
+
+    args = parser.parse_args()
+
+    database = Database(args.database)
+    exported_path = database.export_sql(
+        args.output, include_data=not args.schema_only
+    )
+    print(f"SQL export written to {exported_path}")
