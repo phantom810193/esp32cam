@@ -572,6 +572,17 @@ span~#tab>div:first-of-type,
 .tab-content-1 table td:nth-child(2) {
     text-align: left
 }
+
+.prediction-results {
+    position: relative;
+    padding-top: 12px;
+}
+
+.prediction-window-label {
+    margin: 0 0 12px 0;
+    color: #6d6d6d;
+    font-size: 0.95em;
+}
 .purchase-history th.datetime,
 .purchase-history th.item,
 .purchase-history th.category,

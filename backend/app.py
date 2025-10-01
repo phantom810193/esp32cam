@@ -33,7 +33,8 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from .advertising import AdContext, build_ad_context
 from .ai import GeminiService, GeminiUnavailableError
 from .aws import RekognitionService
-from .database import Database, SEED_MEMBER_IDS
+from .database import Database, Purchase, SEED_MEMBER_IDS
+from .prediction import predict_next_purchases
 from .recognizer import FaceRecognizer
 
 logging.basicConfig(level=logging.INFO)
@@ -182,22 +183,27 @@ def dashboard() -> str:
                 profile = seeded_profile
                 break
 
-    purchases = []
+    purchases: list[Purchase] = []
     page = 1
     page_count = 1
     has_prev = False
     has_next = False
     total_purchases = 0
+    predicted_items = []
+    prediction_window_label: str | None = None
     if profile and member_id:
+        full_history = database.get_purchase_history(member_id)
+        prediction_result = predict_next_purchases(full_history, profile=profile)
+        predicted_items = prediction_result.items
+        prediction_window_label = prediction_result.window_label
+
         limit = 7
-        total_purchases = database.count_purchase_history(member_id)
+        total_purchases = len(full_history)
         if total_purchases:
             page_count = max(1, math.ceil(total_purchases / limit))
             page = min(max(1, requested_page), page_count)
             offset = (page - 1) * limit
-            purchases = database.get_purchase_history_page(
-                member_id, limit=limit, offset=offset
-            )
+            purchases = full_history[offset : offset + limit]
         else:
             page = 1
             page_count = 1
@@ -265,6 +271,8 @@ def dashboard() -> str:
         has_prev=has_prev,
         has_next=has_next,
         total_purchases=total_purchases,
+        predicted_items=predicted_items,
+        prediction_window_label=prediction_window_label,
     )
 
 
