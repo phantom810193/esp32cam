@@ -8,6 +8,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Iterable
 from zoneinfo import ZoneInfo
 
 from .recognizer import FaceEncoding, FaceRecognizer
@@ -727,20 +728,33 @@ class Database:
                 " FROM purchases WHERE member_id = ? ORDER BY purchased_at DESC, id DESC",
                 (member_id,),
             ).fetchall()
-        return [
-            Purchase(
-                member_id=row["member_id"],
-                member_code=row["member_code"],
-                product_category=str(row["product_category"] or ""),
-                internal_item_code=str(row["internal_item_code"] or ""),
-                item=row["item"],
-                purchased_at=row["purchased_at"],
-                unit_price=float(row["unit_price"]),
-                quantity=float(row["quantity"]),
-                total_price=float(row["total_price"]),
-            )
-            for row in rows
-        ]
+        return self._rows_to_purchases(rows)
+
+    def get_purchase_history_page(
+        self, member_id: str, limit: int, offset: int
+    ) -> list[Purchase]:
+        limit = max(0, int(limit))
+        offset = max(0, int(offset))
+        if limit == 0:
+            return []
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT member_id, member_code, product_category, internal_item_code, purchased_at, item, unit_price, quantity, total_price"
+                " FROM purchases WHERE member_id = ? ORDER BY purchased_at DESC, id DESC LIMIT ? OFFSET ?",
+                (member_id, limit, offset),
+            ).fetchall()
+        return self._rows_to_purchases(rows)
+
+    def count_purchase_history(self, member_id: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS total FROM purchases WHERE member_id = ?",
+                (member_id,),
+            ).fetchone()
+        if row is None:
+            return 0
+        return int(row["total"]) if "total" in row.keys() else int(row[0])
 
     def record_upload_event(
         self,
@@ -1422,4 +1436,21 @@ class Database:
                     (*params, row["profile_id"]),
                 )
             conn.commit()
+
+    @staticmethod
+    def _rows_to_purchases(rows: Iterable[sqlite3.Row]) -> list[Purchase]:
+        return [
+            Purchase(
+                member_id=row["member_id"],
+                member_code=row["member_code"],
+                product_category=str(row["product_category"] or ""),
+                internal_item_code=str(row["internal_item_code"] or ""),
+                item=row["item"],
+                purchased_at=row["purchased_at"],
+                unit_price=float(row["unit_price"]),
+                quantity=float(row["quantity"]),
+                total_price=float(row["total_price"]),
+            )
+            for row in rows
+        ]
 

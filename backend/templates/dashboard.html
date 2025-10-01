@@ -214,32 +214,45 @@
                         <table class="purchase-history">
                             <thead>
                                 <tr>
-                                    <th scope="col">消費日期時間</th>
-                                    <th scope="col">項目</th>
-                                    <th scope="col">單價</th>
-                                    <th scope="col">數量</th>
-                                    <th scope="col">總價</th>
+                                    <th scope="col" class="datetime">消費日期時間</th>
+                                    <th scope="col" class="item">項目</th>
+                                    <th scope="col" class="category">商品類別</th>
+                                    <th scope="col" class="numeric">單價</th>
+                                    <th scope="col" class="numeric">數量</th>
+                                    <th scope="col" class="numeric">總價</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% if purchases %}
                                     {% for purchase in purchases %}
                                         <tr>
-                                            <td>{{ purchase.purchased_at }}</td>
-                                            <td>{{ purchase.item }}</td>
-                                            <td>${{ '%.0f'|format(purchase.unit_price) }}</td>
+                                            <td class="datetime">{{ purchase.purchased_at }}</td>
+                                            <td class="item">{{ purchase.item }}</td>
+                                            <td class="category">{{ purchase.product_category or '—' }}</td>
+                                            <td class="numeric">${{ '%.0f'|format(purchase.unit_price) }}</td>
                                             {% set qty_text = ('%.2f'|format(purchase.quantity)).rstrip('0').rstrip('.') %}
-                                            <td>{{ qty_text }}</td>
-                                            <td>${{ '%.0f'|format(purchase.total_price) }}</td>
+                                            <td class="numeric">{{ qty_text }}</td>
+                                            <td class="numeric">${{ '%.0f'|format(purchase.total_price) }}</td>
                                         </tr>
                                     {% endfor %}
                                 {% else %}
                                     <tr>
-                                        <td colspan="5" class="empty-message">尚未有消費紀錄。</td>
+                                        <td colspan="6" class="empty-message">尚未有消費紀錄。</td>
                                     </tr>
                                 {% endif %}
                             </tbody>
                         </table>
+                        <div class="history-pagination" aria-label="歷史消費紀錄頁面導覽">
+                            <span class="page-status">第 {{ page }} / {{ page_count }} 頁</span>
+                            <div class="pagination-links">
+                                <a class="prev{% if not has_prev %} disabled{% endif %}"
+                                   href="{{ url_for('dashboard', member_id=resolved_member_id, page=page - 1) }}"
+                                   {% if not has_prev %}aria-disabled="true" tabindex="-1"{% endif %}>上一頁</a>
+                                <a class="next{% if not has_next %} disabled{% endif %}"
+                                   href="{{ url_for('dashboard', member_id=resolved_member_id, page=page + 1) }}"
+                                   {% if not has_next %}aria-disabled="true" tabindex="-1"{% endif %}>下一頁</a>
+                            </div>
+                        </div>
                     </div>
                     <div class="tab-content-3"><p>內容-3</p>
                     </div>
