@@ -7,8 +7,9 @@ import logging
 import mimetypes
 import os
 import time
-from datetime import datetime
 from pathlib import Path
+from .ad_vertex import generate_ad_with_vertex
+from datetime import datetime
 from time import perf_counter
 from typing import Iterable, Tuple
 from uuid import uuid4
@@ -203,6 +204,7 @@ def upload_face():
         "member_id": member_id,
         "member_code": database.get_member_code(member_id),
         "new_member": new_member,
+        # 這裡仍保留 render_ad 的 URL（但現在回 JSON）
         "ad_url": url_for("render_ad", member_id=member_id, _external=True),
         "scenario_key": scenario_key,
         "hero_image_url": hero_image_url,
@@ -256,48 +258,45 @@ def merge_members():
     ), 200
 
 
+# === 這裡開始：改成 Vertex 版 JSON 端點 + 新增圖片端點 ========================
+
 @app.get("/ad/<member_id>")
 def render_ad(member_id: str):
-    purchases = database.get_purchase_history(member_id)
-    insights = analyse_purchase_intent(purchases)
-    profile = database.get_member_profile(member_id)
+    """
+    以 Vertex (Imagen 3 + Gemini) 為該會員生成廣告素材：
+    - 回傳 JSON，包含 headline/subline/highlight、predicted_item、probability、圖片檔名等
+    - 圖片檔會輸出在 ADS_DIR/AD-<member_id>.jpg
+    """
+    ads_dir = Path(current_app.config.get("ADS_DIR") or "/srv/esp32-ads")
+    result = generate_ad_with_vertex(member_id, ads_dir)
+    return jsonify({
+        "ad": {
+            "headline": result["headline"],
+            "subline": result["subheading"],
+            "image": result["image_name"],
+            "highlight": result.get("highlight", []),
+        },
+        "member_id": member_id,
+        "predicted_item": result["item"],
+        "probability": result.get("probability"),
+        "status": "ok",
+        # 提供直接取圖的 URL
+        "image_url": url_for("ad_image", member_id=member_id, _external=True),
+    })
 
-    creative = None
-    if gemini.can_generate_ads and insights.scenario != "brand_new":
-        try:
-            creative = gemini.generate_ad_copy(
-                member_id,
-                [
-                    {
-                        "member_code": purchase.member_code,
-                        "item": purchase.item,
-                        "purchased_at": purchase.purchased_at,
-                        "unit_price": purchase.unit_price,
-                        "quantity": purchase.quantity,
-                        "total_price": purchase.total_price,
-                    }
-                    for purchase in purchases
-                ],
-                insights=insights,
-            )
-        except GeminiUnavailableError as exc:
-            logging.warning("Gemini ad generation unavailable: %s", exc)
 
-    context = build_ad_context(
-        member_id,
-        purchases,
-        insights=insights,
-        profile=profile,
-        creative=creative,
-    )
-    hero_image_url = _resolve_hero_image_url(context.scenario_key)
+@app.get("/ad-image/<member_id>")
+def ad_image(member_id: str):
+    """
+    取得該會員的廣告圖片（若檔案尚未存在會先觸發生成）。
+    """
+    ads_dir = Path(current_app.config.get("ADS_DIR") or "/srv/esp32-ads")
+    img = ads_dir / f"AD-{member_id}.jpg"
+    if not img.exists():
+        generate_ad_with_vertex(member_id, ads_dir)
+    return send_from_directory(ads_dir, img.name, mimetype="image/jpeg", as_attachment=False)
 
-    return render_template(
-        "ad.html",
-        context=context,
-        hero_image_url=hero_image_url,
-        scenario_key=context.scenario_key,
-    )
+# === 以上兩個端點為此次新增/修改重點 ==========================================
 
 
 @app.get("/ad/latest/stream")
