@@ -6,7 +6,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Iterable, Optional
+from typing import TYPE_CHECKING, Iterable, Optional, Any, Literal
 
 from google.cloud import aiplatform
 from google.api_core import exceptions as gapi_exceptions
@@ -22,6 +22,7 @@ except Exception:  # pragma: no cover
 
 if TYPE_CHECKING:
     from .advertising import PurchaseInsights  # pragma: no cover
+    from .prediction import PredictedItem  # pragma: no cover
 
 _LOGGER = logging.getLogger("backend.ai")
 
@@ -206,6 +207,8 @@ class GeminiService:
         purchases: Iterable[dict[str, object]],
         *,
         insights: "PurchaseInsights | None" = None,
+        predicted_item: "PredictedItem | dict[str, Any] | None" = None,
+        membership_status: "Literal['anonymous', 'prospect', 'member'] | None" = None,
     ) -> AdCreative:
         """Use Gemini Text to produce fresh advertising copy."""
         if not self.can_generate_ads or self._text_model is None:
@@ -215,6 +218,8 @@ class GeminiService:
         prompt_payload = json.dumps(purchase_list, ensure_ascii=False)
         insight_summary = self._describe_insights(insights)
         insight_block = f"\n情境重點：{insight_summary}" if insight_summary else ""
+        prediction_block = self._describe_prediction(predicted_item)
+        membership_instruction = self._membership_instruction(membership_status)
         prompt = f"""
 你是一位零售行銷 AI，目標是根據歷史消費紀錄產生一段動態廣告文案。
 請閱讀以下 JSON 陣列描述的購買紀錄：{prompt_payload}
@@ -225,8 +230,9 @@ class GeminiService:
   "subheading": "...副標...",
   "highlight": "...吸睛促購語..."
 }}
-文案語氣請友善、以繁體中文呈現，若沒有歷史紀錄，請推廣今日的主打商品。{insight_block}
+文案語氣請友善、以繁體中文呈現，若沒有歷史紀錄，請推廣今日的主打商品。{insight_block}{prediction_block}
 會員 ID：{member_id}
+受眾提示：{membership_instruction}
 """
         try:
             resp = self._text_model.generate_content(
@@ -272,6 +278,39 @@ class GeminiService:
             )
 
         return ""
+
+    # ------------------------------------------------------------------
+    def _describe_prediction(
+        self, predicted_item: "PredictedItem | dict[str, Any] | None"
+    ) -> str:
+        if not predicted_item:
+            return ""
+
+        if isinstance(predicted_item, dict):
+            payload = predicted_item
+        else:
+            payload = {
+                "product_code": getattr(predicted_item, "product_code", ""),
+                "product_name": getattr(predicted_item, "product_name", ""),
+                "category": getattr(predicted_item, "category", ""),
+                "category_label": getattr(predicted_item, "category_label", ""),
+                "price": getattr(predicted_item, "price", None),
+                "probability": getattr(predicted_item, "probability", None),
+                "probability_percent": getattr(predicted_item, "probability_percent", None),
+            }
+
+        return "\n主要推廣商品：" + json.dumps(payload, ensure_ascii=False)
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _membership_instruction(
+        membership_status: "Literal['anonymous', 'prospect', 'member'] | None"
+    ) -> str:
+        if membership_status == "member":
+            return "顧客已是商場會員，請強調專屬折扣、點數回饋與升級禮遇。"
+        if membership_status == "prospect":
+            return "顧客尚未加入會員，請以加入會員可立即享有的優惠與專屬禮遇為主軸。"
+        return "顧客身份未明，請維持熱情邀請並聚焦主打商品亮點。"
 
     # ------------------------------------------------------------------
     def _parse_ad_response(self, text: str) -> AdCreative:
