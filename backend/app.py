@@ -4,38 +4,42 @@ from __future__ import annotations
 
 import json
 import logging
-
-from datetime import datetime
-
-import json
 import math
 import mimetypes
+import os
+import time
+from datetime import datetime
 from io import BytesIO
-
 from pathlib import Path
+from queue import Queue
+from threading import Lock
 from time import perf_counter
 from typing import Iterable, Tuple
 from uuid import uuid4
 
-from queue import Queue
-from threading import Lock
-
 from flask import (
     Flask,
     Response,
+    abort,
+    current_app,
     jsonify,
     render_template,
     request,
-    Response,
     send_from_directory,
     stream_with_context,
     url_for,
 )
-
-
+from google.cloud import storage
 from PIL import Image, ImageOps, UnidentifiedImageError
+from werkzeug.utils import safe_join
 
-from .advertising import AdContext, build_ad_context
+from .advertising import (
+    AD_IMAGE_BY_SCENARIO,
+    AdContext,
+    analyse_purchase_intent,
+    build_ad_context,
+    derive_scenario_key,
+)
 from .ai import GeminiService, GeminiUnavailableError
 from .aws import RekognitionService
 from .database import Database, Purchase, SEED_MEMBER_IDS
