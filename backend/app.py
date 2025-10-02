@@ -164,7 +164,7 @@ class _LatestAdHub:
             queue.put(context)
 
 
-_latest_ad_hub = _LatestAdHub()
+_latest_ad_hub = _latest_ad_hub
 
 
 def _persona_label_display(profile_label: str | None) -> str | None:
@@ -654,14 +654,14 @@ def render_latest_ad():
 @app.get("/ad/latest/stream")
 def latest_ad_stream():
     def event_stream():
-        queue = _LatestAdHub().subscribe()  # 每次新的 queue
+        queue = _latest_ad_hub.subscribe()  # 每次新的 queue
         try:
             while True:
                 context = queue.get()
                 payload = json.dumps(context, ensure_ascii=False)
                 yield f"data: {payload}\n\n"
         finally:
-            _LatestAdHub().unsubscribe(queue)
+            _latest_ad_hub.unsubscribe(queue)
 
     response = Response(
         stream_with_context(event_stream()), mimetype="text/event-stream"
