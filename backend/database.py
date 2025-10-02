@@ -34,6 +34,8 @@ SEED_PROFILE_LABELS: tuple[str, ...] = (
     "wellness-gourmet",
 )
 
+SEED_PROFILE_TO_MEMBER_ID: dict[str, str] = dict(zip(SEED_PROFILE_LABELS, SEED_MEMBER_IDS))
+
 
 _TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
@@ -100,6 +102,7 @@ class ResolvedMember:
     new_member: bool
     distance: float | None
     encoding_updated: bool = False
+    auto_merged_source: str | None = None
 
 
 
@@ -376,6 +379,37 @@ class Database:
             return True
         return False
 
+    def _maybe_merge_seed_member(
+        self,
+        provisional_member_id: str,
+        *,
+        candidate_id: str | None,
+        encoding: FaceEncoding,
+    ) -> tuple[str | None, bool]:
+        canonical_id: str | None = None
+        if candidate_id and candidate_id in SEED_MEMBER_IDS:
+            canonical_id = candidate_id
+        if canonical_id is None:
+            profile = self.get_member_profile(provisional_member_id)
+            if profile and profile.profile_label in SEED_PROFILE_TO_MEMBER_ID:
+                canonical_id = SEED_PROFILE_TO_MEMBER_ID[profile.profile_label]
+        if not canonical_id or canonical_id == provisional_member_id:
+            return None, False
+        with self._connect() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM members WHERE member_id = ?", (canonical_id,)
+            ).fetchone()
+        if not exists:
+            return None, False
+        try:
+            self.merge_members(provisional_member_id, canonical_id)
+        except ValueError:
+            return None, False
+        encoding_updated = self.maybe_refresh_member_encoding(canonical_id, encoding)
+        _LOGGER.info("Auto-merged provisional member %s into canonical seed %s", provisional_member_id, canonical_id)
+        return canonical_id, encoding_updated
+
+
     def maybe_refresh_member_encoding(self, member_id: str, encoding: FaceEncoding) -> bool:
         existing = self.get_member_encoding(member_id)
         if existing is None:
@@ -426,6 +460,17 @@ class Database:
             )
 
         member_id = self.create_member(encoding, recognizer.derive_member_id(encoding))
+        canonical_id, canonical_updated = self._maybe_merge_seed_member(
+            member_id, candidate_id=candidate_id, encoding=encoding
+        )
+        if canonical_id:
+            return ResolvedMember(
+                member_id=canonical_id,
+                new_member=False,
+                distance=candidate_distance,
+                encoding_updated=canonical_updated,
+                auto_merged_source=member_id,
+            )
         _LOGGER.info("Created new member %s after failing to auto-resolve", member_id)
         return ResolvedMember(
             member_id=member_id,
@@ -1205,4 +1250,5 @@ class Database:
             )
             for row in rows
         ]
+
 

@@ -412,8 +412,16 @@ def upload_face():
         indexed_encoding = recognizer.register_face(image_bytes, member_id)
         if indexed_encoding is not None:
             database.update_member_encoding(member_id, indexed_encoding)
-    elif resolved.encoding_updated:
-        logger.info("Refreshed stored encoding for member %s", member_id)
+    else:
+        if resolved.auto_merged_source:
+            removed = recognizer.remove_member_faces(resolved.auto_merged_source)
+            if removed:
+                logger.info("Removed %d faces for provisional member %s after seed merge", removed, resolved.auto_merged_source)
+            indexed_encoding = recognizer.register_face(image_bytes, member_id)
+            if indexed_encoding is not None:
+                database.update_member_encoding(member_id, indexed_encoding)
+        if resolved.encoding_updated:
+            logger.info("Refreshed stored encoding for member %s", member_id)
 
     recognition_duration = perf_counter() - recognition_start
 

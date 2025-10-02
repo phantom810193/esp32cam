@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from backend.database import Database
+from backend.database import Database, SEED_MEMBER_IDS
 from backend.recognizer import FaceEncoding, FaceRecognizer
 
 
@@ -33,6 +33,7 @@ def test_resolve_member_id_auto_reuses_existing_member(temp_db: Database) -> Non
     assert result.member_id == member_id
     assert result.new_member is False
     assert result.encoding_updated is False
+    assert result.auto_merged_source is None
     assert result.distance == pytest.approx(0.35, rel=1e-6)
 
     with temp_db._connect() as conn:
@@ -51,6 +52,7 @@ def test_resolve_member_id_creates_new_member_when_far(temp_db: Database) -> Non
 
     assert result.new_member is True
     assert result.member_id != 'MEMEXIST002'
+    assert result.auto_merged_source is None
     assert result.distance == pytest.approx(0.6, rel=1e-6)
 
     with temp_db._connect() as conn:
@@ -72,9 +74,30 @@ def test_resolve_member_id_refreshes_encoding_from_rekognition(temp_db: Database
     assert result.member_id == member_id
     assert result.new_member is False
     assert result.encoding_updated is True
+    assert result.auto_merged_source is None
 
     stored = temp_db.get_member_encoding(member_id)
     assert stored is not None
     assert stored.signature == 'rek-sig'
     assert stored.source == 'rekognition-search'
 
+
+def test_resolve_member_id_merges_into_seed_member(temp_db: Database) -> None:
+    recognizer = FaceRecognizer(None, tolerance=0.32)
+    seed_id = SEED_MEMBER_IDS[0]
+    seed_encoding = _face_encoding(0.0, seed_id, source='seed')
+    temp_db.create_member(seed_encoding, member_id=seed_id)
+
+    candidate_encoding = _face_encoding(0.8, 'brand-new-seed')
+
+    result = temp_db.resolve_member_id(candidate_encoding, recognizer)
+
+    assert result.member_id == seed_id
+    assert result.new_member is False
+    assert result.auto_merged_source is not None
+    assert result.auto_merged_source != seed_id
+
+    with temp_db._connect() as conn:
+        rows = conn.execute('SELECT member_id FROM members').fetchall()
+    member_ids = {row[0] for row in rows}
+    assert member_ids == {seed_id}

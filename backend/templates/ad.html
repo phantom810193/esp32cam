@@ -134,6 +134,19 @@
                                 <li class="btn"><a href="{{ context.cta_href or '#' }}" title="開啟個人化廣告頁">{{ context.cta_text or '檢視生成廣告' }}</a></li>
                             </ul>
                         </div>
+                        <div class="member-offer" id="member-offer">
+                            <h3>{{ context.headline or '會員限定優惠' }}</h3>
+                            {% if context.subheading %}<p class="subheading">{{ context.subheading }}</p>{% endif %}
+                            <figure>
+                                <img src="{{ hero_image_url or url_for('static', filename='images/ads/ME0000.jpg') }}" alt="??????">
+                            </figure>
+                            {% if context.highlight %}<p class="highlight">{{ context.highlight }}</p>{% endif %}
+                            {% if context.cta_href and not context.cta_href.startswith('#') %}
+                                <a class="cta-button" href="{{ context.cta_href }}">{{ context.cta_text or '會員限定優惠' }}</a>
+                            {% else %}
+                                <p class="cta-text">{{ context.cta_text or '會員限定優惠' }}</p>
+                            {% endif %}
+                        </div>
                         <ul class="page">
                             <li class="active"><a href="#" title="第1頁">1</a></li>
                             <li><a href="#" title="第2頁">2</a></li>
