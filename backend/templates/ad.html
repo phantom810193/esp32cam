@@ -49,6 +49,7 @@
 <body>
 
 {% set context = context if context is defined else None %}
+{% set purchases = purchases if purchases is defined else (context.purchases if context and context.purchases is defined else []) %}
 {% set insights = context.insights if context and context.insights is defined else None %}
 {% set scenario = scenario_key|default(insights.scenario if insights and insights.scenario is defined else '') %}
 {% set hero_image_url = hero_url %}
@@ -110,11 +111,11 @@
       {% endif %}
     </div>
 
-    {% if context and context.purchases %}
+    {% if purchases %}
       <div class="history">
         <h2>歷史消費紀錄</h2>
         <ul>
-          {% for purchase in context.purchases %}
+          {% for purchase in purchases %}
             <li>
               <span class="item">{{ purchase.item }}</span>
               <span class="date">{{ purchase.purchased_at }}</span>
