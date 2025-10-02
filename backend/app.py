@@ -65,6 +65,8 @@ DATA_DIR = BASE_DIR / "data"
 DB_PATH = Path(os.environ.get("DB_PATH", str(DATA_DIR / "mvp.sqlite3")))
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", str(DATA_DIR / "uploads")))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+ADS_DIR = Path(os.environ.get("ADS_DIR", str(DATA_DIR / "ads")))
+ADS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 PERSONA_LABELS = {
@@ -77,7 +79,7 @@ PERSONA_LABELS = {
 
 app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
 app.config["JSON_AS_ASCII"] = False
-app.config["ADS_DIR"] = ADS_DIR  # 儲存為字串路徑
+app.config["ADS_DIR"] = str(ADS_DIR)  # 儲存為字串路徑
 app.register_blueprint(adgen_blueprint)
 
 # -----------------------------------------------------------------------------
