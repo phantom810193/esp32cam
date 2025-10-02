@@ -121,7 +121,7 @@ header h1{
     overflow: hidden;
     position: relative;
     flex: 1 1 auto;
-    height: 100%;
+    height: calc(100vh - 96px);
 }
 
 
