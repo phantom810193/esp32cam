@@ -923,407 +923,48 @@ class Database:
 
     # ------------------------------------------------------------------
     def ensure_demo_data(self) -> None:
-        """Seed deterministic purchase histories for demo members."""
+        """Load deterministic demo data from ``data/mvp.sql`` when empty."""
 
         self._profile_purchase_templates = {}
         self._profile_history_seeded.clear()
 
-        dessert_persona_items: list[tuple[str, float, float]] = [
-            ("草莓千層蛋糕", 320.0, 1),
-            ("香草可麗露禮盒", 480.0, 1),
-            ("抹茶生乳捲", 280.0, 1),
-            ("焦糖海鹽布蕾", 95.0, 2),
-            ("蜂蜜檸檬磅蛋糕", 210.0, 1),
-            ("法式莓果塔", 260.0, 1),
-            ("生巧克力布朗尼", 180.0, 2),
-            ("芒果生乳酪杯", 150.0, 2),
-            ("伯爵茶瑪德蓮", 85.0, 4),
-            ("紅絲絨杯子蛋糕", 120.0, 2),
-            ("巴斯克乳酪蛋糕", 420.0, 1),
-            ("桂花烏龍奶酪", 110.0, 2),
-            ("藍莓優格慕斯", 135.0, 2),
-            ("榛果可麗餅捲", 160.0, 2),
-            ("柚香乳酪塔", 240.0, 1),
-            ("抹茶紅豆鬆餅", 150.0, 2),
-            ("花生黑糖奶酪", 105.0, 2),
-            ("玫瑰荔枝蛋糕", 360.0, 1),
-            ("太妃焦糖蘋果塔", 280.0, 1),
-            ("香蕉核桃麵包布丁", 180.0, 2),
-            ("海鹽奶油司康", 90.0, 4),
-            ("柑橘乳酪生乳捲", 295.0, 1),
-            ("法芙娜巧克力塔", 340.0, 1),
-            ("葡萄柚優格杯", 140.0, 2),
-            ("黑糖波士頓派", 330.0, 1),
-            ("餅乾奶油杯", 95.0, 3),
-            ("草莓生乳酪塔", 260.0, 1),
-            ("伯爵奶茶布丁", 110.0, 2),
-            ("楓糖肉桂捲", 85.0, 4),
-            ("抹茶巴菲杯", 165.0, 2),
-        ]
-        dessert_lifestyle_items: list[tuple[str, float, float]] = [
-            ("精品手沖咖啡豆", 520.0, 1),
-            ("手作果醬三入組", 450.0, 1),
-            ("嚴選花草茶禮盒", 680.0, 1),
-            ("有機燕麥早餐罐", 180.0, 2),
-            ("冷萃咖啡瓶裝禮盒", 360.0, 1),
-            ("產地直送有機蔬菜箱", 880.0, 1),
-            ("季節鮮採綜合水果箱", 720.0, 1),
-            ("當季鮮採藍莓盒", 250.0, 1),
-            ("溫室小黃瓜三入組", 95.0, 1),
-            ("冷凍鮭魚切片家庭包", 560.0, 1),
-            ("家用環保洗碗精補充包", 150.0, 2),
-            ("柔感棉質廚房紙巾組", 320.0, 1),
-            ("天然海鹽烹飪罐", 150.0, 1),
-            ("舒眠香氛蠟燭", 320.0, 1),
-            ("有機鮮乳家庭箱", 260.0, 1),
-            ("無糖優酪乳六入", 220.0, 1),
-            ("不沾煎鍋28CM", 880.0, 1),
-            ("家用濾水壺", 520.0, 1),
-            ("多功能香料罐組", 360.0, 1),
-            ("全麥吐司家庭包", 120.0, 2),
-        ]
-        dessert_specs = _blend_persona_items(dessert_persona_items, dessert_lifestyle_items)
+        with self._connect() as conn:
+            try:
+                (count,) = conn.execute("SELECT COUNT(*) FROM member_profiles").fetchone()
+            except sqlite3.OperationalError:
+                count = 0
+            if count:
+                return
 
-        kids_persona_items: list[tuple[str, float, float]] = [
-            ("幼兒律動課體驗券", 680.0, 1),
-            ("親子烘焙下午茶套票", 1180.0, 1),
-            ("益智積木組", 450.0, 1),
-            ("幼幼圖卡教材", 320.0, 1),
-            ("幼兒園夏令營報名費", 5200.0, 1),
-            ("親子瑜伽月票", 1680.0, 1),
-            ("木製拼圖組", 560.0, 1),
-            ("幼兒繪本套書", 1380.0, 1),
-            ("幼兒科學實驗盒", 680.0, 1),
-            ("幼兒園延托服務時數", 420.0, 5),
-            ("兒童才藝試上課程", 780.0, 1),
-            ("親子劇場週末票", 980.0, 1),
-            ("幼兒律動課教材包", 460.0, 1),
-            ("幼兒園制服組", 890.0, 1),
-            ("家庭園遊會餐券", 350.0, 3),
-            ("學前美語體驗課", 880.0, 1),
-            ("幼兒陶土手作課", 720.0, 1),
-            ("幼兒園校車月票", 2800.0, 1),
-            ("幼兒籃球體驗營", 1650.0, 1),
-            ("兒童營養午餐組", 120.0, 10),
-            ("幼兒園畢業紀念冊預購", 550.0, 1),
-            ("親子攝影紀念套組", 2680.0, 1),
-            ("幼兒戶外探索課程", 1350.0, 1),
-            ("兒童舞蹈公演票", 880.0, 2),
-            ("幼兒安全防走失背包", 960.0, 1),
-            ("幼兒園科學週材料包", 420.0, 1),
-            ("親子閱讀早午餐套票", 920.0, 1),
-            ("幼兒園節慶禮盒", 680.0, 1),
-            ("幼兒園音樂會門票", 750.0, 2),
-            ("親子共學木工課", 1450.0, 1),
-        ]
-        kids_lifestyle_items: list[tuple[str, float, float]] = [
-            ("家庭健康維他命組", 850.0, 1),
-            ("週末市集有機蔬菜箱", 980.0, 1),
-            ("家用濾水壺替換濾芯", 450.0, 2),
-            ("智能體重計", 1650.0, 1),
-            ("無線吸塵器濾網組", 620.0, 1),
-            ("家庭常備洗衣精補充包", 320.0, 3),
-            ("旅行收納壓縮袋組", 560.0, 1),
-            ("全家早餐穀物禮盒", 420.0, 2),
-            ("季節鮮果禮盒", 880.0, 1),
-            ("家庭露營炊具套組", 1980.0, 1),
-            ("家庭號沐浴乳三入組", 360.0, 1),
-            ("親子保溫水壺雙入", 520.0, 1),
-            ("多用途餐桌防水墊", 280.0, 1),
-            ("家庭常備繃帶組", 180.0, 1),
-            ("親子戶外防曬乳", 450.0, 1),
-            ("智慧家電延長線", 320.0, 1),
-            ("客廳香氛擴香瓶", 420.0, 1),
-            ("天然洗手乳補充包", 260.0, 2),
-            ("居家整理收納箱組", 580.0, 1),
-            ("家庭號即食玉米濃湯", 150.0, 3),
-        ]
-        kids_specs = _blend_persona_items(kids_persona_items, kids_lifestyle_items)
+        sql_path = Path(__file__).resolve().parent / "data" / "mvp.sql"
+        if not sql_path.exists():  # pragma: no cover - defensive guard
+            _LOGGER.warning("Seed file %s not found; skipping demo data load", sql_path)
+            return
 
-        fitness_specs: list[tuple[str, float, float]] = [
-            ("高蛋白乳清粉", 1280.0, 1),
-            ("肌力訓練彈力帶組", 420.0, 1),
-            ("健身房月卡", 1680.0, 1),
-            ("運動機能背心", 780.0, 1),
-            ("速乾運動毛巾三入組", 360.0, 1),
-            ("低脂優格家庭箱", 480.0, 1),
-            ("能量燕麥棒禮盒", 280.0, 1),
-            ("跑步智能手錶", 3680.0, 1),
-            ("筋膜按摩滾筒", 950.0, 1),
-            ("壺鈴訓練組15KG", 1680.0, 1),
-            ("室內跳繩防滑墊", 520.0, 1),
-            ("舒肥雞胸冷凍餐", 320.0, 3),
-            ("防滑瑜珈墊", 980.0, 1),
-            ("運動壓縮襪", 420.0, 2),
-            ("健康蔬果汁禮盒", 620.0, 1),
-            ("健身料理玻璃保鮮盒組", 780.0, 1),
-            ("BCAA胺基酸飲", 680.0, 1),
-            ("登山補給凍乾水果", 360.0, 1),
-            ("強化護腕", 450.0, 1),
-            ("多功能健腹輪", 820.0, 1),
-            ("無糖豆漿箱", 360.0, 1),
-            ("健康即食藜麥包", 420.0, 2),
-            ("室內腳踏車訓練器租賃", 1980.0, 1),
-            ("全穀饅頭六入", 150.0, 2),
-            ("運動水壺雙入組", 520.0, 1),
-            ("極速冷感運動帽", 680.0, 1),
-            ("防滑健身手套", 420.0, 1),
-            ("戶外越野襪三入", 380.0, 1),
-            ("植物蛋白飲禮盒", 560.0, 1),
-            ("冷壓橄欖油家庭瓶", 680.0, 1),
-            ("有機藍莓盒", 220.0, 1),
-            ("智能體脂計", 1480.0, 1),
-            ("高纖蔬菜湯組", 360.0, 2),
-            ("雞蛋白營養飲", 420.0, 1),
-            ("運動耳機防汗版", 2980.0, 1),
-            ("夜跑LED臂帶", 320.0, 1),
-            ("山藥雞湯即食包", 260.0, 2),
-            ("家用洗碗機洗劑", 450.0, 1),
-            ("天然洗衣精補充包", 320.0, 2),
-            ("旅行收納健身包", 880.0, 1),
-            ("居家伸展彈力椅", 1350.0, 1),
-            ("碳酸鎂粉補充包", 220.0, 1),
-            ("海鹽堅果能量包", 260.0, 2),
-            ("綜合沙拉葉家庭包", 180.0, 2),
-            ("舒眠草本茶禮盒", 520.0, 1),
-            ("多功能果汁機", 2280.0, 1),
-            ("冬季保暖運動外套", 1980.0, 1),
-            ("戶外蛋白餅乾", 180.0, 2),
-            ("家用保溫餐盒", 560.0, 1),
-            ("伸展瑜珈磚", 360.0, 1),
-        ]
+        insert_statements: list[str] = []
+        for line in sql_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            stripped = line.strip()
+            if stripped.upper().startswith("INSERT "):
+                insert_statements.append(line)
+        if not insert_statements:
+            _LOGGER.warning("Seed file %s does not contain INSERT statements", sql_path)
+            return
 
-        homemaker_specs: list[tuple[str, float, float]] = [
-            ("多功能電鍋", 1680.0, 1),
-            ("家庭保鮮盒12件組", 520.0, 1),
-            ("天然洗衣精補充包", 320.0, 3),
-            ("兒童學習餐具組", 420.0, 1),
-            ("客廳防滑地墊", 680.0, 1),
-            ("智能掃地機濾網", 450.0, 1),
-            ("廚房去油劑雙入", 260.0, 1),
-            ("家庭號衛生紙箱", 320.0, 1),
-            ("有機雞蛋家庭盒", 180.0, 2),
-            ("當季蔬菜禮籃", 520.0, 1),
-            ("兒童英文繪本組", 680.0, 1),
-            ("烘焙常備粉組", 260.0, 2),
-            ("廚房紙巾超值組", 360.0, 1),
-            ("家庭常備藥品組", 480.0, 1),
-            ("保溫便當盒雙層", 420.0, 1),
-            ("兒童益智拼圖", 380.0, 1),
-            ("天然酵素清潔液", 450.0, 1),
-            ("家庭車用收納箱", 520.0, 1),
-            ("香氛洗手乳三入", 320.0, 1),
-            ("客廳抱枕套組", 420.0, 1),
-            ("烘碗機除菌濾網", 280.0, 1),
-            ("兒童室內拖鞋", 260.0, 2),
-            ("家庭急救包", 620.0, 1),
-            ("氣炸鍋烘烤紙", 150.0, 2),
-            ("親子烹飪課程券", 1280.0, 1),
-            ("冷凍餃子家庭包", 320.0, 2),
-            ("早餐穀片超值箱", 360.0, 1),
-            ("保鮮袋100入", 180.0, 1),
-            ("兒童成長牛奶", 420.0, 2),
-            ("家用滅菌噴霧", 380.0, 1),
-            ("天然蜂蜜禮盒", 560.0, 1),
-            ("客廳收納籃組", 450.0, 1),
-            ("家庭號冷凍鮭魚", 520.0, 1),
-            ("季節水果拼盤", 420.0, 1),
-            ("小家庭燒烤盤", 780.0, 1),
-            ("兒童畫畫教材組", 360.0, 1),
-            ("除濕包超值組", 280.0, 2),
-            ("家庭用吸塵器濾網", 420.0, 1),
-            ("親子桌遊禮盒", 680.0, 1),
-            ("天然醬油組", 320.0, 1),
-            ("家庭號優格桶", 280.0, 1),
-            ("舒眠草本茶", 260.0, 2),
-            ("有機米禮盒", 680.0, 1),
-            ("保暖親子毛毯", 780.0, 1),
-            ("兒童雨衣靴組", 620.0, 1),
-            ("家庭常備電池組", 360.0, 1),
-            ("廚房玻璃調味罐", 280.0, 1),
-            ("居家香氛噴霧", 450.0, 1),
-            ("蔬果保鮮盒組", 360.0, 1),
-            ("家庭烘焙模具", 320.0, 1),
-            ("親子野餐籃", 520.0, 1),
-            ("天然洗碗皂", 220.0, 2),
-        ]
-
-        health_specs: list[tuple[str, float, float]] = [
-            ("有機冷壓亞麻仁油", 620.0, 1),
-            ("高纖燕麥片禮盒", 360.0, 1),
-            ("綜合堅果禮罐", 520.0, 1),
-            ("植物基蛋白飲", 680.0, 1),
-            ("綠拿鐵冷壓汁", 260.0, 2),
-            ("益生菌粉末盒", 820.0, 1),
-            ("有機羽衣甘藍", 220.0, 2),
-            ("低溫烘焙杏仁", 360.0, 1),
-            ("糙米能量棒", 280.0, 2),
-            ("高鈣無糖豆漿", 320.0, 1),
-            ("藜麥綜合穀物飯", 380.0, 2),
-            ("低GI紫米麵包", 260.0, 2),
-            ("海藻鈣膠囊", 780.0, 1),
-            ("有機甜菜根粉", 420.0, 1),
-            ("天然莓果乾", 320.0, 2),
-            ("膳食纖維飲品", 450.0, 1),
-            ("有機小農蔬菜箱", 880.0, 1),
-            ("優格發酵菌粉", 350.0, 1),
-            ("天然蜂膠滴劑", 560.0, 1),
-            ("低溫烘焙腰果", 420.0, 1),
-            ("紅藜健康米", 420.0, 1),
-            ("綠茶多酚飲", 320.0, 2),
-            ("有機高麗菜", 160.0, 2),
-            ("全穀燕麥奶", 280.0, 2),
-            ("天然蔓越莓汁", 360.0, 2),
-            ("有機黑芝麻粉", 380.0, 1),
-            ("暖薑黑糖飲", 280.0, 2),
-            ("高蛋白豆腐組", 220.0, 2),
-            ("冷壓胡蘿蔔汁", 260.0, 2),
-            ("綠色蔬果粉", 520.0, 1),
-            ("膠原蛋白飲", 780.0, 1),
-            ("天然薄荷茶", 260.0, 2),
-            ("發芽糙米", 320.0, 2),
-            ("有機酪梨禮盒", 620.0, 1),
-            ("全植營養補充錠", 980.0, 1),
-            ("健康烤地瓜片", 180.0, 2),
-            ("有機藍莓醬", 320.0, 1),
-            ("燕麥豆奶布丁", 260.0, 2),
-            ("純淨礦泉水箱", 280.0, 1),
-            ("天然葡萄籽油", 560.0, 1),
-            ("無糖椰子水", 320.0, 2),
-            ("高纖蒟蒻麵", 280.0, 2),
-            ("有機南瓜", 180.0, 2),
-            ("保溫隨行杯", 420.0, 1),
-            ("天然洗衣粉", 320.0, 1),
-            ("香草舒眠枕噴霧", 450.0, 1),
-            ("健康烹飪蒸籠", 680.0, 1),
-            ("有機鷹嘴豆", 260.0, 2),
-            ("純素黑巧克力", 320.0, 1),
-            ("天然洗碗精", 280.0, 1),
-            ("冷壓椰子油", 520.0, 1),
-            ("有機檸檬禮盒", 360.0, 1),
-        ]
-
-        dessert_history = _build_seed_purchases(
-            "2025-01-04 10:30",
-            dessert_specs,
-            "ME0001",
-            default_category="甜點與烘焙",
-            code_prefix="DES",
-        )
-        kids_history = _build_seed_purchases(
-            "2025-01-05 09:20",
-            kids_specs,
-            "ME0002",
-            default_category="親子成長與家庭",
-            code_prefix="FAM",
-        )
-
-        fitness_history = _build_seed_purchases(
-            "2025-01-06 07:30",
-            fitness_specs,
-            "ME0003",
-            default_category="運動與體能",
-            code_prefix="FIT",
-        )
-        homemaker_history = _build_seed_purchases(
-            "2025-01-08 08:45",
-            homemaker_specs,
-            default_category="居家生活",
-            code_prefix="HOM",
-        )
-        health_history = _build_seed_purchases(
-            "2025-01-09 09:10",
-            health_specs,
-            default_category="健康食尚",
-            code_prefix="HLT",
-        )
-
-        self._profile_purchase_templates = {
-            "dessert-lover": dessert_history,
-            "family-groceries": kids_history,
-            "fitness-enthusiast": fitness_history,
-            "home-manager": homemaker_history,
-            "wellness-gourmet": health_history,
-        }
-
-        self._reset_seed_profiles()
-
-        self._seed_member_profile(
-            profile_label="dessert-lover",
-            name="林悅心",
-            member_id=None,
-            mall_member_id="ME0001",
-            member_status="有效",
-            joined_at="2021-06-12",
-            points_balance=1520,
-            gender="女",
-            birth_date="1988-07-12",
-            phone="0912-345-678",
-            email="dessertlover@example.com",
-            address="台北市信義區松壽路10號",
-            occupation="甜點教室講師",
-        )
-        self._seed_member_profile(
-            profile_label="family-groceries",
-            name="陳雅雯",
-            member_id=None,
-            mall_member_id="ME0002",
-            member_status="有效",
-            joined_at="2020-09-01",
-            points_balance=980,
-            gender="女",
-            birth_date="1990-02-08",
-            phone="0923-556-789",
-            email="familybuyer@example.com",
-            address="新北市板橋區文化路100號",
-            occupation="幼兒園老師",
-        )
-        self._seed_member_profile(
-            profile_label="fitness-enthusiast",
-            name="張智翔",
-            member_id=None,
-            mall_member_id="ME0003",
-            member_status="有效",
-            joined_at="2019-11-20",
-            points_balance=2040,
-            gender="男",
-            birth_date="1985-04-19",
-            phone="0955-112-233",
-            email="fitgoer@example.com",
-            address="台中市西屯區市政北二路88號",
-            occupation="企業健身顧問",
-        )
-        self._seed_member_profile(
-            profile_label="home-manager",
-            name="黃珮真",
-            member_id=None,
-            mall_member_id="",
-            member_status=None,
-            joined_at=None,
-            points_balance=None,
-            gender=None,
-            birth_date=None,
-            phone=None,
-            email=None,
-            address=None,
-            occupation=None,
-        )
-        self._seed_member_profile(
-            profile_label="wellness-gourmet",
-            name="吳品蓉",
-            member_id=None,
-            mall_member_id="",
-            member_status=None,
-            joined_at=None,
-            points_balance=None,
-            gender=None,
-            birth_date=None,
-            phone=None,
-            email=None,
-            address=None,
-            occupation=None,
-
-        )
+        with self._connect() as conn:
+            conn.executescript("\n".join(insert_statements))
+            face_map = {
+                "MEME0383FE3AA": "faces/dessert_lover.jpg",
+                "MEM692FFD0824": "faces/family_groceries.jpg",
+                "MEMFITNESS2025": "faces/fitness_enthusiast.jpg",
+                "MEMHOMECARE2025": "faces/home_manager.jpg",
+                "MEMHEALTH2025": "faces/wellness_gourmet.jpg",
+            }
+            for member_id, filename in face_map.items():
+                conn.execute(
+                    "UPDATE member_profiles SET first_image_filename = ? WHERE member_id = ?",
+                    (filename, member_id),
+                )
+            conn.commit()
 
     def _seed_member_history(
         self, member_id: str, purchases: list[dict[str, float | str]]

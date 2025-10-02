@@ -651,12 +651,17 @@ def render_latest_ad():
 
 
 @app.get("/ad/latest/stream")
+
 def latest_ad_stream():
     def event_stream():
-        queue = _latest_ad_hub.subscribe()  # 每次新的 queue
+        queue = _latest_ad_hub.subscribe()
         try:
             while True:
-                context = queue.get()
+                try:
+                    context = queue.get(timeout=15.0)
+                except Empty:
+                    yield "event: ping\n\n"
+                    continue
                 payload = json.dumps(context, ensure_ascii=False)
                 yield f"data: {payload}\n\n"
         finally:
@@ -1044,13 +1049,22 @@ def _profile_snapshot(
         photo_filename = profile.first_image_filename
 
     photo_url: str
+    static_candidate: str | None = None
     try:
         if photo_filename:
-            photo_url = url_for("serve_upload_image", filename=photo_filename)
+            uploads_path = UPLOAD_DIR / photo_filename
+            if uploads_path.exists():
+                photo_url = url_for("serve_upload_image", filename=photo_filename)
+            else:
+                static_candidate = photo_filename if photo_filename.startswith("images/") else f"images/{photo_filename}"
+                photo_url = url_for("static", filename=static_candidate)
         else:
             photo_url = url_for("static", filename="images/face.jpg")
     except RuntimeError:
-        photo_url = f"/uploads/{photo_filename}" if photo_filename else "/static/images/face.jpg"
+        if static_candidate:
+            photo_url = f"/static/{static_candidate}"
+        else:
+            photo_url = f"/uploads/{photo_filename}" if photo_filename else "/static/images/face.jpg"
 
     return {
         "member_id": member_id,
