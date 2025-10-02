@@ -5,6 +5,8 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Iterable, Literal
 
+MembershipStatus = Literal["anonymous", "prospect", "member"]
+
 from .ai import AdCreative
 from .database import MemberProfile, Purchase
 
@@ -39,6 +41,24 @@ AD_IMAGE_BY_SCENARIO: dict[str, str] = {
     "unregistered:homemaker": "AD0001.jpg",
 }
 
+
+def resolve_membership_status(
+    member_code: str, *, profile: MemberProfile | None = None
+) -> MembershipStatus:
+    """Determine whether the shopper is a registered member or prospect."""
+
+    if profile and getattr(profile, "mall_member_id", ""):
+        return "member"
+
+    if member_code:
+        return "member"
+
+    if profile is None:
+        return "anonymous"
+
+    return "prospect"
+
+
 @dataclass
 class PurchaseInsights:
     """Summarised shopping intent derived from historical purchases."""
@@ -65,6 +85,8 @@ class AdContext:
     purchases: list[Purchase]
     insights: PurchaseInsights
     scenario_key: str
+    predicted_item: dict[str, object] | None
+    membership_status: MembershipStatus
 
 def analyse_purchase_intent(
     purchases: Iterable[Purchase], *, new_member: bool = False
@@ -155,16 +177,24 @@ def build_ad_context(
     insights: PurchaseInsights | None = None,
     profile: MemberProfile | None = None,
     creative: AdCreative | None = None,
+    member_code: str | None = None,
+    predicted_item: dict[str, object] | None = None,
 ) -> AdContext:
     purchase_list = list(purchases)
     insights = insights or analyse_purchase_intent(purchase_list)
-    member_code = purchase_list[0].member_code if purchase_list else ""
-    greeting = _member_salutation(member_code)
-    subheading_code = _subheading_prefix(member_code)
+    resolved_member_code = member_code or (purchase_list[0].member_code if purchase_list else "")
+    membership_status = resolve_membership_status(resolved_member_code, profile=profile)
+    greeting = _member_salutation(resolved_member_code)
+    subheading_code = _subheading_prefix(resolved_member_code)
     scenario_key = derive_scenario_key(insights, profile=profile)
 
     fallback_headline, fallback_subheading, fallback_highlight = _fallback_copy(
-        greeting, subheading_code, purchase_list, insights
+        greeting,
+        subheading_code,
+        purchase_list,
+        insights,
+        predicted_item=predicted_item,
+        membership_status=membership_status,
     )
 
     if creative:
@@ -178,13 +208,15 @@ def build_ad_context(
 
     return AdContext(
         member_id=member_id,
-        member_code=member_code,
+        member_code=resolved_member_code,
         headline=headline,
         subheading=subheading,
         highlight=highlight,
         purchases=purchase_list,
         insights=insights,
         scenario_key=scenario_key,
+        predicted_item=predicted_item,
+        membership_status=membership_status,
     )
 
 def _format_quantity(quantity: float) -> str:
@@ -197,6 +229,9 @@ def _fallback_copy(
     subheading_code: str,
     purchases: list[Purchase],
     insights: PurchaseInsights,
+    *,
+    predicted_item: dict[str, object] | None = None,
+    membership_status: MembershipStatus,
 ) -> tuple[str, str, str]:
     latest_summary = _recent_purchase_summary(purchases)
 
@@ -208,22 +243,66 @@ def _fallback_copy(
         highlight = "掃描服務台 QR Code 馬上入會，今日完成註冊送咖啡招待與 120 點開卡禮！"
         return headline, subheading, highlight
 
+    predicted_name = _extract_predicted_name(predicted_item)
+    probability_text = _format_prediction_probability(
+        predicted_item, default_probability=insights.probability
+    )
+    item = (
+        predicted_name
+        or insights.recommended_item
+        or (purchases[0].item if purchases else "人氣商品")
+    )
+
     if insights.scenario == "repeat_purchase":
-        item = insights.recommended_item or (purchases[0].item if purchases else "人氣商品")
         headline = f"{greeting}，{item} 回購加碼！"
         subheading = f"{subheading_code}最近 {insights.repeat_count} 次都選擇了 {item}"
         if latest_summary:
             subheading += f"｜上次 {latest_summary}"
-        highlight = f"{item} 會員限定：第 {insights.repeat_count + 1} 件 82 折，再贈職人限定隨行包！"
+        if membership_status == "prospect":
+            discount_text = _format_discount_text(
+                predicted_item, rate=0.9, fallback_rate_label="9 折"
+            )
+            highlight = (
+                f"加入會員即可解鎖 {item} 回購禮，當日辦卡享 {discount_text}，"
+                "再送開卡點數與職人限定隨行包！"
+            )
+        else:
+            discount_text = _format_discount_text(
+                predicted_item, rate=0.82, fallback_rate_label="82 折"
+            )
+            highlight = (
+                f"{item} 會員限定：第 {insights.repeat_count + 1} 件 {discount_text}，"
+                "回櫃出示會員 QR Code 再加贈限定禮！"
+            )
         return headline, subheading, highlight
 
-    item = insights.recommended_item or (purchases[0].item if purchases else "人氣商品")
-    probability_text = _format_probability(insights.probability)
     headline = f"{greeting}，預留了你的 {item}"
     subheading = f"{subheading_code}系統預測你對 {item} 的購買機率高達 {probability_text}"
     if latest_summary:
         subheading += f"｜上次 {latest_summary}"
-    highlight = f"{item} 今日限量再享會員專屬 88 折，結帳輸入 MEMBER95 加贈點數！"
+
+    if membership_status == "prospect":
+        discount_text = _format_discount_text(
+            predicted_item, rate=0.9, fallback_rate_label="9 折"
+        )
+        highlight = (
+            f"加入會員即享 {item} 限時 {discount_text}，"
+            "今日完成綁定再送開卡禮與雙倍點數！"
+        )
+    elif membership_status == "member":
+        discount_text = _format_discount_text(
+            predicted_item, rate=0.88, fallback_rate_label="88 折"
+        )
+        highlight = (
+            f"{item} 會員專屬 {discount_text}，"
+            "結帳輸入 MEMBER88 再享升級禮！"
+        )
+    else:
+        highlight = (
+            f"{item} 今日限量再享 9 折禮遇，"
+            "現場掃碼立即領取專屬驚喜！"
+        )
+
     return headline, subheading, highlight
 
 def _recent_purchase_summary(purchases: list[Purchase]) -> str | None:
@@ -241,6 +320,51 @@ def _format_probability(probability: float) -> str:
     percentage = round(probability * 100)
     percentage = max(45, min(96, percentage))
     return f"{percentage}%"
+
+
+def _extract_predicted_name(predicted_item: dict[str, object] | None) -> str:
+    if not predicted_item:
+        return ""
+    value = predicted_item.get("product_name")
+    if value:
+        return str(value)
+    value = predicted_item.get("category_label") or predicted_item.get("product_code")
+    return str(value) if value else ""
+
+
+def _format_prediction_probability(
+    predicted_item: dict[str, object] | None, *, default_probability: float
+) -> str:
+    if predicted_item:
+        probability_percent = predicted_item.get("probability_percent")
+        if isinstance(probability_percent, (int, float)):
+            percentage = max(45, min(96, round(float(probability_percent))))
+            return f"{percentage}%"
+        probability_value = predicted_item.get("probability")
+        if isinstance(probability_value, (int, float)):
+            return _format_probability(float(probability_value))
+    return _format_probability(default_probability)
+
+
+def _format_discount_text(
+    predicted_item: dict[str, object] | None,
+    *,
+    rate: float,
+    fallback_rate_label: str,
+) -> str:
+    price_value = None
+    if predicted_item and "price" in predicted_item:
+        try:
+            price_value = float(predicted_item["price"])
+        except (TypeError, ValueError):
+            price_value = None
+
+    if price_value is None or price_value <= 0:
+        return fallback_rate_label
+
+    discounted = max(0, round(price_value * rate))
+    return f"${discounted:,.0f}"
+
 
 def _member_salutation(member_code: str) -> str:
     if member_code:

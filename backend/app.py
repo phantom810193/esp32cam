@@ -12,7 +12,7 @@ from io import BytesIO
 from pathlib import Path
 from queue import Queue
 from threading import Lock
-from time import perf_counter
+from time import perf_counter, sleep
 from typing import Iterable, Tuple
 from uuid import uuid4
 
@@ -38,12 +38,13 @@ from .advertising import (
     analyse_purchase_intent,
     build_ad_context,
     derive_scenario_key,
+    resolve_membership_status,
 )
 from .ai import GeminiService, GeminiUnavailableError
 from .aws import RekognitionService
 from .database import Database, Purchase, SEED_MEMBER_IDS
 
-from .prediction import predict_next_purchases
+from .prediction import PredictedItem, predict_next_purchases
 from .recognizer import FaceRecognizer
 from .routes import adgen_blueprint
 
@@ -165,6 +166,21 @@ def _persona_label_display(profile_label: str | None) -> str | None:
     )
 
 
+def _predicted_item_payload(item: "PredictedItem | None") -> dict[str, object] | None:
+    if item is None:
+        return None
+    return {
+        "product_code": item.product_code,
+        "product_name": item.product_name,
+        "category": item.category,
+        "category_label": item.category_label,
+        "price": item.price,
+        "view_rate_percent": item.view_rate_percent,
+        "probability": item.probability,
+        "probability_percent": item.probability_percent,
+    }
+
+
 def _serialize_ad_context(context: AdContext) -> dict[str, object]:
     return {
         "member_id": context.member_id,
@@ -172,6 +188,7 @@ def _serialize_ad_context(context: AdContext) -> dict[str, object]:
         "headline": context.headline,
         "subheading": context.subheading,
         "highlight": context.highlight,
+        "membership_status": context.membership_status,
         "purchases": [
             {
                 "item": purchase.item,
@@ -184,17 +201,61 @@ def _serialize_ad_context(context: AdContext) -> dict[str, object]:
             }
             for purchase in context.purchases
         ],
+        "predicted_item": context.predicted_item,
     }
+
+
+def _build_stream_payload(
+    member_id: str,
+    context_data: dict[str, object],
+    *,
+    event_id: int | None = None,
+) -> dict[str, object]:
+    payload = dict(context_data)
+    payload["member_id"] = member_id
+    payload.setdefault("status", "ok")
+    payload.setdefault("ad_url", url_for("render_ad", member_id=member_id, _external=True))
+    if event_id is not None:
+        payload["event_id"] = event_id
+    return payload
 
 _existing_event = database.get_latest_upload_event()
 if _existing_event is not None:
-    _existing_purchases = database.get_purchase_history(_existing_event.member_id)
+    _existing_member_id = _existing_event.member_id
+    _existing_purchases = database.get_purchase_history(_existing_member_id)
+    _existing_profile = database.get_member_profile(_existing_member_id)
+    _existing_insights = analyse_purchase_intent(_existing_purchases)
+    _existing_member_code = database.get_member_code(_existing_member_id)
+    _existing_prediction = predict_next_purchases(
+        _existing_purchases,
+        profile=_existing_profile,
+        insights=_existing_insights,
+        limit=5,
+    )
+    _existing_top = _existing_prediction.items[0] if _existing_prediction.items else None
+    _existing_payload = _predicted_item_payload(_existing_top)
     _existing_context = build_ad_context(
-        _existing_event.member_id, _existing_purchases
+        _existing_member_id,
+        _existing_purchases,
+        insights=_existing_insights,
+        profile=_existing_profile,
+        member_code=_existing_member_code,
+        predicted_item=_existing_payload,
     )
     _latest_ad_hub.publish(_serialize_ad_context(_existing_context))
 
-    del _existing_context, _existing_event, _existing_purchases
+    del (
+        _existing_context,
+        _existing_event,
+        _existing_member_id,
+        _existing_purchases,
+        _existing_profile,
+        _existing_insights,
+        _existing_member_code,
+        _existing_prediction,
+        _existing_top,
+        _existing_payload,
+    )
 
 
 
@@ -361,6 +422,16 @@ def upload_face():
     purchases = database.get_purchase_history(member_id)
     insights = analyse_purchase_intent(purchases, new_member=new_member)
     profile = database.get_member_profile(member_id)
+    member_code = database.get_member_code(member_id)
+    membership_status = resolve_membership_status(member_code, profile=profile)
+    prediction = predict_next_purchases(
+        purchases,
+        profile=profile,
+        insights=insights,
+        limit=5,
+    )
+    top_prediction = prediction.items[0] if prediction.items else None
+    predicted_payload = _predicted_item_payload(top_prediction)
 
     # 只有非 brand_new 才呼叫 LLM 產生文案
     creative = None
@@ -382,12 +453,22 @@ def upload_face():
                     for purchase in purchases
                 ],
                 insights=insights,
+                predicted_item=top_prediction,
+                membership_status=membership_status,
             )
         except GeminiUnavailableError as exc:
             logging.warning("Gemini ad generation unavailable: %s", exc)
 
-    context = build_ad_context(member_id, purchases, creative=creative)
-    _latest_ad_hub.publish(_serialize_ad_context(context))
+    context = build_ad_context(
+        member_id,
+        purchases,
+        insights=insights,
+        profile=profile,
+        creative=creative,
+        member_code=member_code,
+        predicted_item=predicted_payload,
+    )
+    context_data = _serialize_ad_context(context)
 
     ad_generation_duration = perf_counter() - ad_generation_start
 
@@ -404,19 +485,30 @@ def upload_face():
     )
     stale_images = database.cleanup_upload_events(keep_latest=1)
     _purge_upload_images(stale_images)
+    latest_event = database.get_latest_upload_event()
+    event_id = latest_event.id if latest_event is not None else None
 
     scenario_key = derive_scenario_key(insights, profile=profile)
     hero_image_url = _resolve_hero_image_url(scenario_key)
 
+    stream_payload = _build_stream_payload(
+        member_id,
+        context_data,
+        event_id=event_id,
+    )
+    _latest_ad_hub.publish(stream_payload)
+
     payload = {
         "status": "ok",
         "member_id": member_id,
-        "member_code": database.get_member_code(member_id),
+        "member_code": member_code,
         "new_member": new_member,
         "ad_url": url_for("render_ad", member_id=member_id, _external=True),
         "scenario_key": scenario_key,
         "hero_image_url": hero_image_url,
     }
+    if event_id is not None:
+        payload["event_id"] = event_id
     if distance is not None:
         payload["distance"] = distance
     return jsonify(payload), 201 if new_member else 200
@@ -471,27 +563,39 @@ def render_ad(member_id: str):
     purchases = database.get_purchase_history(member_id)
     insights = analyse_purchase_intent(purchases)
     profile = database.get_member_profile(member_id)
+    member_code = database.get_member_code(member_id)
+    membership_status = resolve_membership_status(member_code, profile=profile)
+    prediction = predict_next_purchases(
+        purchases,
+        profile=profile,
+        insights=insights,
+        limit=5,
+    )
+    top_prediction = prediction.items[0] if prediction.items else None
+    predicted_payload = _predicted_item_payload(top_prediction)
 
     creative = None
     if gemini.can_generate_ads and insights.scenario != "brand_new":
         try:
-                creative = gemini.generate_ad_copy(
-                    member_id,
-                    [
-                        {
-                            "member_code": purchase.member_code,
-                            "product_category": purchase.product_category,
-                            "internal_item_code": purchase.internal_item_code,
-                            "item": purchase.item,
-                            "purchased_at": purchase.purchased_at,
-                            "unit_price": purchase.unit_price,
-                            "quantity": purchase.quantity,
-                            "total_price": purchase.total_price,
-                        }
-                        for purchase in purchases
-                    ],
-                )
-
+            creative = gemini.generate_ad_copy(
+                member_id,
+                [
+                    {
+                        "member_code": purchase.member_code,
+                        "product_category": purchase.product_category,
+                        "internal_item_code": purchase.internal_item_code,
+                        "item": purchase.item,
+                        "purchased_at": purchase.purchased_at,
+                        "unit_price": purchase.unit_price,
+                        "quantity": purchase.quantity,
+                        "total_price": purchase.total_price,
+                    }
+                    for purchase in purchases
+                ],
+                insights=insights,
+                predicted_item=top_prediction,
+                membership_status=membership_status,
+            )
         except GeminiUnavailableError as exc:
             logging.warning("Gemini ad generation unavailable: %s", exc)
 
@@ -501,6 +605,8 @@ def render_ad(member_id: str):
         insights=insights,
         profile=profile,
         creative=creative,
+        member_code=member_code,
+        predicted_item=predicted_payload,
     )
     hero_image_url = _resolve_hero_image_url(context.scenario_key)
 
@@ -524,13 +630,76 @@ def render_latest_ad():
 
 @app.get("/ad/latest/stream")
 def latest_ad_stream():
+    if _latest_ad_hub.snapshot() is None:
+        latest_event = database.get_latest_upload_event()
+        if latest_event is not None:
+            member_id = latest_event.member_id
+            purchases = database.get_purchase_history(member_id)
+            insights = analyse_purchase_intent(purchases)
+            profile = database.get_member_profile(member_id)
+            member_code = database.get_member_code(member_id)
+            prediction = predict_next_purchases(
+                purchases,
+                profile=profile,
+                insights=insights,
+                limit=5,
+            )
+            top_prediction = prediction.items[0] if prediction.items else None
+            predicted_payload = _predicted_item_payload(top_prediction)
+            context = build_ad_context(
+                member_id,
+                purchases,
+                insights=insights,
+                profile=profile,
+                member_code=member_code,
+                predicted_item=predicted_payload,
+            )
+            context_data = _serialize_ad_context(context)
+            stream_payload = _build_stream_payload(
+                member_id,
+                context_data,
+                event_id=latest_event.id,
+            )
+            _latest_ad_hub.publish(stream_payload)
+
+    once_flag = request.args.get("once", "").strip().lower()
+    run_once = once_flag in {"1", "true", "yes"}
+    interval_param = request.args.get("interval", "").strip()
+    interval: float | None = None
+    if interval_param:
+        try:
+            interval = float(interval_param)
+        except ValueError:
+            return jsonify({"error": "Invalid interval"}), 400
+        if interval <= 0:
+            return jsonify({"error": "Invalid interval"}), 400
+
     def event_stream():
         queue = _latest_ad_hub.subscribe()
         try:
             while True:
                 context = queue.get()
-                payload = json.dumps(context, ensure_ascii=False)
+                base = dict(context)
+                member_id = str(base.get("member_id", ""))
+                event_id = base.get("event_id")
+                if isinstance(event_id, int):
+                    event_id_int = event_id
+                else:
+                    try:
+                        event_id_int = int(event_id)
+                    except (TypeError, ValueError):
+                        event_id_int = None
+                enriched = _build_stream_payload(
+                    member_id,
+                    base,
+                    event_id=event_id_int,
+                )
+                payload = json.dumps(enriched, ensure_ascii=False)
                 yield f"data: {payload}\n\n"
+                if run_once:
+                    break
+                if interval is not None:
+                    sleep(interval)
         finally:
             _latest_ad_hub.unsubscribe(queue)
 
