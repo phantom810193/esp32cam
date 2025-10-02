@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <title>{{ page_title|default('動態廣告看板') }}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="refresh" content="{{ refresh_sec|default(10) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/ad-board.css') }}">
+  </head>
+  <body class="ad-board">
+    {% set template_id = template_id or context.template_id %}
+    {% set hero_url = hero_image_url or url_for('static', filename='images/ads/ME0000.jpg') %}
+    <article id="ad-card" class="ad-card {{ template_id }}" style="background-image: url('{{ hero_url }}');">
+      <div class="copy">
+        <p class="headline">{{ context.headline }}</p>
+        <p class="subheading">{{ context.subheading }}</p>
+        <p class="highlight">{{ context.highlight }}</p>
+      </div>
+      {% if context.cta_text %}
+      <div class="cta">
+        <a href="{{ context.cta_href or '#cta' }}">{{ context.cta_text }}</a>
+      </div>
+      {% endif %}
+    </article>
+  </body>
+</html>
