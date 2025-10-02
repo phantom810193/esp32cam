@@ -1,4 +1,5 @@
 BEGIN TRANSACTION;
+DROP TABLE IF EXISTS member_profiles;
 CREATE TABLE member_profiles (
                     profile_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     profile_label TEXT NOT NULL UNIQUE,
@@ -22,6 +23,10 @@ INSERT INTO "member_profiles" VALUES(2,'family-groceries','陳雅雯','MEM692FFD
 INSERT INTO "member_profiles" VALUES(3,'fitness-enthusiast','張智翔','MEMFITNESS2025','ME0003','有效','2019-11-20',2040.0,'男','1985-04-19','0955-112-233','fitgoer@example.com','台中市西屯區市政北二路88號','企業健身顧問',NULL);
 INSERT INTO "member_profiles" VALUES(4,'home-manager','黃珮真','MEMHOMECARE2025','',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL);
 INSERT INTO "member_profiles" VALUES(5,'wellness-gourmet','吳品蓉','MEMHEALTH2025','',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL);
+INSERT INTO "member_profiles" VALUES(6,'staging-slot-01',NULL,NULL,NULL,'有效',NULL,0.0,NULL,NULL,NULL,NULL,NULL,NULL,NULL);
+INSERT INTO "member_profiles" VALUES(7,'staging-slot-02',NULL,NULL,NULL,'有效',NULL,0.0,NULL,NULL,NULL,NULL,NULL,NULL,NULL);
+INSERT INTO "member_profiles" VALUES(8,'staging-slot-03',NULL,NULL,NULL,'有效',NULL,0.0,NULL,NULL,NULL,NULL,NULL,NULL,NULL);
+DROP TABLE IF EXISTS members;
 CREATE TABLE members (
                     member_id TEXT PRIMARY KEY,
                     encoding_json TEXT NOT NULL
@@ -31,6 +36,7 @@ INSERT INTO "members" VALUES('MEM692FFD0824','{"vector": [0.0, 0.0, 0.0, 0.0, 0.
 INSERT INTO "members" VALUES('MEMFITNESS2025','{"vector": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "signature": "MEMFITNESS2025", "source": "seed"}');
 INSERT INTO "members" VALUES('MEMHOMECARE2025','{"vector": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "signature": "MEMHOMECARE2025", "source": "seed"}');
 INSERT INTO "members" VALUES('MEMHEALTH2025','{"vector": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "signature": "MEMHEALTH2025", "source": "seed"}');
+DROP TABLE IF EXISTS purchases;
 CREATE TABLE purchases (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     member_id TEXT NOT NULL,
@@ -549,6 +555,7 @@ INSERT INTO "purchases" VALUES(756,'MEMHOMECARE2025','','居家用品','HOM-S250
 INSERT INTO "purchases" VALUES(757,'MEMFITNESS2025','ME0003','運動用品','FIT-S25023','2025-09-30 18:35','健身手套',615.0,1.0,615.0);
 INSERT INTO "purchases" VALUES(758,'MEMHEALTH2025','','健康食品','HLT-S25034','2025-09-30 21:50','有機紅蘿蔔汁',255.0,1.0,255.0);
 
+DROP TABLE IF EXISTS upload_events;
 CREATE TABLE upload_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     created_at TEXT NOT NULL,
@@ -561,6 +568,6 @@ CREATE TABLE upload_events (
                     FOREIGN KEY(member_id) REFERENCES members(member_id)
                 );
 DELETE FROM "sqlite_sequence";
-INSERT INTO "sqlite_sequence" VALUES('member_profiles',5);
+INSERT INTO "sqlite_sequence" VALUES('member_profiles',8);
 INSERT INTO "sqlite_sequence" VALUES('purchases',758);
 COMMIT;
