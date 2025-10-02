@@ -10,7 +10,7 @@ import os
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
-from queue import Queue
+from queue import Queue, Empty
 from threading import Lock
 from time import perf_counter
 from typing import Any, Iterable, Mapping, Tuple, Literal
