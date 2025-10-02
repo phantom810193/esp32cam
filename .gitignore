@@ -39,3 +39,5 @@ curl.exe
 backup_*/
 curl
 curl.exe
+!backend/data/uploads/.gitkeep
+!srv/esp32-ads/.gitkeep
