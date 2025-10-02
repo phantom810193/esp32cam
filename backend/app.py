@@ -67,7 +67,6 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 ADS_DIR = Path(os.environ.get("ADS_DIR", str(DATA_DIR / "ads")))
 ADS_DIR.mkdir(parents=True, exist_ok=True)
 
-REKOG_RESET = os.environ.get("REKOG_RESET", "").strip().lower() in {"1", "true", "yes"}
 
 
 PERSONA_LABELS = {
@@ -91,22 +90,15 @@ gemini = GeminiService()
 rekognition = RekognitionService()
 
 def _maybe_prepare_rekognition() -> None:
-    """預設不重置；只有 REKOG_RESET=1 時才清空重建。否則僅確保存在。"""
+    """Reset the Rekognition collection on every startup to match the database."""
     if not getattr(rekognition, "can_describe_faces", False):
         logging.info("Rekognition not available; face features disabled")
         return
     try:
-        if REKOG_RESET:
-            if rekognition.reset_collection():
-                logging.warning("Amazon Rekognition collection reset for a clean start (REKOG_RESET=1)")
-            else:
-                logging.warning("Amazon Rekognition collection reset requested but failed; continuing")
+        if rekognition.reset_collection():
+            logging.info("Amazon Rekognition collection reset for a clean start")
         else:
-            # 輕量動作：確保 collection 存在即可（若你的 service 沒有 ensure_*，可安全略過）
-            ensure_fn = getattr(rekognition, "ensure_collection", None)
-            if callable(ensure_fn):
-                ensure_fn()
-                logging.info("Amazon Rekognition collection ensured (no reset)")
+            logging.warning("Amazon Rekognition collection reset requested but failed; continuing")
     except Exception as exc:  # 安全防護，避免啟動因雲端初始化失敗而崩潰
         logging.warning("Rekognition prepare step failed: %s", exc)
 
