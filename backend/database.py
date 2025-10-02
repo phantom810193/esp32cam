@@ -1251,7 +1251,7 @@ class Database:
         self._seed_member_profile(
             profile_label="dessert-lover",
             name="林悅心",
-            member_id=None,
+            member_id="MEME0383FE3AA",
             mall_member_id="ME0001",
             member_status="有效",
             joined_at="2021-06-12",
@@ -1266,7 +1266,7 @@ class Database:
         self._seed_member_profile(
             profile_label="family-groceries",
             name="陳雅雯",
-            member_id=None,
+            member_id="MEM692FFD0824",
             mall_member_id="ME0002",
             member_status="有效",
             joined_at="2020-09-01",
@@ -1281,7 +1281,7 @@ class Database:
         self._seed_member_profile(
             profile_label="fitness-enthusiast",
             name="張智翔",
-            member_id=None,
+            member_id="MEMFITNESS2025",
             mall_member_id="ME0003",
             member_status="有效",
             joined_at="2019-11-20",
@@ -1296,7 +1296,7 @@ class Database:
         self._seed_member_profile(
             profile_label="home-manager",
             name="黃珮真",
-            member_id=None,
+            member_id="MEMHOMECARE2025",
             mall_member_id="",
             member_status=None,
             joined_at=None,
@@ -1311,7 +1311,7 @@ class Database:
         self._seed_member_profile(
             profile_label="wellness-gourmet",
             name="吳品蓉",
-            member_id=None,
+            member_id="MEMHEALTH2025",
             mall_member_id="",
             member_status=None,
             joined_at=None,
@@ -1324,6 +1324,15 @@ class Database:
             occupation=None,
 
         )
+
+        for member_id, history in (
+            ("MEME0383FE3AA", dessert_history),
+            ("MEM692FFD0824", kids_history),
+            ("MEMFITNESS2025", fitness_history),
+            ("MEMHOMECARE2025", homemaker_history),
+            ("MEMHEALTH2025", health_history),
+        ):
+            self._seed_member_history(member_id, history)
 
     def _seed_member_history(
         self, member_id: str, purchases: list[dict[str, float | str]]
