@@ -1,9 +1,9 @@
-"""Business logic to transform database rows into advertising copy."""
+"""Business logic to transform database rows into advertisement board payloads."""
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from dataclasses import dataclass
-from typing import Any, Iterable, Literal, Mapping, Optional
+from dataclasses import dataclass, field
+from typing import Any, Iterable, Literal, Mapping, Optional, Sequence
 
 from .ai import AdCreative
 from .database import MemberProfile, Purchase
@@ -35,6 +35,7 @@ CTA_MEMBER_OFFER = "會員限定優惠立即領取"
 CTA_DISCOVER = "立即了解活動"
 
 
+
 @dataclass
 class PurchaseInsights:
     """Summarised shopping intent derived from historical purchases."""
@@ -55,7 +56,7 @@ class PurchaseInsights:
 
 @dataclass
 class AdContext:
-    """Final payload used by the front-end advertisement board."""
+    """Final payload consumed by the kiosk front-end."""
 
     member_id: str
     member_code: str
@@ -66,10 +67,14 @@ class AdContext:
     audience: Literal["new", "guest", "member"]
     purchases: list[Purchase]
     insights: PurchaseInsights | None
-    predicted: Mapping[str, Any] | None
-    cta_text: str | None
-    cta_href: str | None
-    scenario_key: str
+    predicted: Mapping[str, Any] | None = None
+    predicted_candidates: list[Mapping[str, Any]] = field(default_factory=list)
+    cta_text: str | None = None
+    cta_href: str | None = None
+    scenario_key: str = "brand_new"
+    profile: Mapping[str, Any] | None = None
+    timings: Mapping[str, Any] | None = None
+    detected_at: str | None = None
 
 
 def analyse_purchase_intent(
@@ -158,9 +163,13 @@ def build_ad_context(
     *,
     insights: PurchaseInsights | None = None,
     profile: MemberProfile | None = None,
+    profile_snapshot: Mapping[str, Any] | None = None,
     creative: AdCreative | None = None,
     predicted_item: Mapping[str, Any] | None = None,
+    prediction_items: Sequence[Mapping[str, Any] | Any] | None = None,
     audience: Literal["new", "guest", "member"] = "guest",
+    timings: Mapping[str, Any] | None = None,
+    detected_at: str | None = None,
     cta_override: str | None = None,
 ) -> AdContext:
     purchase_list = list(purchases)
@@ -173,6 +182,8 @@ def build_ad_context(
         member_code = profile.mall_member_id
 
     normalized_prediction = _normalise_prediction(predicted_item)
+    candidate_list = _normalise_prediction_list(prediction_items)
+
     template_id = _select_template_id(audience, normalized_prediction)
     scenario_key = derive_scenario_key(
         insights,
@@ -209,6 +220,8 @@ def build_ad_context(
         if cta_text is None:
             cta_text = CTA_MEMBER_OFFER
 
+    profile_dict = profile_snapshot or _profile_to_dict(profile)
+
     return AdContext(
         member_id=member_id,
         member_code=member_code,
@@ -220,9 +233,13 @@ def build_ad_context(
         purchases=purchase_list,
         insights=insights,
         predicted=normalized_prediction,
+        predicted_candidates=candidate_list,
         cta_text=cta_text,
         cta_href=cta_href,
         scenario_key=scenario_key,
+        profile=profile_dict,
+        timings=timings,
+        detected_at=detected_at,
     )
 
 
@@ -245,7 +262,9 @@ def _select_template_id(
     return DEFAULT_TEMPLATE_ID
 
 
-def _normalise_prediction(predicted: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
+def _normalise_prediction(
+    predicted: Mapping[str, Any] | Any | None,
+) -> Mapping[str, Any] | None:
     if predicted is None:
         return None
 
@@ -258,6 +277,7 @@ def _normalise_prediction(predicted: Mapping[str, Any] | None) -> Mapping[str, A
             "category": getattr(predicted, "category", None),
             "category_label": getattr(predicted, "category_label", None),
             "price": getattr(predicted, "price", None),
+            "view_rate_percent": getattr(predicted, "view_rate_percent", None),
             "probability": getattr(predicted, "probability", None),
             "probability_percent": getattr(predicted, "probability_percent", None),
         }
@@ -270,6 +290,19 @@ def _normalise_prediction(predicted: Mapping[str, Any] | None) -> Mapping[str, A
             base.pop("probability_percent", None)
 
     return {key: value for key, value in base.items() if value is not None}
+
+
+def _normalise_prediction_list(
+    items: Sequence[Mapping[str, Any] | Any] | None,
+) -> list[Mapping[str, Any]]:
+    if not items:
+        return []
+    normalized: list[Mapping[str, Any]] = []
+    for item in items:
+        value = _normalise_prediction(item)
+        if value:
+            normalized.append(value)
+    return normalized
 
 
 def _normalise_category(value: str | None) -> str:
@@ -289,6 +322,28 @@ def _infer_category_from_name(name: str | None) -> str:
     if any(keyword in lowered for keyword in ("健身", "運動", "能量", "瑜珈", "protein")):
         return "fitness"
     return ""
+
+
+def _profile_to_dict(profile: MemberProfile | None) -> Mapping[str, Any] | None:
+    if profile is None:
+        return None
+
+    return {
+        "name": profile.name,
+        "member_id": profile.member_id,
+        "member_code": profile.mall_member_id,
+        "member_status": profile.member_status,
+        "joined_at": profile.joined_at,
+        "points_balance": profile.points_balance,
+        "gender": profile.gender,
+        "birth_date": profile.birth_date,
+        "phone": profile.phone,
+        "email": profile.email,
+        "address": profile.address,
+        "occupation": profile.occupation,
+        "profile_label": profile.profile_label,
+        "first_image_filename": profile.first_image_filename,
+    }
 
 
 def _fallback_copy(

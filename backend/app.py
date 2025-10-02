@@ -218,11 +218,43 @@ def _serialize_ad_context(context: AdContext) -> dict[str, object]:
 _existing_event = database.get_latest_upload_event()
 if _existing_event is not None:
     _existing_purchases = database.get_purchase_history(_existing_event.member_id)
+    _existing_profile = database.get_member_profile(_existing_event.member_id)
+    _existing_prediction_items: list[Any] = []
+    try:
+        _existing_prediction = predict_next_purchases(_existing_purchases, profile=_existing_profile)
+        if getattr(_existing_prediction, 'items', None):
+            _existing_prediction_items = list(_existing_prediction.items)
+    except Exception as exc:  # pragma: no cover - defensive
+        logging.warning('Prediction pipeline unavailable for %s during warmup: %s', _existing_event.member_id, exc)
+        _existing_prediction_items = []
+
+    _existing_profile_snapshot = _profile_snapshot(
+        _existing_profile,
+        member_id=_existing_event.member_id,
+        image_filename=getattr(_existing_event, 'image_filename', None),
+    )
+    _existing_timings = {
+        'upload': getattr(_existing_event, 'upload_duration', None),
+        'recognition': getattr(_existing_event, 'recognition_duration', None),
+        'generation': getattr(_existing_event, 'ad_duration', None),
+        'total': getattr(_existing_event, 'total_duration', None),
+    }
     _existing_context = build_ad_context(
-        _existing_event.member_id, _existing_purchases
+        _existing_event.member_id,
+        _existing_purchases,
+        profile=_existing_profile,
+        profile_snapshot=_existing_profile_snapshot,
+        prediction_items=_existing_prediction_items,
+        audience=_determine_audience(
+            new_member=False,
+            profile=_existing_profile,
+            purchases=_existing_purchases,
+        ),
+        timings=_existing_timings,
+        detected_at=getattr(_existing_event, 'created_at', None),
     )
     _latest_ad_hub.publish(_serialize_ad_context(_existing_context))
-    del _existing_context, _existing_event, _existing_purchases
+    del (_existing_context, _existing_event, _existing_purchases, _existing_profile, _existing_prediction_items, _existing_profile_snapshot, _existing_timings)
 
 
 @app.get("/")
@@ -390,16 +422,20 @@ def upload_face():
     insights = analyse_purchase_intent(purchases, new_member=new_member)
     profile = database.get_member_profile(member_id)
 
+
     audience = _determine_audience(new_member=new_member, profile=profile, purchases=purchases)
-    predicted_dict = None
+    prediction_items: list[Any] = []
+    predicted_dict: dict[str, Any] | None = None
     try:
         prediction_result = predict_next_purchases(purchases, profile=profile, insights=insights)
-        predicted_item = prediction_result.items[0] if getattr(prediction_result, 'items', None) else None
-        predicted_dict = _prediction_to_dict(predicted_item)
+        if getattr(prediction_result, "items", None):
+            prediction_items = list(prediction_result.items)
+            predicted_dict = _prediction_to_dict(prediction_items[0])
     except Exception as exc:
         logging.warning('Prediction pipeline unavailable for %s: %s', member_id, exc)
+        prediction_items = []
         predicted_dict = None
-
+    
     creative = None
     if gemini.can_generate_ads and audience != "new":
         try:
@@ -424,23 +460,43 @@ def upload_face():
             )
         except GeminiUnavailableError as exc:
             logging.warning("Gemini ad generation unavailable: %s", exc)
-
+    
+    ad_generation_duration = perf_counter() - ad_generation_start
+    
+    image_filename = _persist_upload_image(member_id, image_bytes, mime_type)
+    timings_snapshot = {
+        "upload": round(upload_duration, 3),
+        "recognition": round(recognition_duration, 3),
+        "generation": round(ad_generation_duration, 3),
+    }
+    detected_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    profile_snapshot = _profile_snapshot(
+        profile,
+        member_id=member_id,
+        image_filename=image_filename,
+    )
+    
     context = build_ad_context(
         member_id,
         purchases,
         insights=insights,
         profile=profile,
+        profile_snapshot=profile_snapshot,
         creative=creative,
         predicted_item=predicted_dict,
+        prediction_items=prediction_items,
         audience=audience,
+        timings=timings_snapshot,
+        detected_at=detected_at,
     )
-    _latest_ad_hub.publish(_serialize_ad_context(context))
-
-    ad_generation_duration = perf_counter() - ad_generation_start
-
+    
     total_duration = perf_counter() - overall_start
-
-    image_filename = _persist_upload_image(member_id, image_bytes, mime_type)
+    timings_snapshot["total"] = round(total_duration, 3)
+    context.timings = timings_snapshot
+    
+    _latest_ad_hub.publish(_serialize_ad_context(context))
+    
     database.record_upload_event(
         member_id=member_id,
         image_filename=image_filename,
@@ -451,7 +507,6 @@ def upload_face():
     )
     stale_images = database.cleanup_upload_events(keep_latest=1)
     _purge_upload_images(stale_images)
-
     hero_image_url = _resolve_template_image(context.template_id)
     payload = {
         "status": "ok",
@@ -574,6 +629,10 @@ def render_ad(member_id: str):
     return render_template(
         "ad.html",
         context=context,
+        profile=context.profile,
+        prediction_items=context.predicted_candidates,
+        timings=context.timings,
+        purchases=context.purchases,
         hero_image_url=hero_image_url,
         scenario_key=context.scenario_key,
         template_id=context.template_id,
@@ -586,7 +645,8 @@ def render_latest_ad():
     context = _latest_ad_hub.snapshot()
     return render_template(
         "ad_latest.html",
-        context=context,
+        context=context or {},
+        profile=(context or {}).get("profile") if context else None,
         stream_url=url_for("latest_ad_stream"),
     )
 
@@ -972,6 +1032,45 @@ def _prediction_to_dict(item: Any) -> dict[str, Any] | None:
         }
     cleaned = {key: value for key, value in base.items() if value is not None}
     return cleaned or None
+
+
+def _profile_snapshot(
+    profile: MemberProfile | None,
+    *,
+    member_id: str,
+    image_filename: str | None = None,
+) -> dict[str, Any]:
+    photo_filename = image_filename
+    if not photo_filename and profile and profile.first_image_filename:
+        photo_filename = profile.first_image_filename
+
+    photo_url: str
+    try:
+        if photo_filename:
+            photo_url = url_for("serve_upload_image", filename=photo_filename)
+        else:
+            photo_url = url_for("static", filename="images/face.jpg")
+    except RuntimeError:
+        photo_url = f"/uploads/{photo_filename}" if photo_filename else "/static/images/face.jpg"
+
+    return {
+        "member_id": member_id,
+        "member_code": getattr(profile, "mall_member_id", None) if profile else None,
+        "name": getattr(profile, "name", None) if profile else None,
+        "member_status": getattr(profile, "member_status", None) if profile else None,
+        "joined_at": getattr(profile, "joined_at", None) if profile else None,
+        "points_balance": getattr(profile, "points_balance", None) if profile else None,
+        "gender": getattr(profile, "gender", None) if profile else None,
+        "birth_date": getattr(profile, "birth_date", None) if profile else None,
+        "phone": getattr(profile, "phone", None) if profile else None,
+        "email": getattr(profile, "email", None) if profile else None,
+        "address": getattr(profile, "address", None) if profile else None,
+        "occupation": getattr(profile, "occupation", None) if profile else None,
+        "profile_label": getattr(profile, "profile_label", None) if profile else None,
+        "photo_url": photo_url,
+    }
+
+
 
 
 if __name__ == "__main__":

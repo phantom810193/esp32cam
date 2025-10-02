@@ -2,82 +2,245 @@
 <html lang="zh-Hant">
   <head>
     <meta charset="utf-8" />
-    <title>最新廣告即時看板</title>
+    <title>你的專屬折扣</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/ad-board.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/customer-board.css') }}">
   </head>
-  <body class="ad-board">
+  <body>
     {% set payload = context or {} %}
-    {% set template_id = payload.template_id or 'ME0000' %}
-    {% set hero_url = payload.hero_image_url or {{ url_for('static', filename='images/ads/ME0000.jpg') }} %}
-    <article id="ad-card" class="ad-card {'{'} template_id {'}'}" style="background-image: url('{'{'} hero_url {'}'}');">
-      <div class="copy" id="ad-copy">
-        <p class="headline" id="ad-headline">{'{'} payload.headline or '' {'}'}</p>
-        <p class="subheading" id="ad-subheading">{'{'} payload.subheading or '' {'}'}</p>
-        <p class="highlight" id="ad-highlight">{'{'} payload.highlight or '' {'}'}</p>
-      </div>
-      <div class="cta" id="ad-cta" {'{'} '' if payload.cta_text else 'style="display:none"' {'}'}>
-        <a href="{'{'} payload.cta_href or '#cta' {'}'}" id="ad-cta-link">{'{'} payload.cta_text or '' {'}'}</a>
-      </div>
-    </article>
+    {% set profile = payload.get('profile', {}) %}
+    {% set items = payload.get('predicted_candidates', []) %}
+    {% set timings = payload.get('timings', {}) %}
+    {% set predicted = payload.get('predicted', {}) %}
+    {% set purchases = payload.get('purchases', []) %}
+    {% set first_purchase = purchases[0] if purchases else None %}
+    <header>
+        <h1>你的專屬折扣</h1>
+        <nav>
+            <ul id="nav-links">
+                <li class="event"><a href="#" title="促銷活動">促銷活動</a></li>
+                <li class="shop"><a href="#" title="店舖管理">店舖管理</a></li>
+                <li class="product"><a href="#" title="商品管理">商品管理</a></li>
+                <li class="payment"><a href="#" title="金流管理">金流管理</a></li>
+                <li class="customer active"><a href="#" title="顧客資料">顧客資料</a></li>
+            </ul>
+        </nav>
+    </header>
+    <main id="customer-profile">
+        <article id="customer-information">
+            <h2 class="hide">顧客資料</h2>
+            <figure class="customer-photo">
+                <img id="customer-photo" src="{{ profile.get('photo_url') or url_for('static', filename='images/face.jpg') }}" alt="Customer Photo">
+                <figcaption id="detected-at">{{ payload.get('detected_at', '--') }}</figcaption>
+            </figure>
+            <section class="customer-infolist">
+                <ul class="customer-basic-info">
+                    <li class="customer-name" id="customer-name">{{ profile.get('name') or '匿名顧客' }}</li>
+                    <li class="customer-level general" id="member-status">{{ profile.get('member_status') or ('訪客' if payload.get('audience') == 'new' else '一般會員') }}</li>
+                    <li>Face ID：<span id="face-id">{{ payload.get('member_id', '--') }}</span></li>
+                    <li>會員編號：<span id="member-code">{{ profile.get('member_code') or '尚未註冊' }}</span></li>
+                    <li>會員狀態：<span id="member-state">{{ profile.get('member_status') or '未知' }}</span></li>
+                    <li>加入日期：<span id="joined-at">{{ profile.get('joined_at') or '--' }}</span></li>
+                    <li>點數餘額：<span id="points-balance">{{ profile.get('points_balance', 0) }}</span> 點</li>
+                </ul>
+                <ul class="customer-contact-info">
+                    <li>性別：<span id="member-gender">{{ profile.get('gender') or '未填寫' }}</span></li>
+                    <li>出生年月：<span id="member-birth">{{ profile.get('birth_date') or '未填寫' }}</span></li>
+                    <li>聯絡電話：<span id="member-phone">{{ profile.get('phone') or '未填寫' }}</span></li>
+                    <li>電子郵件：<span id="member-email">{{ profile.get('email') or '未填寫' }}</span></li>
+                    <li>郵遞地址：<span id="member-address">{{ profile.get('address') or '未填寫' }}</span></li>
+                    <li>職業 / 產業別：<span id="member-occupation">{{ profile.get('occupation') or '未填寫' }}</span></li>
+                </ul>
+            </section>
+        </article>
+        <article id="customer-details">
+            <section id="customer-tags">
+                <h2>顧客標籤</h2>
+                <ul class="customer-taglist" id="member-tags">
+                    <li>#{{ profile.get('profile_label') or '來店訪客' }}</li>
+                </ul>
+            </section>
+            <section id="customer-preferences">
+                <h2 class="hide">顧客偏好</h2>
+                <ul class="customer-preferencelist">
+                    <li><span>偏好商品類別</span><span id="preference-category">{{ predicted.get('category_label') or predicted.get('category') or '健康飲品' }}</span></li>
+                    <li><span>最近消費時間</span><i id="last-purchase">{{ first_purchase['purchased_at'] if first_purchase else '--' }}</i></li>
+                    <li><span>本季消費頻率</span>每月 <i id="season-frequency">{{ purchases|length }}</i> 次</li>
+                    <li><span>平均消費金額</span>NT$ <i id="avg-amount">{{ first_purchase['total_price']|int if first_purchase else 0 }}</i></li>
+                </ul>
+            </section>
+            <section id="customer-purchase-history">
+                <h2 class="hide">顧客購買歷史</h2>
+                <span id="tab-1">1</span>
+                <span id="tab-2">2</span>
+                <span id="tab-3">3</span>
+                <span id="tab-4">4</span>
+                <div id="tab">
+                    <ul>
+                        <li><a href="#tab-1" title="感興趣商品推估">感興趣商品推估</a></li>
+                        <li><a href="#tab-2" title="歷史消費紀錄">歷史消費紀錄</a></li>
+                        <li><a href="#tab-3" title="動線區域停留時間">動線區域停留時間</a></li>
+                        <li><a href="#tab-4" title="參與活動紀錄">參與活動紀錄</a></li>
+                    </ul>
+                    <div class="tab-content-1">
+                        <h3 class="hide">感興趣商品推估</h3>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>內部商品編號</th>
+                                    <th>商品名稱</th>
+                                    <th>商品類別</th>
+                                    <th>商品價格</th>
+                                    <th>商品<br/>查閱率</th>
+                                    <th>廣告<br/>查閱率</th>
+                                    <th>相似紀錄<br/>符合率</th>
+                                    <th>預估購買機率</th>
+                                </tr>
+                            </thead>
+                            <tbody id="prediction-rows">
+                                {% for item in items[:7] %}
+                                <tr>
+                                    <td>{{ item.product_code or '--' }}</td>
+                                    <td>{{ item.product_name or '--' }}</td>
+                                    <td>{{ item.category_label or item.category or '--' }}</td>
+                                    <td>{% if item.price is not none %}${{ '%.0f' % item.price }}{% else %}--{% endif %}</td>
+                                    <td>{{ item.view_rate_percent or '65' }}%</td>
+                                    <td>{{ item.get('ad_view_percent', '60') }}%</td>
+                                    <td>{{ item.get('match_percent', '80') }}%</td>
+                                    <td><span class="hight">高</span></td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        <div class="advertising">
+                            <ul class="advertising_info" id="timing-metrics">
+                                <li><span>上傳速度</span><span id="timing-upload">{{ timings.get('upload', '--') }}</span>秒</li>
+                                <li><span>辨識速度</span><span id="timing-recognition">{{ timings.get('recognition', '--') }}</span>秒</li>
+                                <li><span>廣告生成</span><span id="timing-generation">{{ timings.get('generation', '--') }}</span>秒</li>
+                                <li><span>總計耗時</span><span id="timing-total">{{ timings.get('total', '--') }}</span>秒</li>
+                                <li class="btn"><a href="{{ payload.get('cta_href', '#') }}" id="cta-link" title="開啟個人化廣告頁">{{ payload.get('cta_text', '檢視生成廣告') }}</a></li>
+                            </ul>
+                        </div>
+                        <ul class="page">
+                            <li class="active"><a href="#" title="第1頁">1</a></li>
+                            <li><a href="#" title="第2頁">2</a></li>
+                            <li><a href="#" title="第3頁">3</a></li>
+                        </ul>
+                    </div>
+                    <div class="tab-content-2"><p>內容-2</p></div>
+                    <div class="tab-content-3"><p>內容-3</p></div>
+                    <div class="tab-content-4"><p>內容-4</p></div>
+                </div>
+            </section>
+        </article>
+    </main>
     <script>
-      const TEMPLATE_IMAGES = {
-        'ME0000': '{{ url_for('static', filename='images/ads/ME0000.jpg') }}',
+      const templateImages = {
+        'ME0000': '{{ url_for('static', filename='images/face.jpg') }}',
         'ME0001': '{{ url_for('static', filename='images/ads/ME0001.jpg') }}',
         'ME0002': '{{ url_for('static', filename='images/ads/ME0002.jpg') }}',
-        'ME0003': '{{ url_for('static', filename='images/ads/ME0003.jpg') }}'
+        'ME0003': '{{ url_for('static', filename='images/ads/ME0003.jpg') }}',
       };
 
-      function resolveBackground(templateId, providedUrl) {
-        if (providedUrl) {
-          return providedUrl;
+      function formatProbabilityTag(probability) {
+        if (typeof probability !== 'number') {
+          return '<span class="medium">中</span>';
         }
-        return TEMPLATE_IMAGES[templateId] || TEMPLATE_IMAGES.ME0000;
+        if (probability >= 66) {
+          return '<span class="hight">高</span>';
+        }
+        if (probability >= 33) {
+          return '<span class="medium">中</span>';
+        }
+        return '<span class="medium">中</span>';
       }
 
-      function applyAdPayload(data) {
-        if (!data) {
-          return;
+      function buildRows(items) {
+        if (!items || !items.length) {
+          return '<tr><td colspan="8">暫無預測資料，歡迎加入會員以獲得更多推薦。</td></tr>';
         }
-        const article = document.getElementById('ad-card');
-        const copyBlock = document.getElementById('ad-copy');
-        const headlineEl = document.getElementById('ad-headline');
-        const subheadingEl = document.getElementById('ad-subheading');
-        const highlightEl = document.getElementById('ad-highlight');
-        const ctaWrapper = document.getElementById('ad-cta');
-        const ctaLink = document.getElementById('ad-cta-link');
-
-        const templateId = data.template_id || 'ME0000';
-        const heroUrl = resolveBackground(templateId, data.hero_image_url);
-
-        article.className = 'ad-card ' + templateId;
-        article.style.backgroundImage = "url('" + heroUrl + "')";
-
-        headlineEl.textContent = data.headline || '';
-        subheadingEl.textContent = data.subheading || '';
-        highlightEl.textContent = data.highlight || '';
-
-        if (data.cta_text) {
-          ctaLink.textContent = data.cta_text;
-          ctaLink.href = data.cta_href || '#cta';
-          ctaWrapper.style.display = 'block';
-        } else {
-          ctaWrapper.style.display = 'none';
-        }
+        return items.slice(0, 7).map((item) => {
+          const price = item.price != null ? `$${Math.round(item.price)}` : '--';
+          const category = item.category_label || item.category || '--';
+          const viewRate = item.view_rate_percent != null ? `${item.view_rate_percent}%` : '65%';
+          const adView = item.ad_view_percent != null ? `${item.ad_view_percent}%` : '60%';
+          const matchRate = item.match_percent != null ? `${item.match_percent}%` : '80%';
+          const probability = item.probability_percent;
+          return `<tr>
+            <td>${item.product_code || '--'}</td>
+            <td>${item.product_name || '--'}</td>
+            <td>${category}</td>
+            <td>${price}</td>
+            <td>${viewRate}</td>
+            <td>${adView}</td>
+            <td>${matchRate}</td>
+            <td>${formatProbabilityTag(typeof probability === 'number' ? probability : null)}</td>
+          </tr>`;
+        }).join('');
       }
+
+      function applyPayload(payload) {
+        if (!payload) { return; }
+        const profile = payload.profile || {};
+        document.getElementById('customer-name').textContent = profile.name || '匿名顧客';
+        document.getElementById('member-status').textContent = profile.member_status || (payload.audience === 'new' ? '訪客' : '一般會員');
+        document.getElementById('face-id').textContent = payload.member_id || '--';
+        document.getElementById('member-code').textContent = profile.member_code || '尚未註冊';
+        document.getElementById('member-state').textContent = profile.member_status || '未知';
+        document.getElementById('joined-at').textContent = profile.joined_at || '--';
+        document.getElementById('points-balance').textContent = profile.points_balance != null ? profile.points_balance : 0;
+        document.getElementById('member-gender').textContent = profile.gender || '未填寫';
+        document.getElementById('member-birth').textContent = profile.birth_date || '未填寫';
+        document.getElementById('member-phone').textContent = profile.phone || '未填寫';
+        document.getElementById('member-email').textContent = profile.email || '未填寫';
+        document.getElementById('member-address').textContent = profile.address || '未填寫';
+        document.getElementById('member-occupation').textContent = profile.occupation || '未填寫';
+
+        const photoEl = document.getElementById('customer-photo');
+        const photoUrl = profile.photo_url || templateImages[payload.template_id] || templateImages.ME0000;
+        if (photoEl && photoUrl) {
+          photoEl.src = photoUrl;
+        }
+
+        document.getElementById('detected-at').textContent = payload.detected_at || '--';
+        document.getElementById('member-tags').innerHTML = `<li>#${profile.profile_label || '來店訪客'}</li>`;
+
+        const predicted = payload.predicted || {};
+        document.getElementById('preference-category').textContent = predicted.category_label || predicted.category || '健康飲品';
+        const purchases = payload.purchases || [];
+        document.getElementById('last-purchase').textContent = purchases.length ? purchases[0].purchased_at : '--';
+        document.getElementById('season-frequency').textContent = purchases.length;
+        document.getElementById('avg-amount').textContent = purchases.length ? Math.round(purchases[0].total_price || 0) : 0;
+
+        const tableBody = document.getElementById('prediction-rows');
+        tableBody.innerHTML = buildRows(payload.predicted_candidates || []);
+
+        const timings = payload.timings || {};
+        const getTiming = (key) => (timings[key] === undefined || timings[key] === null ? '--' : timings[key]);
+        document.getElementById('timing-upload').textContent = getTiming('upload');
+        document.getElementById('timing-recognition').textContent = getTiming('recognition');
+        document.getElementById('timing-generation').textContent = getTiming('generation');
+        document.getElementById('timing-total').textContent = getTiming('total');
+
+        const ctaLink = document.getElementById('cta-link');
+        ctaLink.textContent = payload.cta_text || '檢視生成廣告';
+        ctaLink.href = payload.cta_href || '#';
+      }
+
+      applyPayload({{ payload | tojson }});
 
       (function initStream() {
         if (!window.EventSource) {
           console.warn('EventSource not supported in this browser.');
           return;
         }
-        const source = new EventSource('{'{'} stream_url {'}'}');
+        const source = new EventSource('{{ stream_url }}');
         source.onmessage = (event) => {
           try {
             const payload = JSON.parse(event.data);
-            applyAdPayload(payload);
+            applyPayload(payload);
           } catch (error) {
-            console.error('Failed to apply ad payload', error);
+            console.error('Failed to apply payload', error);
           }
         };
       })();

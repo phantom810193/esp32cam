@@ -1,26 +1,151 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-Hant">
-  <head>
-    <meta charset="utf-8" />
-    <title>{{ page_title|default('動態廣告看板') }}</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta http-equiv="refresh" content="{{ refresh_sec|default(10) }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/ad-board.css') }}">
-  </head>
-  <body class="ad-board">
-    {% set template_id = template_id or context.template_id %}
-    {% set hero_url = hero_image_url or url_for('static', filename='images/ads/ME0000.jpg') %}
-    <article id="ad-card" class="ad-card {{ template_id }}" style="background-image: url('{{ hero_url }}');">
-      <div class="copy">
-        <p class="headline">{{ context.headline }}</p>
-        <p class="subheading">{{ context.subheading }}</p>
-        <p class="highlight">{{ context.highlight }}</p>
-      </div>
-      {% if context.cta_text %}
-      <div class="cta">
-        <a href="{{ context.cta_href or '#cta' }}">{{ context.cta_text }}</a>
-      </div>
-      {% endif %}
-    </article>
-  </body>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>你的專屬折扣</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/customer-board.css') }}">
+</head>
+{% set profile = profile or context.profile or {} %}
+{% set items = prediction_items or context.predicted_candidates or [] %}
+{% set timings = timings or context.timings or {} %}
+{% set purchases = purchases or context.purchases or [] %}
+{% set predicted = context.predicted or {} %}
+{% set first_purchase = purchases[0] if purchases else None %}
+<body>
+    <header>
+        <h1>你的專屬折扣</h1>
+        <nav>
+            <ul id="nav-links">
+                <li class="event"><a href="#" title="促銷活動">促銷活動</a></li>
+                <li class="shop"><a href="#" title="店舖管理">店舖管理</a></li>
+                <li class="product"><a href="#" title="商品管理">商品管理</a></li>
+                <li class="payment"><a href="#" title="金流管理">金流管理</a></li>
+                <li class="customer active"><a href="#" title="顧客資料">顧客資料</a></li>
+            </ul>
+        </nav>
+    </header>
+    <main id="customer-profile">
+        <article id="customer-information">
+            <h2 class="hide">顧客資料</h2>
+            <figure class="customer-photo">
+                <img src="{{ profile.photo_url or url_for('static', filename='images/face.jpg') }}" alt="Customer Photo">
+                <figcaption>{{ context.detected_at or timings.get('detected_at') or '--' }}</figcaption>
+            </figure>
+            <section class="customer-infolist">
+                <ul class="customer-basic-info">
+                    <li class="customer-name">{{ profile.name or '匿名顧客' }}</li>
+                    <li class="customer-level general">{{ profile.member_status or (context.audience == 'new' and '訪客' or '一般會員') }}</li>
+                    <li>Face ID：{{ context.member_id }}</li>
+                    <li>會員編號：{{ profile.member_code or '尚未註冊' }}</li>
+                    <li>會員狀態：{{ profile.member_status or '未知' }}</li>
+                    <li>加入日期：{{ profile.joined_at or '--' }}</li>
+                    <li>點數餘額：{{ profile.points_balance if profile.points_balance is not none else 0 }} 點</li>
+                </ul>
+                <ul class="customer-contact-info">
+                    <li>性別：{{ profile.gender or '未填寫' }}</li>
+                    <li>出生年月：{{ profile.birth_date or '未填寫' }}</li>
+                    <li>聯絡電話：{{ profile.phone or '未填寫' }}</li>
+                    <li>電子郵件：{{ profile.email or '未填寫' }}</li>
+                    <li>郵遞地址：{{ profile.address or '未填寫' }}</li>
+                    <li>職業 / 產業別：{{ profile.occupation or '未填寫' }}</li>
+                </ul>
+            </section>
+        </article>
+        <article id="customer-details">
+            <section id="customer-tags">
+                <h2>顧客標籤</h2>
+                <ul class="customer-taglist">
+                    {% if profile.profile_label %}<li>#{{ profile.profile_label }}</li>{% endif %}
+                    {% if predicted.category_label %}<li>#{{ predicted.category_label }}</li>{% endif %}
+                </ul>
+            </section>
+            <section id="customer-preferences">
+                <h2 class="hide">顧客偏好</h2>
+                <ul class="customer-preferencelist">
+                    <li><span>偏好商品類別</span>{{ predicted.category_label or '健康飲品' }}</li>
+                    <li><span>最近消費時間</span><i>{{ first_purchase.purchased_at if first_purchase else '--' }}</i></li>
+                    <li><span>本季消費頻率</span>每月 <i>{{ purchases|length }}</i> 次</li>
+                    <li><span>平均消費金額</span>NT$ <i>{{ '%.0f' % (first_purchase.total_price or 0) if first_purchase else '0' }}</i></li>
+                </ul>
+            </section>
+            <section id="customer-purchase-history">
+                <h2 class="hide">顧客購買歷史</h2>
+                <span id="tab-1">1</span>
+                <span id="tab-2">2</span>
+                <span id="tab-3">3</span>
+                <span id="tab-4">4</span>
+                <div id="tab">
+                    <ul>
+                        <li><a href="#tab-1" title="感興趣商品推估">感興趣商品推估</a></li>
+                        <li><a href="#tab-2" title="歷史消費紀錄">歷史消費紀錄</a></li>
+                        <li><a href="#tab-3" title="動線區域停留時間">動線區域停留時間</a></li>
+                        <li><a href="#tab-4" title="參與活動紀錄">參與活動紀錄</a></li>
+                    </ul>
+                    <div class="tab-content-1">
+                        <h3 class="hide">感興趣商品推估</h3>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>內部商品編號</th>
+                                    <th>商品名稱</th>
+                                    <th>商品類別</th>
+                                    <th>商品價格</th>
+                                    <th>商品<br/>查閱率</th>
+                                    <th>廣告<br/>查閱率</th>
+                                    <th>相似紀錄<br/>符合率</th>
+                                    <th>預估購買機率</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% if items %}
+                                    {% for item in items[:7] %}
+                                        {% set probability = item.probability_percent if item.probability_percent is not none else None %}
+                                        <tr>
+                                            <td>{{ item.product_code or '--' }}</td>
+                                            <td>{{ item.product_name or '--' }}</td>
+                                            <td>{{ item.category_label or item.category or '--' }}</td>
+                                            <td>{% if item.price is not none %}${{ '%.0f' % item.price }}{% else %}--{% endif %}</td>
+                                            <td>{{ item.view_rate_percent or '65' }}%</td>
+                                            <td>{{ item.get('ad_view_percent', '60') }}%</td>
+                                            <td>{{ item.get('match_percent', '80') }}%</td>
+                                            <td>
+                                                {% if probability is not none and probability >= 66 %}
+                                                    <span class="hight">高</span>
+                                                {% elif probability is not none and probability >= 33 %}
+                                                    <span class="medium">中</span>
+                                                {% else %}
+                                                    <span class="medium">中</span>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    <tr><td colspan="8">暫無預測資料，歡迎加入會員以獲得更多推薦。</td></tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                        <div class="advertising">
+                            <ul class="advertising_info">
+                                <li><span>上傳速度</span>{{ timings.get('upload', '--') }}秒</li>
+                                <li><span>辨識速度</span>{{ timings.get('recognition', '--') }}秒</li>
+                                <li><span>廣告生成</span>{{ timings.get('generation', '--') }}秒</li>
+                                <li><span>總計耗時</span>{{ timings.get('total', '--') }}秒</li>
+                                <li class="btn"><a href="{{ context.cta_href or '#' }}" title="開啟個人化廣告頁">{{ context.cta_text or '檢視生成廣告' }}</a></li>
+                            </ul>
+                        </div>
+                        <ul class="page">
+                            <li class="active"><a href="#" title="第1頁">1</a></li>
+                            <li><a href="#" title="第2頁">2</a></li>
+                            <li><a href="#" title="第3頁">3</a></li>
+                        </ul>
+                    </div>
+                    <div class="tab-content-2"><p>內容-2</p></div>
+                    <div class="tab-content-3"><p>內容-3</p></div>
+                    <div class="tab-content-4"><p>內容-4</p></div>
+                </div>
+            </section>
+        </article>
+    </main>
+</body>
 </html>
