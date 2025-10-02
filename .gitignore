@@ -32,3 +32,10 @@ srv/esp32-ads/
 backup_*/
 curl
 curl.exe
+# Backups & temps
+*.bak
+*.badindent.bak
+*.sqlite3-*
+backup_*/
+curl
+curl.exe
