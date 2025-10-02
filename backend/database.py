@@ -35,6 +35,14 @@ SEED_PROFILE_LABELS: tuple[str, ...] = (
     "wellness-gourmet",
 )
 
+PROFILE_LABEL_TO_SEED_MEMBER: dict[str, str] = {
+    "dessert-lover": "MEME0383FE3AA",
+    "family-groceries": "MEM692FFD0824",
+    "fitness-enthusiast": "MEMFITNESS2025",
+    "home-manager": "MEMHOMECARE2025",
+    "wellness-gourmet": "MEMHEALTH2025",
+}
+
 
 _TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
@@ -1440,6 +1448,12 @@ class Database:
             occupation=None,
 
         )
+
+        for profile_label, member_id in PROFILE_LABEL_TO_SEED_MEMBER.items():
+            template = self._profile_purchase_templates.get(profile_label)
+            if not template:
+                continue
+            self._seed_member_history(member_id, template)
 
     def _seed_member_history(
         self, member_id: str, purchases: list[dict[str, float | str]]
