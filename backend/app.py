@@ -402,17 +402,18 @@ def upload_face():
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 422
 
-    member_id, distance = database.find_member_by_encoding(encoding, recognizer)
-    new_member = False
-    if member_id is None:
-        member_id = database.create_member(encoding, recognizer.derive_member_id(encoding))
-        _create_welcome_purchase(member_id)
-        new_member = True
+    resolved = database.resolve_member_id(encoding, recognizer)
+    member_id = resolved.member_id
+    distance = resolved.distance
+    new_member = resolved.new_member
 
     if new_member:
+        _create_welcome_purchase(member_id)
         indexed_encoding = recognizer.register_face(image_bytes, member_id)
         if indexed_encoding is not None:
             database.update_member_encoding(member_id, indexed_encoding)
+    elif resolved.encoding_updated:
+        logger.info("Refreshed stored encoding for member %s", member_id)
 
     recognition_duration = perf_counter() - recognition_start
 

@@ -82,6 +82,26 @@ class UploadEvent:
     ad_duration: float
     total_duration: float
 
+AUTO_MERGE_DISTANCE_MIN = 0.32
+AUTO_MERGE_DISTANCE_MAX = 0.40
+
+
+@dataclass
+class MemberMatch:
+    matched_id: str | None
+    matched_distance: float | None
+    best_candidate_id: str | None
+    best_candidate_distance: float | None
+
+
+@dataclass
+class ResolvedMember:
+    member_id: str
+    new_member: bool
+    distance: float | None
+    encoding_updated: bool = False
+
+
 
 def _build_seed_purchases(
     start_timestamp: str,
@@ -299,28 +319,119 @@ class Database:
     # ------------------------------------------------------------------
     def find_member_by_encoding(
         self, encoding: FaceEncoding, recognizer: FaceRecognizer
-    ) -> tuple[str | None, float | None]:
-        """Return the best matching member for the provided encoding.
+    ) -> MemberMatch:
+        """Return the closest matching member and fallback candidate for ``encoding``."""
 
-        Returns a tuple of ``(member_id, distance)``.  If no sufficiently close match
-        is found the ``member_id`` will be ``None``.
-        """
+        matched_id: str | None = None
+        matched_distance: float | None = None
+        best_candidate_id: str | None = None
+        best_candidate_distance: float | None = None
 
-        best_member: str | None = None
-        best_distance: float | None = None
         with self._connect() as conn:
             for row in conn.execute("SELECT member_id, encoding_json FROM members"):
-                if encoding.signature and encoding.signature == row["member_id"]:
-                    return row["member_id"], 0.0
+                member_id = row["member_id"]
                 stored = FaceEncoding.from_jsonable(json.loads(row["encoding_json"]))
+
+                if encoding.signature and encoding.signature == member_id:
+                    matched_id = member_id
+                    matched_distance = 0.0
+                    best_candidate_id = member_id
+                    best_candidate_distance = 0.0
+                    break
+
                 if stored.signature and stored.signature == encoding.signature:
-                    return row["member_id"], 0.0
+                    matched_id = member_id
+                    matched_distance = 0.0
+                    best_candidate_id = member_id
+                    best_candidate_distance = 0.0
+                    break
+
                 distance = recognizer.distance(stored, encoding)
+
                 if recognizer.is_match(stored, encoding):
-                    if best_distance is None or distance < best_distance:
-                        best_member = row["member_id"]
-                        best_distance = distance
-        return best_member, best_distance
+                    if matched_distance is None or distance < matched_distance:
+                        matched_id = member_id
+                        matched_distance = distance
+
+                if best_candidate_distance is None or distance < best_candidate_distance:
+                    best_candidate_id = member_id
+                    best_candidate_distance = distance
+
+        return MemberMatch(
+            matched_id=matched_id,
+            matched_distance=matched_distance,
+            best_candidate_id=best_candidate_id,
+            best_candidate_distance=best_candidate_distance,
+        )
+
+    @staticmethod
+    def _should_replace_encoding(current: FaceEncoding, candidate: FaceEncoding) -> bool:
+        if not current.signature and candidate.signature:
+            return True
+        if (
+            candidate.signature
+            and candidate.source.startswith("rekognition")
+            and not current.source.startswith("rekognition")
+        ):
+            return True
+        return False
+
+    def maybe_refresh_member_encoding(self, member_id: str, encoding: FaceEncoding) -> bool:
+        existing = self.get_member_encoding(member_id)
+        if existing is None:
+            return False
+        if self._should_replace_encoding(existing, encoding):
+            self.update_member_encoding(member_id, encoding)
+            return True
+        return False
+
+    def resolve_member_id(
+        self,
+        encoding: FaceEncoding,
+        recognizer: FaceRecognizer,
+        *,
+        auto_merge_min_distance: float = AUTO_MERGE_DISTANCE_MIN,
+        auto_merge_max_distance: float = AUTO_MERGE_DISTANCE_MAX,
+    ) -> ResolvedMember:
+        """Resolve ``encoding`` to a member id, auto-merging when safe."""
+
+        match = self.find_member_by_encoding(encoding, recognizer)
+
+        if match.matched_id:
+            encoding_updated = self.maybe_refresh_member_encoding(match.matched_id, encoding)
+            return ResolvedMember(
+                member_id=match.matched_id,
+                new_member=False,
+                distance=match.matched_distance,
+                encoding_updated=encoding_updated,
+            )
+
+        candidate_id = match.best_candidate_id
+        candidate_distance = match.best_candidate_distance
+        lower_bound = max(recognizer.tolerance, auto_merge_min_distance)
+        upper_bound = auto_merge_max_distance
+
+        if (
+            candidate_id
+            and candidate_distance is not None
+            and lower_bound <= candidate_distance <= upper_bound
+        ):
+            encoding_updated = self.maybe_refresh_member_encoding(candidate_id, encoding)
+            _LOGGER.info("Auto-resolved face to member %s (distance=%.3f)", candidate_id, candidate_distance)
+            return ResolvedMember(
+                member_id=candidate_id,
+                new_member=False,
+                distance=candidate_distance,
+                encoding_updated=encoding_updated,
+            )
+
+        member_id = self.create_member(encoding, recognizer.derive_member_id(encoding))
+        _LOGGER.info("Created new member %s after failing to auto-resolve", member_id)
+        return ResolvedMember(
+            member_id=member_id,
+            new_member=True,
+            distance=candidate_distance,
+        )
 
     def create_member(self, encoding: FaceEncoding, member_id: str | None = None) -> str:
         candidate = member_id or self._generate_member_id(encoding)
