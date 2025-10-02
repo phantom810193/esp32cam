@@ -164,7 +164,6 @@ class _LatestAdHub:
             queue.put(context)
 
 
-_latest_ad_hub = _latest_ad_hub
 
 
 def _persona_label_display(profile_label: str | None) -> str | None:
