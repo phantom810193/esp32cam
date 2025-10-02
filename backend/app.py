@@ -233,6 +233,7 @@ def dashboard() -> str:
                 break
 
     purchases: list[Purchase] = []
+    full_history: list[Purchase] = []
     page = 1
     page_count = 1
     has_prev = False
@@ -320,6 +321,7 @@ def dashboard() -> str:
         has_prev=has_prev,
         has_next=has_next,
         total_purchases=total_purchases,
+        full_purchase_history=full_history,
         predicted_items=predicted_items,
         prediction_window_label=prediction_window_label,
     )
@@ -475,23 +477,22 @@ def render_ad(member_id: str):
     creative = None
     if gemini.can_generate_ads and insights.scenario != "brand_new":
         try:
-                creative = gemini.generate_ad_copy(
-                    member_id,
-                    [
-                        {
-                            "member_code": purchase.member_code,
-                            "product_category": purchase.product_category,
-                            "internal_item_code": purchase.internal_item_code,
-                            "item": purchase.item,
-                            "purchased_at": purchase.purchased_at,
-                            "unit_price": purchase.unit_price,
-                            "quantity": purchase.quantity,
-                            "total_price": purchase.total_price,
-                        }
-                        for purchase in purchases
-                    ],
-                )
-
+            creative = gemini.generate_ad_copy(
+                member_id,
+                [
+                    {
+                        "member_code": purchase.member_code,
+                        "product_category": purchase.product_category,
+                        "internal_item_code": purchase.internal_item_code,
+                        "item": purchase.item,
+                        "purchased_at": purchase.purchased_at,
+                        "unit_price": purchase.unit_price,
+                        "quantity": purchase.quantity,
+                        "total_price": purchase.total_price,
+                    }
+                    for purchase in purchases
+                ],
+            )
         except GeminiUnavailableError as exc:
             logging.warning("Gemini ad generation unavailable: %s", exc)
 
@@ -507,6 +508,7 @@ def render_ad(member_id: str):
     return render_template(
         "ad.html",
         context=context,
+        purchases=purchases,
         hero_image_url=hero_image_url,
         scenario_key=context.scenario_key,
     )
@@ -583,7 +585,7 @@ def member_directory():
     directory: list[dict[str, object]] = []
 
     for profile in profiles:
-        purchases = []
+        purchases: list[Purchase] = []
         if profile.member_id:
             purchases = database.get_purchase_history(profile.member_id)
 
