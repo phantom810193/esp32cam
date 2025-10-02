@@ -127,7 +127,7 @@ header h1{
 
 #customer-information .customer-panel::after {
     position: absolute;
-    right: 16px;
+    right: 0px;
     bottom: 0;
     content: "";
     display: block;
