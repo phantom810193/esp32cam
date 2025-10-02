@@ -55,6 +55,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
+logger = logging.getLogger(__name__)
 
 # -----------------------------------------------------------------------------
 # Paths & Config
@@ -69,7 +70,6 @@ ADS_DIR = Path(os.environ.get("ADS_DIR", str(DATA_DIR / "ads")))
 ADS_DIR.mkdir(parents=True, exist_ok=True)
 
 REKOG_RESET = os.environ.get("REKOG_RESET", "").strip().lower() in {"1", "true", "yes"}
-
 
 PERSONA_LABELS = {
     "dessert-lover": "甜點收藏家",
@@ -89,7 +89,17 @@ app.register_blueprint(adgen_blueprint)
 # -----------------------------------------------------------------------------
 gemini = GeminiService()
 
+# ---- 重要：相容性 shim（避免其他模組仍 import `Gemini` 時失敗）----
+try:
+    from . import ai as _ai_mod  # 相對匯入 backend.ai
+    if not hasattr(_ai_mod, "Gemini") and hasattr(_ai_mod, "GeminiService"):
+        setattr(_ai_mod, "Gemini", _ai_mod.GeminiService)
+        logger.info("Back-compat shim enabled: backend.ai.Gemini -> GeminiService")
+except Exception as _shim_exc:  # 不影響主流程
+    logger.warning("Back-compat shim failed to set backend.ai.Gemini: %s", _shim_exc)
+
 rekognition = RekognitionService()
+
 
 def _maybe_prepare_rekognition() -> None:
     """預設不重置；只有 REKOG_RESET=1 時才清空重建。否則僅確保存在。"""
@@ -103,13 +113,13 @@ def _maybe_prepare_rekognition() -> None:
             else:
                 logging.warning("Amazon Rekognition collection reset requested but failed; continuing")
         else:
-            # 輕量動作：確保 collection 存在即可（若你的 service 沒有 ensure_*，可安全略過）
             ensure_fn = getattr(rekognition, "ensure_collection", None)
             if callable(ensure_fn):
                 ensure_fn()
                 logging.info("Amazon Rekognition collection ensured (no reset)")
     except Exception as exc:  # 安全防護，避免啟動因雲端初始化失敗而崩潰
         logging.warning("Rekognition prepare step failed: %s", exc)
+
 
 _maybe_prepare_rekognition()
 
@@ -204,6 +214,7 @@ def _serialize_ad_context(context: AdContext) -> dict[str, object]:
         payload["event_id"] = latest_event.id
     return payload
 
+
 _existing_event = database.get_latest_upload_event()
 if _existing_event is not None:
     _existing_purchases = database.get_purchase_history(_existing_event.member_id)
@@ -211,14 +222,13 @@ if _existing_event is not None:
         _existing_event.member_id, _existing_purchases
     )
     _latest_ad_hub.publish(_serialize_ad_context(_existing_context))
-
     del _existing_context, _existing_event, _existing_purchases
-
 
 
 @app.get("/")
 def index() -> str:
     return render_template("index.html")
+
 
 @app.get("/dashboard")
 def dashboard() -> str:
@@ -584,14 +594,14 @@ def render_latest_ad():
 @app.get("/ad/latest/stream")
 def latest_ad_stream():
     def event_stream():
-        queue = _latest_ad_hub.subscribe()
+        queue = _LatestAdHub().subscribe()  # 每次新的 queue
         try:
             while True:
                 context = queue.get()
                 payload = json.dumps(context, ensure_ascii=False)
                 yield f"data: {payload}\n\n"
         finally:
-            _latest_ad_hub.unsubscribe(queue)
+            _LatestAdHub().unsubscribe(queue)
 
     response = Response(
         stream_with_context(event_stream()), mimetype="text/event-stream"
@@ -646,7 +656,6 @@ def member_directory():
         if profile.member_id:
             purchases = database.get_purchase_history(profile.member_id)
 
-
         persona_label = _persona_label_display(profile.profile_label)
         display_name = profile.name or persona_label or "尚未命名會員"
 
@@ -658,7 +667,6 @@ def member_directory():
                 "display_name": display_name,
             }
         )
-
 
     return render_template("members.html", members=directory)
 
@@ -851,6 +859,13 @@ def _resolve_hero_image_url(scenario_key: str) -> str | None:
 
 
 def _extract_image_payload(req) -> Tuple[bytes, str]:
+    """
+    支援：
+      - multipart/form-data: field 名稱優先找 'image'，也支援 'file', 'photo'
+      - 直接傳 raw image/* 本體
+      - （可選）JSON 內含 base64
+    """
+    # 1) multipart/form-data
     if req.files:
         for key in ("image", "file", "photo"):
             if key in req.files:
@@ -858,10 +873,23 @@ def _extract_image_payload(req) -> Tuple[bytes, str]:
                 data = uploaded.read()
                 if data:
                     return data, uploaded.mimetype or req.mimetype or "image/jpeg"
-    data = req.get_data()
-    if not data:
-        raise ValueError("No image data found in request")
-    return data, req.mimetype or "image/jpeg"
+
+    # 2) raw image/*
+    ct = (req.headers.get("Content-Type") or "").lower()
+    if ct.startswith("image/"):
+        data = req.get_data()
+        if data:
+            return data, req.mimetype or "image/jpeg"
+
+    # 3) base64 in JSON（若你用得到）
+    if req.is_json:
+        j = req.get_json(silent=True) or {}
+        b64 = j.get("image_base64")
+        if b64:
+            import base64
+            return base64.b64decode(b64), j.get("mime_type", "image/jpeg")
+
+    raise ValueError("No image data found in request")
 
 
 def _create_welcome_purchase(member_id: str) -> None:
@@ -887,7 +915,6 @@ def _persist_upload_image(member_id: str, image_bytes: bytes, mime_type: str) ->
     filename = f"{timestamp}_{unique_suffix}_{member_id}{extension}"
     path = UPLOAD_DIR / filename
     try:
-
         with Image.open(BytesIO(image_bytes)) as image:
             normalized = ImageOps.exif_transpose(image)
             save_kwargs: dict[str, object] = {}
