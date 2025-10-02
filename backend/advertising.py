@@ -148,11 +148,6 @@ def derive_scenario_key(
 
     return "brand_new"
 
-@dataclass
-class PurchaseInsights:
-    recommended_item: str | None = None
-
-
 def build_ad_context(
     member_id: str,
     purchases: Iterable[Purchase],
@@ -227,7 +222,7 @@ def _fallback_copy(
     headline = f"{greeting}，預留了你的 {item}"
     subheading = f"{subheading_code}系統預測你對 {item} 的購買機率高達 {probability_text}"
     if latest_summary:
-        subheading += f"｜上次 {最新_summary}"
+        subheading += f"｜上次 {latest_summary}"
     highlight = f"{item} 今日限量再享會員專屬 88 折，結帳輸入 MEMBER95 加贈點數！"
     return headline, subheading, highlight
 
