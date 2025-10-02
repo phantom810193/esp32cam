@@ -11,3 +11,24 @@ __pycache__/
 backend/data/mvp.sqlite3
 backend/data/uploads/
 srv/esp32-ads/
+
+# Python caches / build
+__pycache__/
+*.py[cod]
+*.pytest_cache/
+*.egg-info/
+
+# Local env & data
+.venv/
+.env
+backend/data/mvp.sqlite3
+backend/data/uploads/
+srv/esp32-ads/
+# Backups & temp
+*.bak
+*.bak.*
+*.badindent.bak
+*.sqlite3-*
+backup_*/
+curl
+curl.exe
