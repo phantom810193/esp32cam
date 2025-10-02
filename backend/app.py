@@ -6,7 +6,6 @@ import json
 import logging
 import math
 import mimetypes
-import os
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
