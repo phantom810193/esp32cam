@@ -45,7 +45,7 @@ from .database import Database, Purchase, SEED_MEMBER_IDS
 
 from .prediction import predict_next_purchases
 from .recognizer import FaceRecognizer
-from .routes import adgen_blueprint
+from .routes import adgen_blueprint, generate_vertex_ad
 
 # -----------------------------------------------------------------------------
 # Logging
@@ -627,6 +627,29 @@ def manager_dashboard_view():
             limit=7,
         )
 
+        vertex_ad: dict[str, object] | None = None
+        vertex_ad_error: str | None = None
+        top_prediction = prediction.items[0] if prediction.items else None
+
+        if top_prediction:
+            sku = top_prediction.product_code or top_prediction.product_name
+            member_payload = _summarise_member_profile(profile)
+            missing_env = [
+                env
+                for env in ("GCP_PROJECT_ID", "ASSET_BUCKET", "GOOGLE_APPLICATION_CREDENTIALS")
+                if not os.environ.get(env)
+            ]
+            if missing_env:
+                vertex_ad_error = (
+                    "Vertex AI 服務尚未設定環境變數：" + ", ".join(sorted(missing_env))
+                )
+            else:
+                try:
+                    vertex_ad = generate_vertex_ad(sku, member_payload)
+                except Exception as exc:  # pylint: disable=broad-except
+                    logging.warning("Vertex AI creative unavailable for %s: %s", sku, exc)
+                    vertex_ad_error = str(exc)
+
         context = {
             "member_id": selected_id,
             "member": profile,
@@ -635,6 +658,9 @@ def manager_dashboard_view():
             "hero_image_url": hero_image_url,
             "prediction": prediction,
             "ad_url": url_for("render_ad", member_id=selected_id, v2=1, _external=False),
+            "top_prediction": top_prediction,
+            "vertex_ad": vertex_ad,
+            "vertex_ad_error": vertex_ad_error,
         }
     else:
         error = "尚未建立任何會員資料"
@@ -711,7 +737,22 @@ def extended_health_check():
     ads_dir = current_app.config.get("ADS_DIR") or ""
     ads_path = Path(ads_dir)
     exists = ads_path.is_dir()
-    writable = exists and os.access(ads_path, os.W_OK)
+    writable = False
+    write_error: str | None = None
+    if exists:
+        test_path = ads_path / f".healthz-{uuid4().hex}.tmp"
+        try:
+            with open(test_path, "w", encoding="utf-8") as handle:
+                handle.write("ok")
+            writable = True
+        except OSError as exc:
+            write_error = str(exc)
+            logging.warning("Ads directory write test failed for %s: %s", ads_path, exc)
+        finally:
+            try:
+                test_path.unlink(missing_ok=True)
+            except OSError:
+                pass
     sample: list[str] = []
     if exists:
         try:
@@ -741,6 +782,7 @@ def extended_health_check():
             "ads_dir_exists": exists,
             "ads_dir_writable": writable,
             "ads_dir_sample": sample,
+            "ads_dir_write_error": write_error,
             "gcs": gcs_status,
             "vertex": ai_status,
         }
@@ -755,6 +797,26 @@ def _manager_hero_image(profile, scenario_key: str) -> str | None:
     if profile and profile.first_image_filename:
         return url_for("serve_upload_image", filename=profile.first_image_filename)
     return _resolve_hero_image_url(scenario_key)
+
+
+def _summarise_member_profile(profile) -> dict[str, object]:
+    if not profile:
+        return {}
+
+    return {
+        "member_id": profile.member_id,
+        "mall_member_id": profile.mall_member_id,
+        "member_status": profile.member_status,
+        "joined_at": profile.joined_at,
+        "points_balance": profile.points_balance,
+        "gender": profile.gender,
+        "birth_date": profile.birth_date,
+        "phone": profile.phone,
+        "email": profile.email,
+        "address": profile.address,
+        "occupation": profile.occupation,
+        "profile_label": profile.profile_label,
+    }
 
 
 def _resolve_hero_image_url(scenario_key: str) -> str | None:
