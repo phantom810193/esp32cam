@@ -58,6 +58,12 @@ class _PersonaPurchaseConfig(TypedDict):
     items: list[_PersonaPurchaseItem]
 
 
+class _ReservedProfile(TypedDict):
+    member_id: str
+    profile_id: int
+    profile_label: str
+
+
 _SEPTEMBER_2025_PURCHASE_CONFIG: dict[str, _PersonaPurchaseConfig] = {
     "MEME0383FE3AA": {
         "prefix": "DES",
@@ -446,26 +452,116 @@ class Database:
                         best_distance = distance
         return best_member, best_distance
 
+    def _locate_reserved_profile(
+        self, conn: sqlite3.Connection, preferred_member_id: str | None
+    ) -> _ReservedProfile | None:
+        def _row_to_profile(row: sqlite3.Row) -> _ReservedProfile:
+            return {
+                "member_id": str(row["member_id"]),
+                "profile_id": int(row["profile_id"]),
+                "profile_label": str(row["profile_label"]),
+            }
+
+        if preferred_member_id:
+            row = conn.execute(
+                """
+                SELECT profile_id, profile_label, member_id
+                FROM member_profiles
+                WHERE member_id = ?
+                  AND member_id IS NOT NULL
+                  AND TRIM(member_id) <> ''
+                  AND NOT EXISTS (
+                        SELECT 1
+                        FROM upload_events
+                        WHERE upload_events.member_id = member_profiles.member_id
+                    )
+                LIMIT 1
+                """,
+                (preferred_member_id,),
+            ).fetchone()
+            if row:
+                return _row_to_profile(row)
+
+        rows = conn.execute(
+            """
+            SELECT profile_id, profile_label, member_id
+            FROM member_profiles
+            WHERE member_id IS NOT NULL
+              AND TRIM(member_id) <> ''
+              AND NOT EXISTS (
+                    SELECT 1
+                    FROM upload_events
+                    WHERE upload_events.member_id = member_profiles.member_id
+                )
+            ORDER BY profile_id
+            """,
+        ).fetchall()
+
+        for row in rows:
+            if not row["member_id"]:
+                continue
+            return _row_to_profile(row)
+
+        return None
+
     def create_member(self, encoding: FaceEncoding, member_id: str | None = None) -> str:
-        candidate = member_id or self._generate_member_id(encoding)
         payload = json.dumps(encoding.to_jsonable(), ensure_ascii=False)
 
+        claimed_reserved = False
+        updated_existing = False
+        reserved_profile: _ReservedProfile | None = None
+
         with self._connect() as conn:
-            while True:
-                try:
+            reserved_profile = self._locate_reserved_profile(conn, member_id)
+            if reserved_profile:
+                candidate = reserved_profile["member_id"]
+                exists = conn.execute(
+                    "SELECT 1 FROM members WHERE member_id = ?",
+                    (candidate,),
+                ).fetchone()
+                if exists:
+                    conn.execute(
+                        "UPDATE members SET encoding_json = ? WHERE member_id = ?",
+                        (payload, candidate),
+                    )
+                    updated_existing = True
+                else:
                     conn.execute(
                         "INSERT INTO members (member_id, encoding_json) VALUES (?, ?)",
                         (candidate, payload),
                     )
-                except sqlite3.IntegrityError:
-                    _LOGGER.warning(
-                        "Member id %s already exists, generating fallback id", candidate
-                    )
-                    candidate = self._generate_member_id()
-                    continue
-                else:
-                    conn.commit()
-                    break
+                conn.commit()
+                claimed_reserved = True
+            else:
+                candidate = member_id or self._generate_member_id(encoding)
+                while True:
+                    try:
+                        conn.execute(
+                            "INSERT INTO members (member_id, encoding_json) VALUES (?, ?)",
+                            (candidate, payload),
+                        )
+                    except sqlite3.IntegrityError:
+                        _LOGGER.warning(
+                            "Member id %s already exists, generating fallback id", candidate
+                        )
+                        candidate = self._generate_member_id()
+                        continue
+                    else:
+                        conn.commit()
+                        break
+
+        if claimed_reserved and reserved_profile:
+            action = "updated" if updated_existing else "created"
+            _LOGGER.info(
+                "Claimed reserved member %s from profile %s (%s)",
+                reserved_profile["member_id"],
+                reserved_profile["profile_label"],
+                action,
+            )
+            self._populate_profile_history(
+                reserved_profile["profile_label"], reserved_profile["member_id"]
+            )
+            return reserved_profile["member_id"]
 
         _LOGGER.info("Created new member %s", candidate)
         self._claim_unassigned_profile(candidate)
