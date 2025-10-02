@@ -117,17 +117,17 @@ header h1{
     flex-direction: column;
     width: 100%;
     background: white;
-    border-radius: 32px;
+    border-radius: 32px 32px 0 32px;
     overflow: hidden;
     position: relative;
     flex: 1 1 auto;
-    height: 100%;
+    height: calc(100vh - 96px)
 }
 
 
 #customer-information .customer-panel::after {
     position: absolute;
-    right: 16px;
+    right: 0px;
     bottom: 0;
     content: "";
     display: block;
@@ -189,7 +189,7 @@ header h1{
 
 /* 右欄位列表 顧客資料 */
 .customer-basic-info{
-    padding: 18px 24px 22px 24px;
+    padding: 16px 24px;
     margin: 0;
     position: relative;
 }
@@ -219,7 +219,7 @@ header h1{
     background: #F1D800;
 }
 .customer-contact-info{
-    padding: 22px 24px;
+    padding: 16px 24px;
     margin: 0;
     border-top: solid 1px #E2E2E2;
 }
@@ -615,11 +615,20 @@ span~#tab>div:first-of-type,
     gap: 12px;
 }
 .history-pagination .pagination-links a {
-    display: inline-flex;
+    font-size: 1.1em;
+    line-height: 1.6em;
+    height: 48px;
+    width: 160px;
+    bottom: 0;
+    right: 0;
+    margin: 0 8px;
+    display: flex;
     align-items: center;
     justify-content: center;
-    padding: 6px 14px;
-    border-radius: 20px;
+    border-radius: 16px;
+    box-shadow: rgba(0, 0, 0, 0.14) 0 2px 2px 0, rgba(0, 0, 0, 0.12) 0 3px 1px -2px, rgba(0, 0, 0, 0.2) 0 1px 5px 0px;
+    align-items: center;
+    justify-content: center;
     background-color: #1B6F15;
     color: white;
     text-decoration: none;
