@@ -6,6 +6,7 @@ import json
 import logging
 import math
 import mimetypes
+import os
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
@@ -65,6 +66,8 @@ UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", str(DATA_DIR / "uploads")))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 ADS_DIR = Path(os.environ.get("ADS_DIR", str(DATA_DIR / "ads")))
 ADS_DIR.mkdir(parents=True, exist_ok=True)
+
+REKOG_RESET = os.environ.get("REKOG_RESET", "").strip().lower() in {"1", "true", "yes"}
 
 
 PERSONA_LABELS = {
