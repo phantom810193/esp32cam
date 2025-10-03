@@ -289,7 +289,7 @@ def dashboard() -> str:
         persona_label = _persona_label_display(profile.profile_label)
         display_name = profile.name or persona_label
     if display_name is None:
-        display_name = "尚未命名會員"
+        display_name = "尚未註冊會員"
 
     profile_image_url: str | None = None
     if profile and profile.first_image_filename:
