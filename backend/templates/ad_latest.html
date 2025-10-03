@@ -23,6 +23,7 @@
     {% set template_id = payload.get('template_id') %}
     {% set raw_cta = payload.get('cta_href') %}
     {% set initial_cta_href = raw_cta if raw_cta and not raw_cta.startswith('#') else payload.get('ad_url') %}
+
     <header>
         <h1>你的專屬折扣</h1>
         <nav>
@@ -208,6 +209,7 @@
       function buildRows(items) {
         if (!items || !items.length) {
           return '<tr><td colspan="6">暫無預測資料，歡迎加入會員以獲得更多推薦。</td></tr>';
+
         }
         return items.slice(0, 7).map((item) => {
           const price = item.price != null ? `$${Math.round(item.price)}` : '--';
@@ -221,6 +223,7 @@
             <td>${price}</td>
             <td>${viewRate}</td>
             <td>${formatProbability(probability)}</td>
+
           </tr>`;
         }).join('');
       }
@@ -310,6 +313,7 @@
         }
 
         syncLink(document.getElementById('cta-link'), '檢視生成廣告');
+
       }
 
       applyPayload({{ payload | tojson }});
