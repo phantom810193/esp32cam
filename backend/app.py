@@ -169,6 +169,9 @@ _latest_ad_hub = _LatestAdHub()
 _warmup_once_lock = Lock()
 _warmup_ran = False
 
+
+
+
 def _seed_latest_ad_hub() -> None:
     """Lazy warm-up: run on first incoming request, not at import time."""
     try:
@@ -227,7 +230,7 @@ def _persona_label_display(profile_label: str | None) -> str | None:
 
 
 def _serialize_ad_context(context: AdContext) -> dict[str, object]:
-  
+
     try:
         ad_url = url_for("render_ad", member_id=context.member_id, _external=True)
     except RuntimeError:
@@ -544,7 +547,6 @@ def upload_face():
     )
     stale_images = database.cleanup_upload_events(keep_latest=1)
     _purge_upload_images(stale_images)
-
     hero_image_url = _resolve_template_image(context.template_id)
     payload = {
         "status": "ok",
@@ -680,10 +682,8 @@ def render_ad(member_id: str):
         context_dict["detected_at"] = context.detected_at
 
     return render_template(
-        "ad_latest.html",
+        "ad_offer.html",
         context=context_dict,
-        profile=context_dict.get("profile"),
-        stream_url=url_for("latest_ad_stream"),
     )
 
 
@@ -862,9 +862,11 @@ def ad_preview(filename: str):
         scenario_key=request.args.get("scenario_key", "brand_new"),
     )
 
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 
 

@@ -93,6 +93,7 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
      - `HOM###`：家居生活（Homemaker）
      - `GEN###`：生活選品（General）
    - 每個商品皆附帶基礎查閱率（View Rate）與售價資訊，方便預測模組產生 UI 所需欄位。
+   - 商品查閱率會按照 `backend/prediction.py` 的品類權重微調：`view_rate_percent = round(min(1.0, product.view_rate * (0.9 + category_weight)) * 100, 1)`，讓不同品類在 UI 上呈現的查閱率仍落在 0–100% 間。
    - 透過 `infer_category_from_item()` 將歷史訂單名稱對應回目錄品類，確保跨模組一致性。
 
 7. 機率計算公式：
