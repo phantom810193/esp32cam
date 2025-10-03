@@ -1374,7 +1374,7 @@ class Database:
 
         self._seed_member_profile(
             profile_label="dessert-lover",
-            name="林悅心",
+            name="李函霏",
             member_id=None,
             mall_member_id="ME0001",
             member_status="有效",
@@ -1389,13 +1389,13 @@ class Database:
         )
         self._seed_member_profile(
             profile_label="family-groceries",
-            name="陳雅雯",
+            name="林位青",
             member_id=None,
             mall_member_id="ME0002",
             member_status="有效",
             joined_at="2020-09-01",
             points_balance=980,
-            gender="女",
+            gender="男",
             birth_date="1990-02-08",
             phone="0923-556-789",
             email="familybuyer@example.com",
@@ -1404,13 +1404,13 @@ class Database:
         )
         self._seed_member_profile(
             profile_label="fitness-enthusiast",
-            name="張智翔",
+            name="范文華",
             member_id=None,
             mall_member_id="ME0003",
             member_status="有效",
             joined_at="2019-11-20",
             points_balance=2040,
-            gender="男",
+            gender="女",
             birth_date="1985-04-19",
             phone="0955-112-233",
             email="fitgoer@example.com",
@@ -1419,7 +1419,7 @@ class Database:
         )
         self._seed_member_profile(
             profile_label="home-manager",
-            name="黃珮真",
+            name="未註冊客戶",
             member_id=None,
             mall_member_id="",
             member_status=None,
@@ -1434,7 +1434,7 @@ class Database:
         )
         self._seed_member_profile(
             profile_label="wellness-gourmet",
-            name="吳品蓉",
+            name="未註冊客戶",
             member_id=None,
             mall_member_id="",
             member_status=None,
