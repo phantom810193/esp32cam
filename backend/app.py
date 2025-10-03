@@ -28,7 +28,6 @@ from flask import (
     stream_with_context,
     url_for,
 )
-from google.cloud import storage
 from PIL import Image, ImageOps, UnidentifiedImageError
 from werkzeug.utils import safe_join
 
@@ -85,7 +84,7 @@ app.config["ADS_DIR"] = str(ADS_DIR)  # 儲存為字串路徑
 app.register_blueprint(adgen_blueprint)
 
 # -----------------------------------------------------------------------------
-# Services (Vertex AI / AWS Rekognition / DB)
+# Services (Gemini Text / AWS Rekognition / DB)
 # -----------------------------------------------------------------------------
 gemini = GeminiService()
 
@@ -163,13 +162,9 @@ class _LatestAdHub:
         for queue in subscribers:
             queue.put(context)
 
-
 _latest_ad_hub = _LatestAdHub()
 _warmup_once_lock = Lock()
 _warmup_ran = False
-
-
-
 
 def _seed_latest_ad_hub() -> None:
     """Lazy warm-up: run on first incoming request, not at import time."""
@@ -218,7 +213,6 @@ def _seed_latest_ad_hub() -> None:
 
     except Exception as exc:
         logging.warning("Warmup seed failed (lazy): %s", exc)
-
 
 def _persona_label_display(profile_label: str | None) -> str | None:
     if not profile_label:
@@ -273,21 +267,19 @@ def _serialize_ad_context(context: AdContext) -> dict[str, object]:
         payload["event_id"] = latest_event.id
     return payload
 
-
 @app.get("/")
 def index() -> str:
     return render_template("index.html")
-
 
 @app.get("/demo/upload-ad")
 def simple_upload_demo() -> str:
     """Serve a minimal uploader that drives the face recognition flow."""
     return render_template("simple_upload.html")
 
-
 @app.get("/dashboard")
 def dashboard() -> str:
     """Render the customer dashboard demo page."""
+
     requested_member_id = request.args.get("member_id")
     member_id = requested_member_id or None
 
@@ -539,6 +531,7 @@ def upload_face():
     )
     stale_images = database.cleanup_upload_events(keep_latest=1)
     _purge_upload_images(stale_images)
+    
     hero_image_url = _resolve_template_image(context.template_id)
     payload = {
         "status": "ok",
@@ -555,6 +548,7 @@ def upload_face():
         "highlight": context.highlight,
         "detected_at": detected_at,
     }
+
     if predicted_dict:
         payload["predicted"] = predicted_dict
     if context.cta_text:
@@ -851,69 +845,6 @@ def ad_preview(filename: str):
         "ad.html",
         hero_image_url=hero_image_url,
         scenario_key=request.args.get("scenario_key", "brand_new"),
-    )
-
-
-@app.get("/health")
-def health_check():
-    # 強化健康檢查，方便遠端排錯
-    ads_dir = current_app.config.get("ADS_DIR") or ""
-    ads_path = Path(ads_dir)
-    exists = ads_path.is_dir()
-    sample: list[str] = []
-    if exists:
-        try:
-            sample = [entry.name for entry in sorted(ads_path.iterdir())[:10]]
-        except OSError:
-            sample = []
-    return jsonify(
-        {
-            "status": "ok",
-            "ads_dir": ads_dir,
-            "ads_dir_exists": exists,
-            "ads_dir_sample": sample,
-        }
-    )
-
-
-@app.get("/healthz")
-def extended_health_check():
-    ads_dir = current_app.config.get("ADS_DIR") or ""
-    ads_path = Path(ads_dir)
-    exists = ads_path.is_dir()
-    writable = exists and os.access(ads_path, os.W_OK)
-    sample: list[str] = []
-    if exists:
-        try:
-            sample = [entry.name for entry in sorted(ads_path.iterdir())[:10]]
-        except OSError as exc:
-            logging.warning("Failed to inspect ads directory %s: %s", ads_path, exc)
-
-    bucket_name = os.environ.get("ASSET_BUCKET", "")
-    gcs_status: dict[str, object] = {"bucket": bucket_name, "reachable": False}
-    if bucket_name:
-        try:
-            client = storage.Client()
-            bucket = client.bucket(bucket_name)
-            gcs_status["reachable"] = bucket.exists()
-        except Exception as exc:  # pylint: disable=broad-except
-            gcs_status["error"] = str(exc)
-    else:
-        gcs_status["error"] = "ASSET_BUCKET not configured"
-
-    # 併入 Vertex AI 健康資訊
-    ai_status = gemini.health_probe()
-
-    return jsonify(
-        {
-            "status": "ok" if ai_status.get("vertexai") == "initialized" else "degraded",
-            "ads_dir": str(ads_path),
-            "ads_dir_exists": exists,
-            "ads_dir_writable": writable,
-            "ads_dir_sample": sample,
-            "gcs": gcs_status,
-            "vertex": ai_status,
-        }
     )
 
 
