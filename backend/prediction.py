@@ -1,10 +1,12 @@
 """Prediction helpers for estimating next-best offers."""
 from __future__ import annotations
 
+import os
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from math import exp
+from pathlib import Path
 from typing import Iterable, Sequence
 
 from .advertising import PurchaseInsights
@@ -16,7 +18,23 @@ from .catalogue import (
     infer_category_from_item,
     purchased_product_codes,
 )
-from .database import MemberProfile, Purchase
+from .database import Database, MemberProfile, Purchase
+
+
+_DATABASE: Database | None = None
+
+
+def _database_path() -> Path:
+    base_dir = Path(__file__).resolve().parent
+    default_path = base_dir / "data" / "mvp.sqlite3"
+    return Path(os.environ.get("DB_PATH", str(default_path)))
+
+
+def _get_database() -> Database:
+    global _DATABASE
+    if _DATABASE is None:
+        _DATABASE = Database(_database_path())
+    return _DATABASE
 
 
 @dataclass
@@ -261,3 +279,70 @@ def _build_activity_feed(
         )
 
     return feed[:3]
+
+
+def predict_for_member(member_id: str, limit: int = 3) -> list[dict[str, object]]:
+    """回傳 list[ {item, score, category, price, ...}, ... ]"""
+
+    database = _get_database()
+    purchases = database.get_purchase_history(member_id)
+    profile = database.get_member_profile(member_id)
+
+    prediction = predict_next_purchases(
+        purchases,
+        profile=profile,
+        limit=max(1, int(limit)),
+    )
+    results: list[dict[str, object]] = []
+    for item in prediction.items:
+        results.append(
+            {
+                "product_code": item.product_code,
+                "item": item.product_name,
+                "category": item.category,
+                "category_label": item.category_label,
+                "price": item.price,
+                "view_rate_percent": item.view_rate_percent,
+                "probability": item.probability,
+                "probability_percent": item.probability_percent,
+            }
+        )
+        if len(results) >= limit:
+            break
+    return results
+
+
+def recent_summary(member_id: str) -> str:
+    """回傳一行摘要（近 30 天品項/消費），給 Prompt 用"""
+
+    database = _get_database()
+    purchases = database.get_purchase_history(member_id)
+    if not purchases:
+        return "近30天暫無消費紀錄，請聚焦會員開卡禮"
+
+    now = datetime.now()
+    cutoff = now - timedelta(days=30)
+    recent: list[Purchase] = []
+    total_amount = 0.0
+    category_counter: Counter[str] = Counter()
+    for purchase in purchases:
+        ts = parse_timestamp(purchase.purchased_at)
+        if ts >= cutoff:
+            recent.append(purchase)
+            total_amount += float(purchase.total_price)
+            category = infer_category_from_item(purchase.item)
+            category_counter[category] += 1
+
+    if recent:
+        top_categories = [
+            f"{CATEGORY_LABELS.get(cat, cat)}x{count}"
+            for cat, count in category_counter.most_common(3)
+        ]
+        category_text = "、".join(top_categories) if top_categories else "多元品類"
+        return (
+            f"近30天{len(recent)}筆，總額NT${total_amount:,.0f}，熱門：{category_text}"
+        )
+
+    latest_items = purchases[:3]
+    items_text = "、".join(purchase.item for purchase in latest_items)
+    return f"近30天暫無消費，最近曾選購：{items_text}"

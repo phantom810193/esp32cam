@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <title>ESP32 CAM 廣告合成測試</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: "Noto Sans TC", "Helvetica Neue", Arial, sans-serif;
+      background: #10141c;
+      color: #f4f6fb;
+      margin: 0;
+      padding: 2rem;
+    }
+    h1 {
+      margin-top: 0;
+      font-size: 2rem;
+    }
+    .card {
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25);
+    }
+    button {
+      background: linear-gradient(135deg, #ff9a4b, #ff4d4d);
+      color: #fff;
+      border: none;
+      border-radius: 999px;
+      padding: 0.6rem 1.6rem;
+      font-size: 1rem;
+      cursor: pointer;
+      margin-right: 0.5rem;
+      margin-bottom: 0.5rem;
+      transition: transform 0.2s ease;
+    }
+    button:hover {
+      transform: translateY(-2px);
+    }
+    pre {
+      background: rgba(0, 0, 0, 0.45);
+      border-radius: 12px;
+      padding: 1rem;
+      overflow-x: auto;
+      max-height: 400px;
+    }
+    a {
+      color: #7ec8ff;
+    }
+    .status {
+      margin-top: 0.75rem;
+      font-size: 0.95rem;
+      color: #ffd166;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>ESP32 CAM 廣告合成測試入口</h1>
+    <p>
+      點選以下按鈕即可呼叫 <code>/ad/&lt;member_id&gt;/compose</code> API，
+      並在下方檢視回傳 JSON 結果。
+    </p>
+    <div>
+      <button data-member="ME0001">生成 ME0001（甜點）</button>
+      <button data-member="ME0002">生成 ME0002（幼兒園）</button>
+      <button data-member="ME0003">生成 ME0003（健身房）</button>
+    </div>
+    <p class="status" id="status">尚未呼叫 API。</p>
+  </div>
+
+  <div class="card">
+    <h2>回傳結果</h2>
+    <pre id="result">{ }
+</pre>
+  </div>
+
+  <div class="card">
+    <h2>快速驗收步驟</h2>
+    <ol>
+      <li>啟動後端伺服器，確認 <code>http://127.0.0.1:8000</code> 可連線。</li>
+      <li>分別執行：<code>curl -fsS "http://127.0.0.1:8000/ad/ME0001/compose" | jq .</code> 等指令。</li>
+      <li>確認 <code>/srv/esp32-ads/out</code> 內產生對應 JPG。</li>
+    </ol>
+    <p>
+      若要重新產生素材，可在 API 加上 <code>?force=1</code> 或使用 CLI：
+      <code>python -m backend.tools.generate_ad --member ME0001 --force</code>
+    </p>
+  </div>
+
+  <script>
+    const buttons = document.querySelectorAll('button[data-member]');
+    const resultEl = document.getElementById('result');
+    const statusEl = document.getElementById('status');
+
+    async function callApi(memberId) {
+      const url = `http://127.0.0.1:8000/ad/${memberId}/compose`;
+      statusEl.textContent = `呼叫 ${url} 中...`;
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || response.statusText);
+        }
+        const data = await response.json();
+        resultEl.textContent = JSON.stringify(data, null, 2);
+        statusEl.textContent = `已取得 ${memberId} 的廣告資料，輸出檔案：${data.out_path || '未知'}`;
+      } catch (error) {
+        console.error(error);
+        statusEl.textContent = `呼叫失敗：${error.message}`;
+      }
+    }
+
+    buttons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const memberId = btn.dataset.member;
+        callApi(memberId);
+      });
+    });
+  </script>
+</body>
+</html>
