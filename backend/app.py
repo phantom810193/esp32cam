@@ -270,6 +270,12 @@ def index() -> str:
     return render_template("index.html")
 
 
+@app.get("/demo/upload-ad")
+def simple_upload_demo() -> str:
+    """Serve a minimal uploader that drives the face recognition flow."""
+    return render_template("simple_upload.html")
+
+
 @app.get("/dashboard")
 def dashboard() -> str:
     """Render the customer dashboard demo page."""
@@ -535,6 +541,10 @@ def upload_face():
         "audience": audience,
         "scenario_key": context.scenario_key,
         "hero_image_url": hero_image_url,
+        "headline": context.headline,
+        "subheading": context.subheading,
+        "highlight": context.highlight,
+        "detected_at": detected_at,
     }
     if predicted_dict:
         payload["predicted"] = predicted_dict
