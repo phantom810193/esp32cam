@@ -162,13 +162,9 @@ class _LatestAdHub:
         for queue in subscribers:
             queue.put(context)
 
-
 _latest_ad_hub = _LatestAdHub()
 _warmup_once_lock = Lock()
 _warmup_ran = False
-
-
-
 
 def _seed_latest_ad_hub() -> None:
     """Lazy warm-up: run on first incoming request, not at import time."""
@@ -217,7 +213,6 @@ def _seed_latest_ad_hub() -> None:
 
     except Exception as exc:
         logging.warning("Warmup seed failed (lazy): %s", exc)
-
 
 def _persona_label_display(profile_label: str | None) -> str | None:
     if not profile_label:
@@ -272,21 +267,19 @@ def _serialize_ad_context(context: AdContext) -> dict[str, object]:
         payload["event_id"] = latest_event.id
     return payload
 
-
 @app.get("/")
 def index() -> str:
     return render_template("index.html")
-
 
 @app.get("/demo/upload-ad")
 def simple_upload_demo() -> str:
     """Serve a minimal uploader that drives the face recognition flow."""
     return render_template("simple_upload.html")
 
-
 @app.get("/dashboard")
 def dashboard() -> str:
     """Render the customer dashboard demo page."""
+
     requested_member_id = request.args.get("member_id")
     member_id = requested_member_id or None
 
@@ -538,6 +531,7 @@ def upload_face():
     )
     stale_images = database.cleanup_upload_events(keep_latest=1)
     _purge_upload_images(stale_images)
+    
     hero_image_url = _resolve_template_image(context.template_id)
     payload = {
         "status": "ok",
@@ -554,6 +548,7 @@ def upload_face():
         "highlight": context.highlight,
         "detected_at": detected_at,
     }
+
     if predicted_dict:
         payload["predicted"] = predicted_dict
     if context.cta_text:
@@ -1057,7 +1052,6 @@ def _profile_snapshot(
         "profile_label": getattr(profile, "profile_label", None) if profile else None,
         "photo_url": photo_url,
     }
-
 
 if hasattr(app, "before_first_request"):
 
