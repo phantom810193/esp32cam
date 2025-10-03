@@ -470,11 +470,7 @@ class Database:
                 WHERE member_id = ?
                   AND member_id IS NOT NULL
                   AND TRIM(member_id) <> ''
-                  AND NOT EXISTS (
-                        SELECT 1
-                        FROM upload_events
-                        WHERE upload_events.member_id = member_profiles.member_id
-                    )
+                  AND first_image_filename IS NULL
                 LIMIT 1
                 """,
                 (preferred_member_id,),
@@ -488,11 +484,7 @@ class Database:
             FROM member_profiles
             WHERE member_id IS NOT NULL
               AND TRIM(member_id) <> ''
-              AND NOT EXISTS (
-                    SELECT 1
-                    FROM upload_events
-                    WHERE upload_events.member_id = member_profiles.member_id
-                )
+              AND first_image_filename IS NULL
             ORDER BY profile_id
             """,
         ).fetchall()

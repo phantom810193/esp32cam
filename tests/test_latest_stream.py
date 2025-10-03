@@ -1,10 +1,13 @@
 import json
 import sys
 import types
+from io import BytesIO
+from itertools import count
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -140,3 +143,93 @@ def test_latest_stream_rejects_invalid_interval(client):
     assert response.status_code == 400
     payload = response.get_json()
     assert payload == {"error": "Invalid interval"}
+
+
+def test_reserved_member_ids_not_reused(client, monkeypatch):
+    database.ensure_demo_data()
+    database.cleanup_upload_events(keep_latest=0)
+
+    counter = count(1)
+
+    def _fake_persist(member_id: str, image_bytes: bytes, mime_type: str) -> str:
+        return f"test-upload-{next(counter)}-{member_id}.jpg"
+
+    monkeypatch.setattr("backend.app._persist_upload_image", _fake_persist)
+
+    reserved_slots = [
+        ("staging-slot-01", "MEMSLOT01"),
+        ("staging-slot-02", "MEMSLOT02"),
+        ("staging-slot-03", "MEMSLOT03"),
+    ]
+
+    try:
+        with database._connect() as conn:
+            conn.execute("DELETE FROM upload_events")
+            conn.execute(
+                "DELETE FROM members WHERE member_id IN (?, ?, ?)",
+                tuple(member_id for _, member_id in reserved_slots),
+            )
+            conn.execute(
+                """
+                UPDATE member_profiles
+                SET first_image_filename = COALESCE(first_image_filename, 'seed-' || member_id || '.jpg')
+                WHERE member_id IN (?, ?, ?, ?, ?)
+                """,
+                (
+                    "MEME0383FE3AA",
+                    "MEM692FFD0824",
+                    "MEMFITNESS2025",
+                    "MEMHOMECARE2025",
+                    "MEMHEALTH2025",
+                ),
+            )
+            for label, member_id in reserved_slots:
+                conn.execute(
+                    """
+                    UPDATE member_profiles
+                    SET member_id = ?, first_image_filename = NULL
+                    WHERE profile_label = ?
+                    """,
+                    (member_id, label),
+                )
+            conn.commit()
+
+        results = []
+        for index, (_, expected_member_id) in enumerate(reserved_slots):
+            image = Image.new("RGB", (16, 16), color=(10 + index * 30, 40, 70))
+            buffer = BytesIO()
+            image.save(buffer, format="JPEG")
+            image_bytes = buffer.getvalue()
+
+            response = client.post(
+                "/upload_face",
+                data={"image": (BytesIO(image_bytes), f"face-{index}.jpg")},
+                content_type="multipart/form-data",
+            )
+
+            assert response.status_code == 201
+            payload = response.get_json()
+            assert payload["status"] == "ok"
+            assert payload["new_member"] is True
+            assert payload["member_id"] == expected_member_id
+            results.append(payload)
+
+        returned_ids = [payload["member_id"] for payload in results]
+        assert returned_ids == [member_id for _, member_id in reserved_slots]
+
+        with database._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT profile_label, member_id, first_image_filename
+                FROM member_profiles
+                WHERE profile_label IN (?, ?, ?)
+                ORDER BY profile_id
+                """,
+                tuple(label for label, _ in reserved_slots),
+            ).fetchall()
+
+        assert [row["member_id"] for row in rows] == returned_ids
+        assert all(row["first_image_filename"] for row in rows)
+    finally:
+        database.ensure_demo_data()
+        database.cleanup_upload_events(keep_latest=0)
