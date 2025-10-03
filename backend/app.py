@@ -165,8 +165,59 @@ class _LatestAdHub:
 
 
 _latest_ad_hub = _LatestAdHub()
+_warmup_once_lock = Lock()
+_warmup_ran = False
 
 
+
+
+def _seed_latest_ad_hub() -> None:
+    """Lazy warm-up: run on first incoming request, not at import time."""
+    try:
+        event = database.get_latest_upload_event()
+        if not event:
+            return
+
+        purchases = database.get_purchase_history(event.member_id)
+        profile = database.get_member_profile(event.member_id)
+
+        prediction_items: list[Any] = []
+        try:
+            pr = predict_next_purchases(purchases, profile=profile)
+            if getattr(pr, "items", None):
+                prediction_items = list(pr.items)
+        except Exception as exc:
+            logging.warning(
+                "Prediction pipeline unavailable for %s during warmup: %s",
+                event.member_id,
+                exc,
+            )
+            prediction_items = []
+
+        timings = {
+            "upload": getattr(event, "upload_duration", None),
+            "recognition": getattr(event, "recognition_duration", None),
+            "generation": getattr(event, "ad_duration", None),
+            "total": getattr(event, "total_duration", None),
+        }
+
+        ctx = build_ad_context(
+            event.member_id,
+            purchases,
+            profile=profile,
+            profile_snapshot=None,
+            prediction_items=prediction_items,
+            audience=_determine_audience(
+                new_member=False, profile=profile, purchases=purchases
+            ),
+            timings=timings,
+            detected_at=getattr(event, "created_at", None),
+        )
+
+        _latest_ad_hub.publish(_serialize_ad_context(ctx))
+
+    except Exception as exc:
+        logging.warning("Warmup seed failed (lazy): %s", exc)
 
 
 def _persona_label_display(profile_label: str | None) -> str | None:
@@ -223,51 +274,15 @@ def _serialize_ad_context(context: AdContext) -> dict[str, object]:
     return payload
 
 
-_existing_event = database.get_latest_upload_event()
-if _existing_event is not None:
-    _existing_purchases = database.get_purchase_history(_existing_event.member_id)
-    _existing_profile = database.get_member_profile(_existing_event.member_id)
-    _existing_prediction_items: list[Any] = []
-    try:
-        _existing_prediction = predict_next_purchases(_existing_purchases, profile=_existing_profile)
-        if getattr(_existing_prediction, 'items', None):
-            _existing_prediction_items = list(_existing_prediction.items)
-    except Exception as exc:  # pragma: no cover - defensive
-        logging.warning('Prediction pipeline unavailable for %s during warmup: %s', _existing_event.member_id, exc)
-        _existing_prediction_items = []
-
-    _existing_profile_snapshot = _profile_snapshot(
-        _existing_profile,
-        member_id=_existing_event.member_id,
-        image_filename=getattr(_existing_event, 'image_filename', None),
-    )
-    _existing_timings = {
-        'upload': getattr(_existing_event, 'upload_duration', None),
-        'recognition': getattr(_existing_event, 'recognition_duration', None),
-        'generation': getattr(_existing_event, 'ad_duration', None),
-        'total': getattr(_existing_event, 'total_duration', None),
-    }
-    _existing_context = build_ad_context(
-        _existing_event.member_id,
-        _existing_purchases,
-        profile=_existing_profile,
-        profile_snapshot=_existing_profile_snapshot,
-        prediction_items=_existing_prediction_items,
-        audience=_determine_audience(
-            new_member=False,
-            profile=_existing_profile,
-            purchases=_existing_purchases,
-        ),
-        timings=_existing_timings,
-        detected_at=getattr(_existing_event, 'created_at', None),
-    )
-    _latest_ad_hub.publish(_serialize_ad_context(_existing_context))
-    del (_existing_context, _existing_event, _existing_purchases, _existing_profile, _existing_prediction_items, _existing_profile_snapshot, _existing_timings)
-
-
 @app.get("/")
 def index() -> str:
     return render_template("index.html")
+
+
+@app.get("/demo/upload-ad")
+def simple_upload_demo() -> str:
+    """Serve a minimal uploader that drives the face recognition flow."""
+    return render_template("simple_upload.html")
 
 
 @app.get("/dashboard")
@@ -535,6 +550,10 @@ def upload_face():
         "audience": audience,
         "scenario_key": context.scenario_key,
         "hero_image_url": hero_image_url,
+        "headline": context.headline,
+        "subheading": context.subheading,
+        "highlight": context.highlight,
+        "detected_at": detected_at,
     }
     if predicted_dict:
         payload["predicted"] = predicted_dict
@@ -1104,6 +1123,26 @@ def _profile_snapshot(
     }
 
 
+if hasattr(app, "before_first_request"):
+
+    @app.before_first_request
+    def _warmup_on_first_request():
+        """Seed the latest ad hub only when the first request arrives."""
+        _seed_latest_ad_hub()
+
+else:
+
+    @app.before_request
+    def _warmup_on_first_request():  # pragma: no cover - Flask 3 fallback
+        """Fallback for Flask versions without before_first_request."""
+        global _warmup_ran
+        if _warmup_ran:
+            return
+        with _warmup_once_lock:
+            if _warmup_ran:
+                return
+            _seed_latest_ad_hub()
+            _warmup_ran = True
 
 
 if __name__ == "__main__":
