@@ -165,13 +165,9 @@ class _LatestAdHub:
         for queue in subscribers:
             queue.put(context)
 
-
 _latest_ad_hub = _LatestAdHub()
 _warmup_once_lock = Lock()
 _warmup_ran = False
-
-
-
 
 def _seed_latest_ad_hub() -> None:
     """Lazy warm-up: run on first incoming request, not at import time."""
@@ -221,7 +217,6 @@ def _seed_latest_ad_hub() -> None:
     except Exception as exc:
         logging.warning("Warmup seed failed (lazy): %s", exc)
 
-
 def _persona_label_display(profile_label: str | None) -> str | None:
     if not profile_label:
         return None
@@ -232,6 +227,7 @@ def _persona_label_display(profile_label: str | None) -> str | None:
 
 
 def _serialize_ad_context(context: AdContext) -> dict[str, object]:
+  
     try:
         ad_url = url_for("render_ad", member_id=context.member_id, _external=True)
     except RuntimeError:
@@ -276,6 +272,7 @@ def _serialize_ad_context(context: AdContext) -> dict[str, object]:
     payload["hero_image_url"] = _resolve_template_image(context.template_id)
     payload["status"] = "ok"
     payload["ad_url"] = ad_url
+
     latest_event = database.get_latest_upload_event()
     if latest_event is not None:
         payload["event_id"] = latest_event.id
@@ -564,7 +561,6 @@ def upload_face():
         "highlight": context.highlight,
         "detected_at": detected_at,
     }
-
     if predicted_dict:
         payload["predicted"] = predicted_dict
     if context.cta_text:
@@ -573,6 +569,7 @@ def upload_face():
     if not cta_href or cta_href.startswith("#"):
         cta_href = payload["ad_url"]
     payload["cta_href"] = cta_href
+
     if distance is not None:
         payload["distance"] = distance
     return jsonify(payload), 201 if new_member else 200
@@ -868,6 +865,7 @@ def ad_preview(filename: str):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 
 def _manager_hero_image(profile, scenario_key: str) -> str | None:
