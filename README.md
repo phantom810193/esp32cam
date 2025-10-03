@@ -190,7 +190,9 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
 ## 前端展示（電視棒 / 螢幕）
 
 - 建議在電視棒或任何瀏覽器打開 `http://<server-ip>:8000/ad/latest`，透過 SSE 自動切換成最新辨識出的會員廣告。
+
 - 若需固定觀看指定會員，可開啟 `http://<server-ip>:8000/ad/<member_id>`（儀表板）或 `http://<server-ip>:8000/ad/<member_id>/offer`（純廣告頁）進行除錯；儀表板頁面會保留原本的輪播刷新行為。
+
 - 管理人員可前往 `http://<server-ip>:8000/dashboard` 檢視會員儀表板，亦可透過查詢參數 `?member_id=MEMxxxx` 指定會員。此頁整合會員基本資料、聯絡方式、點數餘額與購買紀錄，方便現場客服或營運團隊快速掌握狀態。
 - Demo 情境可直接拜訪 `http://<server-ip>:8000/demo/upload-ad`，上傳人像後立即取得會員辨識結果與同步產生的 Gemini 廣告文案，並可在頁面內預覽固定底圖 + 文案的輸出效果。
 

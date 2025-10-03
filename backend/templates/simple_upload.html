@@ -389,6 +389,7 @@
         adSubheading.textContent = data.subheading || '';
         adHighlight.textContent = data.highlight || '';
         adTag.textContent = audienceCopy[data.audience] || `🎯 ${data.audience || '廣告預覽'}`;
+
         let preferredHref;
         if (data.cta_href && !data.cta_href.startsWith('#')) {
           preferredHref = data.cta_href;
@@ -402,6 +403,7 @@
         const actionLink = preferredHref && !preferredHref.startsWith('#')
           ? toAbsoluteUrl(preferredHref)
           : null;
+
         if (data.cta_text || actionLink) {
           adCta.textContent = data.cta_text || '查看完整廣告';
           if (actionLink) {
@@ -412,6 +414,7 @@
             adCta.removeAttribute('href');
             adCta.removeAttribute('target');
             adCta.removeAttribute('rel');
+
           }
           adCta.style.display = 'inline-flex';
         } else {

@@ -28,7 +28,9 @@ from flask import (
     stream_with_context,
     url_for,
 )
+
 from PIL import Image, ImageOps, UnidentifiedImageError
+
 from werkzeug.utils import safe_join
 
 from .advertising import (
@@ -86,6 +88,7 @@ app.register_blueprint(adgen_blueprint)
 # -----------------------------------------------------------------------------
 # Services (Gemini Text / AWS Rekognition / DB)
 # -----------------------------------------------------------------------------
+
 gemini = GeminiService()
 
 # ---- 重要：相容性 shim（避免其他模組仍 import `Gemini` 時失敗）----
@@ -218,7 +221,6 @@ def _seed_latest_ad_hub() -> None:
     except Exception as exc:
         logging.warning("Warmup seed failed (lazy): %s", exc)
 
-
 def _persona_label_display(profile_label: str | None) -> str | None:
     if not profile_label:
         return None
@@ -226,6 +228,7 @@ def _persona_label_display(profile_label: str | None) -> str | None:
         profile_label,
         profile_label.replace("-", " ").title(),
     )
+
 
 
 def _serialize_ad_context(context: AdContext) -> dict[str, object]:
@@ -278,6 +281,7 @@ def _serialize_ad_context(context: AdContext) -> dict[str, object]:
         payload["predicted"] = dict(context.predicted)
     if context.detected_at:
         payload["detected_at"] = context.detected_at
+
     payload["hero_image_url"] = _resolve_template_image(context.template_id)
     payload["status"] = "ok"
     payload["ad_url"] = ad_url
@@ -302,6 +306,7 @@ def simple_upload_demo() -> str:
 @app.get("/dashboard")
 def dashboard() -> str:
     """Render the customer dashboard demo page."""
+
     requested_member_id = request.args.get("member_id")
     member_id = requested_member_id or None
 
@@ -553,6 +558,7 @@ def upload_face():
     )
     stale_images = database.cleanup_upload_events(keep_latest=1)
     _purge_upload_images(stale_images)
+
     hero_image_url = _resolve_template_image(context.template_id)
     payload = {
         "status": "ok",
@@ -580,6 +586,7 @@ def upload_face():
     elif cta_href.startswith("#") and audience == "member":
         cta_href = payload["offer_url"]
     payload["cta_href"] = cta_href
+
     if distance is not None:
         payload["distance"] = distance
     return jsonify(payload), 201 if new_member else 200
@@ -627,6 +634,7 @@ def merge_members():
             "encoding_updated": encoding_updated,
         }
     ), 200
+
 
 
 def _prepare_member_ad_context(member_id: str) -> tuple[dict[str, object], MemberProfile | None]:
@@ -710,7 +718,6 @@ def render_ad_offer(member_id: str):
         "ad_offer.html",
         context=context_dict,
     )
-
 
 @app.get("/ad/latest")
 def render_latest_ad():
@@ -903,9 +910,13 @@ def ad_preview(filename: str):
     )
 
 
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+
 
 def _manager_hero_image(profile, scenario_key: str) -> str | None:
     if profile and profile.first_image_filename:

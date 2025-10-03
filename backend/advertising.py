@@ -216,7 +216,9 @@ def build_ad_context(
         if cta_text is None:
             cta_text = CTA_JOIN_MEMBER
     else:
+
         fallback_ad_link = f"/ad/{member_id}/offer" if member_id else "#member-offer"
+
         cta_href = fallback_ad_link
         if cta_text is None:
             cta_text = CTA_MEMBER_OFFER

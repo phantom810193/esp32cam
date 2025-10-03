@@ -524,6 +524,7 @@ span~#tab>div:first-of-type,
     color: #6b7280;
     text-align: center;
 }
+
 .member-offer {
     margin-top: 24px;
     background: #ffffff;
@@ -604,6 +605,7 @@ span~#tab>div:first-of-type,
 .member-offer__copy .is-hidden {
     display: none;
 }
+
 .hight{
     padding: 4px 16px;
     border-radius: 8px;

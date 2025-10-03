@@ -29,6 +29,7 @@
     {% else %}
         {% set initial_cta_href = raw_cta or payload.get('ad_url') %}
     {% endif %}
+
     <header>
         <h1>你的專屬折扣</h1>
         <nav>
@@ -214,6 +215,7 @@
       function buildRows(items) {
         if (!items || !items.length) {
           return '<tr><td colspan="6">暫無預測資料，歡迎加入會員以獲得更多推薦。</td></tr>';
+
         }
         return items.slice(0, 7).map((item) => {
           const price = item.price != null ? `$${Math.round(item.price)}` : '--';
@@ -227,6 +229,7 @@
             <td>${price}</td>
             <td>${viewRate}</td>
             <td>${formatProbability(probability)}</td>
+
           </tr>`;
         }).join('');
       }
@@ -304,21 +307,26 @@
           preferredHref = payload.ad_url;
         }
 
+
         function syncLink(linkEl, defaultText) {
           if (!linkEl) return;
           linkEl.textContent = payload.cta_text || defaultText;
+
           if (preferredHref && !preferredHref.startsWith('#')) {
+
             linkEl.href = preferredHref;
             linkEl.target = '_blank';
             linkEl.rel = 'noopener';
             linkEl.classList.remove('is-disabled');
             linkEl.removeAttribute('aria-disabled');
+
           } else if (preferredHref) {
             linkEl.href = preferredHref;
             linkEl.removeAttribute('target');
             linkEl.removeAttribute('rel');
             linkEl.classList.remove('is-disabled');
             linkEl.removeAttribute('aria-disabled');
+
           } else {
             linkEl.href = '#';
             linkEl.removeAttribute('target');
@@ -329,6 +337,7 @@
         }
 
         syncLink(document.getElementById('cta-link'), '檢視生成廣告');
+
       }
 
       applyPayload({{ payload | tojson }});
