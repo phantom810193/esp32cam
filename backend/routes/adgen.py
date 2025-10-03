@@ -1,179 +1,172 @@
-"""Vertex AI powered advertisement generation endpoints."""
+"""Google Gemini powered advertisement generation endpoints."""
 from __future__ import annotations
 
-import json
 import logging
-import os
-from datetime import datetime, timedelta
-from typing import Any, Dict
-from uuid import uuid4
+from typing import Any, Dict, Iterable
 
 from flask import Blueprint, jsonify, request, url_for
-from google.cloud import storage
-import vertexai
-from vertexai.generative_models import GenerationConfig, GenerativeModel
-from vertexai.preview.vision_models import ImageGenerationModel
+
+from ..ai import GeminiService, GeminiUnavailableError
+from ..advertising import CATEGORY_TEMPLATE_RULES, TEMPLATE_IMAGE_BY_ID
 
 adgen_blueprint = Blueprint("adgen", __name__)
 
-_TEXT_MODEL_NAME = os.environ.get("VERTEX_TEXT_MODEL", "gemini-1.5-pro")
-_IMAGE_MODEL_NAME = os.environ.get("VERTEX_IMAGE_MODEL", "imagegeneration@002")
-_DEFAULT_REGION = os.environ.get("GCP_REGION", "asia-east1")
+_gemini_service = GeminiService()
 
-_vertex_initialised = False
-_text_model_instance: GenerativeModel | None = None
-_image_model_instance: ImageGenerationModel | None = None
-
-
-def _ensure_vertex_initialised() -> tuple[str, str]:
-    global _vertex_initialised
-    project_id = os.environ.get("GCP_PROJECT_ID")
-    if not project_id:
-        raise RuntimeError("GCP_PROJECT_ID environment variable is required for Vertex AI")
-
-    region = os.environ.get("GCP_REGION", _DEFAULT_REGION)
-    if not _vertex_initialised:
-        vertexai.init(project=project_id, location=region)
-        _vertex_initialised = True
-    return project_id, region
+_DEFAULT_TEMPLATE_ID = "ME0003"
+_KEYWORD_TEMPLATE_HINTS = {
+    "dessert": "ME0001",
+    "sweet": "ME0001",
+    "cake": "ME0001",
+    "bakery": "ME0001",
+    "幼兒": "ME0002",
+    "親子": "ME0002",
+    "kids": "ME0002",
+    "kindergarten": "ME0002",
+    "健身": "ME0003",
+    "運動": "ME0003",
+    "fitness": "ME0003",
+}
 
 
-def _get_text_model() -> GenerativeModel:
-    global _text_model_instance
-    if _text_model_instance is None:
-        _ensure_vertex_initialised()
-        _text_model_instance = GenerativeModel(_TEXT_MODEL_NAME)
-    return _text_model_instance
+def _normalise_template_id(candidate: str | None) -> str | None:
+    if not candidate:
+        return None
+    value = candidate.strip().upper()
+    if value.endswith(".JPG"):
+        value = value[:-4]
+    if value in TEMPLATE_IMAGE_BY_ID:
+        return value
+    return None
 
 
-def _get_image_model() -> ImageGenerationModel:
-    global _image_model_instance
-    if _image_model_instance is None:
-        _ensure_vertex_initialised()
-        _image_model_instance = ImageGenerationModel.from_pretrained(_IMAGE_MODEL_NAME)
-    return _image_model_instance
+def _collect_hint_tokens(payload: Dict[str, Any], member_profile: Dict[str, Any]) -> Iterable[str]:
+    tokens: list[str] = []
+    for key in ("category", "theme", "template", "segment"):
+        value = payload.get(key)
+        if isinstance(value, str):
+            tokens.append(value.lower())
+    sku = payload.get("sku")
+    if isinstance(sku, str):
+        tokens.extend(part.lower() for part in sku.split())
+    for key in ("segment", "profile_label", "template_id"):
+        value = member_profile.get(key)
+        if isinstance(value, str):
+            tokens.append(value.lower())
+    tags = member_profile.get("tags")
+    if isinstance(tags, (list, tuple)):
+        for tag in tags:
+            if isinstance(tag, str):
+                tokens.append(tag.lower())
+    return tokens
 
 
-def _build_text_prompt(sku: str, member_profile: Dict[str, Any]) -> str:
-    persona = json.dumps(member_profile, ensure_ascii=False) if member_profile else "{}"
-    return (
-        "你是一位商場的廣告行銷策劃師，正在為會員製作 1:1 的推播文案。\n"
-        "請針對下列資訊，輸出一段 JSON，鍵值必須包含 title、subline、cta 三項，"
-        "內容需使用繁體中文且適合數位看板，保持 6~18 個字且富有行動力。\n"
-        "\nSKU: "
-        f"{sku}\n"
-        "會員資料(JSON)："
-        f"{persona}\n"
-        "若資訊不足，請以吸引新客為目標設計文案，仍須輸出 JSON。"
-    )
+def _resolve_template_id(payload: Dict[str, Any], member_profile: Dict[str, Any]) -> str:
+    explicit = _normalise_template_id(payload.get("template_id"))
+    if explicit:
+        return explicit
+
+    profile_hint = _normalise_template_id(member_profile.get("template_id"))
+    if profile_hint:
+        return profile_hint
+
+    tokens = list(_collect_hint_tokens(payload, member_profile))
+    for token in tokens:
+        for template_id, categories in CATEGORY_TEMPLATE_RULES.items():
+            if token in categories:
+                return template_id
+
+    combined = " ".join(tokens)
+    for keyword, template_id in _KEYWORD_TEMPLATE_HINTS.items():
+        if keyword in combined:
+            return template_id
+
+    return _DEFAULT_TEMPLATE_ID
 
 
-def _build_image_prompt(sku: str, copy: Dict[str, str], member_profile: Dict[str, Any]) -> str:
-    persona_bits = ", ".join(
-        f"{key}:{value}" for key, value in member_profile.items() if value
-    )
-    headline = copy.get("title") or sku
-    description = copy.get("subline") or ""
-    prompt = (
-        "生成一張 1:1 比例、充滿活力的商場活動宣傳海報。"
-        "畫面需加入代表商品或服務的視覺元素，避免文字擁擠。"
-        "以高端百貨風格呈現，色彩明亮吸睛，適合 1080x1080 LED 看板。"
-        f"主標題靈感：{headline}. 副標語靈感：{description}."
-    )
-    if persona_bits:
-        prompt += f" 目標客群特徵：{persona_bits}."
-    prompt += f" 針對品項 {sku} 打造，避免浮水印與品牌 logo。"
-    return prompt
+def _build_background_url(template_id: str) -> str:
+    filename = TEMPLATE_IMAGE_BY_ID.get(template_id) or TEMPLATE_IMAGE_BY_ID[_DEFAULT_TEMPLATE_ID]
+    return url_for("static", filename=f"images/ads/{filename}", _external=True)
 
 
-def _generate_copy(sku: str, member_profile: Dict[str, Any]) -> Dict[str, str]:
-    model = _get_text_model()
-    prompt = _build_text_prompt(sku, member_profile)
-    response = model.generate_content(
-        prompt,
-        generation_config=GenerationConfig(temperature=0.6, max_output_tokens=256),
-    )
-    text = getattr(response, "text", None) or ""
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        logging.warning("Vertex AI Gemini response is not JSON, fallback to template: %s", text)
+def _fallback_copy(audience: str) -> Dict[str, str]:
+    audience_key = (audience or "guest").strip().lower()
+    if audience_key == "member":
         return {
-            "title": f"{sku} 限時禮遇",
-            "subline": "專屬禮遇即刻開啟，加入會員解鎖驚喜。",
-            "cta": "立即了解活動"
+            "headline": "會員尊享限定禮遇",
+            "subheading": "立即憑會員編號兌換專屬好禮",
+            "highlight": "感謝長期支持，館內人氣品牌同步加碼折扣，錯過不再。",
+            "cta": "立即領取會員獎勵",
         }
-    result = {
-        "title": str(parsed.get("title") or f"{sku} 精選活動").strip(),
-        "subline": str(parsed.get("subline") or "加入會員即可領取驚喜好禮").strip(),
-        "cta": str(parsed.get("cta") or "立即參加").strip(),
-    }
-    return result
-
-
-def _generate_image_bytes(sku: str, copy: Dict[str, str], member_profile: Dict[str, Any]) -> bytes:
-    model = _get_image_model()
-    prompt = _build_image_prompt(sku, copy, member_profile)
-    result = model.generate_images(prompt=prompt, number_of_images=1, aspect_ratio="1:1")
-    if not result.images:
-        raise RuntimeError("Vertex AI Images did not return any image data")
-    image = result.images[0]
-    if hasattr(image, "as_bytes"):
-        return image.as_bytes()
-    if hasattr(image, "bytes_data"):
-        return image.bytes_data
-    raise RuntimeError("Unsupported image response format from Vertex AI Images")
-
-
-def _upload_to_gcs(image_bytes: bytes, sku: str) -> str:
-    bucket_name = os.environ.get("ASSET_BUCKET")
-    if not bucket_name:
-        raise RuntimeError("ASSET_BUCKET environment variable is required")
-
-    client = storage.Client()
-    bucket = client.bucket(bucket_name)
-    object_name = f"adgen/{sku}/{datetime.utcnow():%Y%m%d}/{uuid4().hex}.png"
-    blob = bucket.blob(object_name)
-    blob.upload_from_string(image_bytes, content_type="image/png")
-
-    expires = datetime.utcnow() + timedelta(hours=12)
-    return blob.generate_signed_url(expiration=expires, method="GET")
-
-
-def _fallback_payload(sku: str) -> Dict[str, str]:
-    image_url = url_for("static", filename="images/ads/ME0000.jpg", _external=True)
+    if audience_key == "new":
+        return {
+            "headline": "歡迎加入星悅商場",
+            "subheading": "首次來店享入會好禮與免費體驗",
+            "highlight": "填寫基本資料即可獲得甜點招待券，還有多項入會驚喜等你探索。",
+            "cta": "立即啟動迎賓禮",
+        }
     return {
-        "title": f"{sku} 推廣活動",
-        "subline": "系統暫時使用預設素材，仍歡迎洽詢現場人員。",
-        "cta": "現場了解更多",
-        "image_url": image_url,
+        "headline": "加入會員 解鎖專屬優惠",
+        "subheading": "立即完成註冊，暢享館內好康",
+        "highlight": "新朋友限定！加入即可領取甜點兌換券與全館 95 折購物禮遇。",
+        "cta": "立即加入會員",
     }
 
 
 @adgen_blueprint.post("/adgen")
 def create_generated_ad():
     payload = request.get_json(silent=True) or {}
-    sku = str(payload.get("sku") or "").strip()
-    if not sku:
-        return jsonify({"error": "sku is required"}), 400
+    if not isinstance(payload, dict):
+        payload = {}
 
-    member_profile = payload.get("member_profile") or {}
+    member_id = str(payload.get("member_id") or "GUEST").strip() or "GUEST"
+    audience = str(payload.get("audience") or "guest")
+    purchases = payload.get("purchases") or []
+    if not isinstance(purchases, list):
+        purchases = []
+    purchases_payload: list[dict[str, Any]] = []
+    for entry in purchases:
+        if isinstance(entry, dict):
+            purchases_payload.append(entry)
+
+    predicted = payload.get("predicted")
+    if not isinstance(predicted, dict):
+        predicted = None
+
+    member_profile = payload.get("member_profile")
     if not isinstance(member_profile, dict):
         member_profile = {}
 
     try:
-        _ensure_vertex_initialised()
-        copy = _generate_copy(sku, member_profile)
-        image_bytes = _generate_image_bytes(sku, copy, member_profile)
-        image_url = _upload_to_gcs(image_bytes, sku)
-    except Exception as exc:  # pylint: disable=broad-except
-        logging.exception("Ad generation pipeline failed for SKU %s: %s", sku, exc)
-        fallback = _fallback_payload(sku)
-        return jsonify(fallback), 503
+        creative = _gemini_service.generate_ad_copy(
+            member_id=member_id,
+            purchases=purchases_payload,
+            predicted=predicted,
+            audience=audience,
+        )
+        copy_payload = {
+            "headline": creative.headline,
+            "subheading": creative.subheading,
+            "highlight": creative.highlight,
+            "cta": creative.cta or _fallback_copy(audience)["cta"],
+        }
+    except GeminiUnavailableError as exc:
+        logging.warning("Gemini unavailable during /adgen: %s", exc)
+        copy_payload = _fallback_copy(audience)
+        status_code = 503
+    except Exception as exc:  # pragma: no cover - defensive catch
+        logging.exception("Unexpected Gemini failure during /adgen: %s", exc)
+        copy_payload = _fallback_copy(audience)
+        status_code = 500
+    else:
+        status_code = 200
 
-    return jsonify({
-        "title": copy["title"],
-        "subline": copy["subline"],
-        "cta": copy["cta"],
+    template_id = _resolve_template_id(payload, member_profile)
+    image_url = _build_background_url(template_id)
+
+    response_body = {
+        **copy_payload,
+        "template_id": template_id,
         "image_url": image_url,
-    })
+    }
+    return jsonify(response_body), status_code
