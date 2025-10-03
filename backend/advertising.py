@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from pathlib import Path
+import shutil
 from typing import Iterable, Literal
 
 from .ai import AdCreative
@@ -251,3 +253,55 @@ def _subheading_prefix(member_code: str) -> str:
     if member_code:
         return f"商場會員代號：{member_code}｜"
     return "尚未綁定商場會員，立即至服務台完成綁定享專屬禮遇｜"
+
+
+def compose_final_image(
+    base_image_path: str | Path,
+    *,
+    member_id: str,
+    output_dir: str | Path | None = None,
+) -> Path:
+    """Prepare the final advertising image for ``member_id``.
+
+    The previous implementation attempted to infer the member identifier from the
+    ``base_image_path`` by reading the filename and renaming the file before
+    saving the composed result.  That approach broke down whenever the base
+    image did not already contain the member identifier (for example when using
+    cached hero images that were stored under scenario-based filenames).  The
+    updated version asks the caller to provide the ``member_id`` explicitly so
+    the output filename can be constructed deterministically regardless of the
+    source filename.
+
+    Parameters
+    ----------
+    base_image_path:
+        The source hero image that should be used as the background for the
+        member advertisement.
+    member_id:
+        The member identifier used to build the output filename.
+    output_dir:
+        Optional directory where the composed image should be written.  When not
+        supplied the image will be created next to the base image.
+
+    Returns
+    -------
+    pathlib.Path
+        The path to the composed image on disk.
+    """
+
+    base_path = Path(base_image_path)
+    if not base_path.exists():
+        raise FileNotFoundError(f"Base advertising image not found: {base_path}")
+
+    destination_dir = Path(output_dir) if output_dir is not None else base_path.parent
+    destination_dir.mkdir(parents=True, exist_ok=True)
+
+    output_path = destination_dir / f"{member_id}{base_path.suffix}"
+
+    # When the base image already resides at the desired location we avoid
+    # copying and simply reuse the file.  Otherwise a copy ensures we do not
+    # mutate shared assets.
+    if base_path.resolve() != output_path.resolve():
+        shutil.copy2(base_path, output_path)
+
+    return output_path
