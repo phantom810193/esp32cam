@@ -216,7 +216,8 @@ def build_ad_context(
         if cta_text is None:
             cta_text = CTA_JOIN_MEMBER
     else:
-        cta_href = "#member-offer"
+        fallback_ad_link = f"/ad/{member_id}/offer" if member_id else "#member-offer"
+        cta_href = fallback_ad_link
         if cta_text is None:
             cta_text = CTA_MEMBER_OFFER
 
@@ -359,13 +360,8 @@ def _fallback_copy(
         )
 
     product_name = str(predicted.get("product_name")) if predicted and predicted.get("product_name") else None
-    probability_percent = predicted.get("probability_percent") if predicted else None
     price = predicted.get("price") if predicted else None
     category_label = str(predicted.get("category_label", "人氣商品")) if predicted else "人氣商品"
-
-    probability_text = ""
-    if isinstance(probability_percent, (int, float)) and probability_percent > 0:
-        probability_text = f"預測本月購買機率 {probability_percent:.1f}%"
 
     price_text = ""
     if isinstance(price, (int, float)) and price > 0:
@@ -375,7 +371,10 @@ def _fallback_copy(
         if product_name:
             return (
                 f"{product_name} 限時預留",
-                f"{probability_text or '依照你的上月消費偏好，我們已為你預留熱門商品'} {price_text}".strip(),
+                (
+                    "依照你的上月消費偏好，我們已為你預留熱門商品"
+                    + (f"，{price_text}" if price_text else "")
+                ),
                 f"加入會員即享 {product_name} 首購 85 折，再送迎賓點數！",
                 CTA_JOIN_MEMBER,
             )
@@ -388,9 +387,12 @@ def _fallback_copy(
 
     # audience == "member"
     if product_name:
+        detail = f"{category_label} 主題推薦"
+        if price_text:
+            detail = f"{detail}｜{price_text}"
         return (
             f"會員專屬 {product_name}",
-            f"{probability_text or category_label + ' 主題推薦'} {price_text}".strip(),
+            detail,
             f"今日刷會員卡享 {product_name} 88 折，點數雙倍奉上！",
             CTA_MEMBER_OFFER,
         )

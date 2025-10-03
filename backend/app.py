@@ -28,7 +28,6 @@ from flask import (
     stream_with_context,
     url_for,
 )
-from google.cloud import storage
 from PIL import Image, ImageOps, UnidentifiedImageError
 from werkzeug.utils import safe_join
 
@@ -85,7 +84,7 @@ app.config["ADS_DIR"] = str(ADS_DIR)  # 儲存為字串路徑
 app.register_blueprint(adgen_blueprint)
 
 # -----------------------------------------------------------------------------
-# Services (Vertex AI / AWS Rekognition / DB)
+# Services (Gemini Text / AWS Rekognition / DB)
 # -----------------------------------------------------------------------------
 gemini = GeminiService()
 
@@ -165,8 +164,59 @@ class _LatestAdHub:
 
 
 _latest_ad_hub = _LatestAdHub()
+_warmup_once_lock = Lock()
+_warmup_ran = False
 
 
+
+
+def _seed_latest_ad_hub() -> None:
+    """Lazy warm-up: run on first incoming request, not at import time."""
+    try:
+        event = database.get_latest_upload_event()
+        if not event:
+            return
+
+        purchases = database.get_purchase_history(event.member_id)
+        profile = database.get_member_profile(event.member_id)
+
+        prediction_items: list[Any] = []
+        try:
+            pr = predict_next_purchases(purchases, profile=profile)
+            if getattr(pr, "items", None):
+                prediction_items = list(pr.items)
+        except Exception as exc:
+            logging.warning(
+                "Prediction pipeline unavailable for %s during warmup: %s",
+                event.member_id,
+                exc,
+            )
+            prediction_items = []
+
+        timings = {
+            "upload": getattr(event, "upload_duration", None),
+            "recognition": getattr(event, "recognition_duration", None),
+            "generation": getattr(event, "ad_duration", None),
+            "total": getattr(event, "total_duration", None),
+        }
+
+        ctx = build_ad_context(
+            event.member_id,
+            purchases,
+            profile=profile,
+            profile_snapshot=None,
+            prediction_items=prediction_items,
+            audience=_determine_audience(
+                new_member=False, profile=profile, purchases=purchases
+            ),
+            timings=timings,
+            detected_at=getattr(event, "created_at", None),
+        )
+
+        _latest_ad_hub.publish(_serialize_ad_context(ctx))
+
+    except Exception as exc:
+        logging.warning("Warmup seed failed (lazy): %s", exc)
 
 
 def _persona_label_display(profile_label: str | None) -> str | None:
@@ -179,6 +229,23 @@ def _persona_label_display(profile_label: str | None) -> str | None:
 
 
 def _serialize_ad_context(context: AdContext) -> dict[str, object]:
+    try:
+        ad_url = url_for("render_ad", member_id=context.member_id, _external=True)
+    except RuntimeError:
+        ad_url = f"/ad/{context.member_id}"
+
+    try:
+        offer_url = url_for("render_ad_offer", member_id=context.member_id, _external=True)
+    except RuntimeError:
+        offer_url = f"/ad/{context.member_id}/offer"
+
+    audience = context.audience
+    cta_href = context.cta_href or ""
+    if not cta_href:
+        cta_href = offer_url or ad_url
+    elif cta_href.startswith("#") and audience == "member":
+        cta_href = offer_url or ad_url
+
     payload: dict[str, object] = {
         "member_id": context.member_id,
         "member_code": context.member_code,
@@ -189,7 +256,7 @@ def _serialize_ad_context(context: AdContext) -> dict[str, object]:
         "audience": context.audience,
         "scenario_key": context.scenario_key,
         "cta_text": context.cta_text,
-        "cta_href": context.cta_href,
+        "cta_href": cta_href,
         "purchases": [
             {
                 "item": purchase.item,
@@ -213,61 +280,23 @@ def _serialize_ad_context(context: AdContext) -> dict[str, object]:
         payload["detected_at"] = context.detected_at
     payload["hero_image_url"] = _resolve_template_image(context.template_id)
     payload["status"] = "ok"
-    try:
-        payload["ad_url"] = url_for("render_ad", member_id=context.member_id, _external=True)
-    except RuntimeError:
-        payload["ad_url"] = f"/ad/{context.member_id}"
+    payload["ad_url"] = ad_url
+    payload["offer_url"] = offer_url
     latest_event = database.get_latest_upload_event()
     if latest_event is not None:
         payload["event_id"] = latest_event.id
     return payload
 
 
-_existing_event = database.get_latest_upload_event()
-if _existing_event is not None:
-    _existing_purchases = database.get_purchase_history(_existing_event.member_id)
-    _existing_profile = database.get_member_profile(_existing_event.member_id)
-    _existing_prediction_items: list[Any] = []
-    try:
-        _existing_prediction = predict_next_purchases(_existing_purchases, profile=_existing_profile)
-        if getattr(_existing_prediction, 'items', None):
-            _existing_prediction_items = list(_existing_prediction.items)
-    except Exception as exc:  # pragma: no cover - defensive
-        logging.warning('Prediction pipeline unavailable for %s during warmup: %s', _existing_event.member_id, exc)
-        _existing_prediction_items = []
-
-    _existing_profile_snapshot = _profile_snapshot(
-        _existing_profile,
-        member_id=_existing_event.member_id,
-        image_filename=getattr(_existing_event, 'image_filename', None),
-    )
-    _existing_timings = {
-        'upload': getattr(_existing_event, 'upload_duration', None),
-        'recognition': getattr(_existing_event, 'recognition_duration', None),
-        'generation': getattr(_existing_event, 'ad_duration', None),
-        'total': getattr(_existing_event, 'total_duration', None),
-    }
-    _existing_context = build_ad_context(
-        _existing_event.member_id,
-        _existing_purchases,
-        profile=_existing_profile,
-        profile_snapshot=_existing_profile_snapshot,
-        prediction_items=_existing_prediction_items,
-        audience=_determine_audience(
-            new_member=False,
-            profile=_existing_profile,
-            purchases=_existing_purchases,
-        ),
-        timings=_existing_timings,
-        detected_at=getattr(_existing_event, 'created_at', None),
-    )
-    _latest_ad_hub.publish(_serialize_ad_context(_existing_context))
-    del (_existing_context, _existing_event, _existing_purchases, _existing_profile, _existing_prediction_items, _existing_profile_snapshot, _existing_timings)
-
-
 @app.get("/")
 def index() -> str:
     return render_template("index.html")
+
+
+@app.get("/demo/upload-ad")
+def simple_upload_demo() -> str:
+    """Serve a minimal uploader that drives the face recognition flow."""
+    return render_template("simple_upload.html")
 
 
 @app.get("/dashboard")
@@ -531,17 +560,26 @@ def upload_face():
         "member_code": database.get_member_code(member_id),
         "new_member": new_member,
         "ad_url": url_for("render_ad", member_id=member_id, _external=True),
+        "offer_url": url_for("render_ad_offer", member_id=member_id, _external=True),
         "template_id": context.template_id,
         "audience": audience,
         "scenario_key": context.scenario_key,
         "hero_image_url": hero_image_url,
+        "headline": context.headline,
+        "subheading": context.subheading,
+        "highlight": context.highlight,
+        "detected_at": detected_at,
     }
     if predicted_dict:
         payload["predicted"] = predicted_dict
     if context.cta_text:
         payload["cta_text"] = context.cta_text
-    if context.cta_href:
-        payload["cta_href"] = context.cta_href
+    cta_href = context.cta_href or ""
+    if not cta_href:
+        cta_href = payload["offer_url"]
+    elif cta_href.startswith("#") and audience == "member":
+        cta_href = payload["offer_url"]
+    payload["cta_href"] = cta_href
     if distance is not None:
         payload["distance"] = distance
     return jsonify(payload), 201 if new_member else 200
@@ -591,8 +629,7 @@ def merge_members():
     ), 200
 
 
-@app.get("/ad/<member_id>")
-def render_ad(member_id: str):
+def _prepare_member_ad_context(member_id: str) -> tuple[dict[str, object], MemberProfile | None]:
     purchases = database.get_purchase_history(member_id)
     insights = analyse_purchase_intent(purchases)
     profile = database.get_member_profile(member_id)
@@ -601,10 +638,10 @@ def render_ad(member_id: str):
     predicted_dict = None
     try:
         prediction_result = predict_next_purchases(purchases, profile=profile, insights=insights)
-        predicted_item = prediction_result.items[0] if getattr(prediction_result, 'items', None) else None
+        predicted_item = prediction_result.items[0] if getattr(prediction_result, "items", None) else None
         predicted_dict = _prediction_to_dict(predicted_item)
     except Exception as exc:
-        logging.warning('Prediction pipeline unavailable for %s: %s', member_id, exc)
+        logging.warning("Prediction pipeline unavailable for %s: %s", member_id, exc)
         predicted_dict = None
 
     creative = None
@@ -651,11 +688,27 @@ def render_ad(member_id: str):
     if context.detected_at:
         context_dict["detected_at"] = context.detected_at
 
+    return context_dict, profile
+
+
+@app.get("/ad/<member_id>")
+def render_ad(member_id: str):
+    context_dict, profile = _prepare_member_ad_context(member_id)
+    resolved_profile = context_dict.get("profile") or profile
     return render_template(
         "ad_latest.html",
         context=context_dict,
-        profile=context_dict.get("profile"),
+        profile=resolved_profile,
         stream_url=url_for("latest_ad_stream"),
+    )
+
+
+@app.get("/ad/<member_id>/offer")
+def render_ad_offer(member_id: str):
+    context_dict, _ = _prepare_member_ad_context(member_id)
+    return render_template(
+        "ad_offer.html",
+        context=context_dict,
     )
 
 
@@ -673,17 +726,30 @@ def render_latest_ad():
 @app.get("/ad/latest/stream")
 
 def latest_ad_stream():
+    interval_param = request.args.get("interval")
+    try:
+        interval = 15.0 if not interval_param else float(interval_param)
+        if interval <= 0:
+            raise ValueError
+    except ValueError:
+        return jsonify({"error": "Invalid interval"}), 400
+
+    once_flag = request.args.get("once", "").strip().lower()
+    send_once = once_flag in {"1", "true", "yes"}
+
     def event_stream():
         queue = _latest_ad_hub.subscribe()
         try:
             while True:
                 try:
-                    context = queue.get(timeout=15.0)
+                    context = queue.get(timeout=interval)
                 except Empty:
                     yield "event: ping\n\n"
                     continue
                 payload = json.dumps(context, ensure_ascii=False)
                 yield f"data: {payload}\n\n"
+                if send_once:
+                    break
         finally:
             _latest_ad_hub.unsubscribe(queue)
 
@@ -724,6 +790,7 @@ def latest_upload_dashboard():
         event=event,
         image_url=image_url,
         ad_url=url_for("render_ad", member_id=event.member_id, _external=True),
+        offer_url=url_for("render_ad_offer", member_id=event.member_id, _external=True),
         members_url=url_for("member_directory"),
         display_name=display_name,
         persona_label=persona_label,
@@ -786,6 +853,7 @@ def manager_dashboard_view():
             "hero_image_url": hero_image_url,
             "prediction": prediction,
             "ad_url": url_for("render_ad", member_id=selected_id, v2=1, _external=False),
+            "offer_url": url_for("render_ad_offer", member_id=selected_id, _external=False),
         }
     else:
         error = "尚未建立任何會員資料"
@@ -832,69 +900,6 @@ def ad_preview(filename: str):
         "ad.html",
         hero_image_url=hero_image_url,
         scenario_key=request.args.get("scenario_key", "brand_new"),
-    )
-
-
-@app.get("/health")
-def health_check():
-    # 強化健康檢查，方便遠端排錯
-    ads_dir = current_app.config.get("ADS_DIR") or ""
-    ads_path = Path(ads_dir)
-    exists = ads_path.is_dir()
-    sample: list[str] = []
-    if exists:
-        try:
-            sample = [entry.name for entry in sorted(ads_path.iterdir())[:10]]
-        except OSError:
-            sample = []
-    return jsonify(
-        {
-            "status": "ok",
-            "ads_dir": ads_dir,
-            "ads_dir_exists": exists,
-            "ads_dir_sample": sample,
-        }
-    )
-
-
-@app.get("/healthz")
-def extended_health_check():
-    ads_dir = current_app.config.get("ADS_DIR") or ""
-    ads_path = Path(ads_dir)
-    exists = ads_path.is_dir()
-    writable = exists and os.access(ads_path, os.W_OK)
-    sample: list[str] = []
-    if exists:
-        try:
-            sample = [entry.name for entry in sorted(ads_path.iterdir())[:10]]
-        except OSError as exc:
-            logging.warning("Failed to inspect ads directory %s: %s", ads_path, exc)
-
-    bucket_name = os.environ.get("ASSET_BUCKET", "")
-    gcs_status: dict[str, object] = {"bucket": bucket_name, "reachable": False}
-    if bucket_name:
-        try:
-            client = storage.Client()
-            bucket = client.bucket(bucket_name)
-            gcs_status["reachable"] = bucket.exists()
-        except Exception as exc:  # pylint: disable=broad-except
-            gcs_status["error"] = str(exc)
-    else:
-        gcs_status["error"] = "ASSET_BUCKET not configured"
-
-    # 併入 Vertex AI 健康資訊
-    ai_status = gemini.health_probe()
-
-    return jsonify(
-        {
-            "status": "ok" if ai_status.get("vertexai") == "initialized" else "degraded",
-            "ads_dir": str(ads_path),
-            "ads_dir_exists": exists,
-            "ads_dir_writable": writable,
-            "ads_dir_sample": sample,
-            "gcs": gcs_status,
-            "vertex": ai_status,
-        }
     )
 
 
@@ -1104,6 +1109,26 @@ def _profile_snapshot(
     }
 
 
+if hasattr(app, "before_first_request"):
+
+    @app.before_first_request
+    def _warmup_on_first_request():
+        """Seed the latest ad hub only when the first request arrives."""
+        _seed_latest_ad_hub()
+
+else:
+
+    @app.before_request
+    def _warmup_on_first_request():  # pragma: no cover - Flask 3 fallback
+        """Fallback for Flask versions without before_first_request."""
+        global _warmup_ran
+        if _warmup_ran:
+            return
+        with _warmup_once_lock:
+            if _warmup_ran:
+                return
+            _seed_latest_ad_hub()
+            _warmup_ran = True
 
 
 if __name__ == "__main__":

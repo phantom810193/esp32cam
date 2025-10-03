@@ -75,7 +75,7 @@
                 </div>
               </dl>
               <div class="hero-links">
-                <a class="btn" href="{{ context.ad_url }}" target="_blank" rel="noopener">前往顧客版廣告</a>
+                <a class="btn" href="{{ context.offer_url or context.ad_url }}" target="_blank" rel="noopener">前往顧客版廣告</a>
               </div>
             {% else %}
               <div class="hero-empty">請先選擇顧客，即可載入預測資訊</div>
