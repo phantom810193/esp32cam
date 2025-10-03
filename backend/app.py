@@ -1122,7 +1122,6 @@ def _profile_snapshot(
         "photo_url": photo_url,
     }
 
-
 if hasattr(app, "before_first_request"):
 
     @app.before_first_request
