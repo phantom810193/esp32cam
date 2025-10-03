@@ -73,8 +73,9 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
 
 5. API 重點：
 
-    - `POST /upload_face`：接受 `image/jpeg` 或 `multipart/form-data` 影像。回傳 JSON，內含 `member_id`、`member_code`（僅在已有商場註冊代號時帶值）、`new_member` 旗標與廣告頁 URL。
-    - `GET /ad/<member_id>`：根據 SQLite + Gemini Text 的輸出生成廣告頁，適合在除錯或需要鎖定特定會員時手動檢視。
+    - `POST /upload_face`：接受 `image/jpeg` 或 `multipart/form-data` 影像。回傳 JSON，內含 `member_id`、`member_code`（僅在已有商場註冊代號時帶值）、`new_member` 旗標、儀表板網址 (`ad_url`) 以及會員 CTA 專用的廣告頁 (`offer_url`)。
+    - `GET /ad/<member_id>`：顯示會員儀表板（圖二版面），可直接檢視 Gemini 文案、歷史消費與推薦列表。
+    - `GET /ad/<member_id>/offer`：僅呈現指定會員的廣告圖與 Gemini 文案（圖一版面），供 CTA 另開新視窗使用。
     - `GET /dashboard?member_id=MEMxxxx`：管理人員專用的會員儀表板。可輸入 `member_id` 查詢特定會員，也會自動回退至最新上傳事件或預設示範會員。頁面會顯示會員基本資料、聯絡資訊、點數餘額、Persona 標籤及購買歷史，並在有上傳首張照片時自動載入對應人像。
     - `GET /ad/latest`：即時廣告看板。使用 Server-Sent Events (SSE) 監聽最新辨識結果，電視棒只要固定開啟這個網址就會自動切換成剛辨識完成的會員廣告，不需重新整理頁面。
     - `GET /latest_upload`：顯示最新上傳影像、辨識結果、個人化廣告連結與各階段耗時分析，方便除錯與現場展示。後端會保留最新一張上傳影像，並為每位會員留存首次辨識的照片，以避免佔用過多空間又能在名單頁回溯影像。
@@ -120,7 +121,7 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
      1. ESP32-CAM 上傳的顧客影像（若未有首張影像則使用 hero fallback）。
      2. 本月潛在熱銷清單（七筆）、上一期熱銷前三名與上一個月的消費紀錄。
      3. 會員基本資料、職業 / 產業別欄位與參與活動紀錄。
-   - 顧客端廣告頁：`GET /ad/<member_id>?v2=1` 可直接預覽新版樣式；若需要除錯，可加上 `&debug=1` 觀察 hero 圖來源與情境代碼。
+   - 顧客端廣告頁：`GET /ad/<member_id>/offer` 只會顯示 Gemini 圖文廣告；若需要除錯，可改開 `/ad/<member_id>` 檢視完整儀表板與資料來源。
    - 若要重跑推薦邏輯，可從 VM 目錄中挑任一張測試照片呼叫 `/upload_face`，後台會自動辨識身份、寫入上一個月資料並更新上述兩個畫面。
 
 9. 服務啟動時會先刪除並重建 Amazon Rekognition 人臉集合，確保所有雲端特徵從零開始訓練；同時 SQLite 也會重設
@@ -155,7 +156,8 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
      "member_id": "MEM6A9C2A41F2",
      "member_code": "",
      "new_member": false,
-     "ad_url": "http://localhost:8000/ad/MEM6A9C2A41F2"
+     "ad_url": "http://localhost:8000/ad/MEM6A9C2A41F2",
+     "offer_url": "http://localhost:8000/ad/MEM6A9C2A41F2/offer"
    }
    ```
 
@@ -188,7 +190,9 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
 ## 前端展示（電視棒 / 螢幕）
 
 - 建議在電視棒或任何瀏覽器打開 `http://<server-ip>:8000/ad/latest`，透過 SSE 自動切換成最新辨識出的會員廣告。
-- 若需固定觀看指定會員，仍可開啟 `http://<server-ip>:8000/ad/<member_id>` 進行除錯。此頁會保留原本的輪播刷新行為。
+
+- 若需固定觀看指定會員，可開啟 `http://<server-ip>:8000/ad/<member_id>`（儀表板）或 `http://<server-ip>:8000/ad/<member_id>/offer`（純廣告頁）進行除錯；儀表板頁面會保留原本的輪播刷新行為。
+
 - 管理人員可前往 `http://<server-ip>:8000/dashboard` 檢視會員儀表板，亦可透過查詢參數 `?member_id=MEMxxxx` 指定會員。此頁整合會員基本資料、聯絡方式、點數餘額與購買紀錄，方便現場客服或營運團隊快速掌握狀態。
 - Demo 情境可直接拜訪 `http://<server-ip>:8000/demo/upload-ad`，上傳人像後立即取得會員辨識結果與同步產生的 Gemini 廣告文案，並可在頁面內預覽固定底圖 + 文案的輸出效果。
 

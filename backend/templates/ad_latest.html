@@ -22,7 +22,13 @@
     } %}
     {% set template_id = payload.get('template_id') %}
     {% set raw_cta = payload.get('cta_href') %}
-    {% set initial_cta_href = raw_cta if raw_cta and not raw_cta.startswith('#') else payload.get('ad_url') %}
+    {% if raw_cta and not raw_cta.startswith('#') %}
+        {% set initial_cta_href = raw_cta %}
+    {% elif payload.get('audience') == 'member' %}
+        {% set initial_cta_href = payload.get('offer_url') or payload.get('ad_url') %}
+    {% else %}
+        {% set initial_cta_href = raw_cta or payload.get('ad_url') %}
+    {% endif %}
 
     <header>
         <h1>你的專屬折扣</h1>
@@ -290,19 +296,37 @@
         document.getElementById('timing-generation').textContent = getTiming('generation');
         document.getElementById('timing-total').textContent = getTiming('total');
 
-        const preferredHref = payload.cta_href && !payload.cta_href.startsWith('#')
-          ? payload.cta_href
-          : payload.ad_url;
+        let preferredHref;
+        if (payload.cta_href && !payload.cta_href.startsWith('#')) {
+          preferredHref = payload.cta_href;
+        } else if (payload.audience === 'member') {
+          preferredHref = payload.offer_url || payload.ad_url;
+        } else if (payload.cta_href) {
+          preferredHref = payload.cta_href;
+        } else {
+          preferredHref = payload.ad_url;
+        }
+
 
         function syncLink(linkEl, defaultText) {
           if (!linkEl) return;
           linkEl.textContent = payload.cta_text || defaultText;
-          if (preferredHref) {
+
+          if (preferredHref && !preferredHref.startsWith('#')) {
+
             linkEl.href = preferredHref;
             linkEl.target = '_blank';
             linkEl.rel = 'noopener';
             linkEl.classList.remove('is-disabled');
             linkEl.removeAttribute('aria-disabled');
+
+          } else if (preferredHref) {
+            linkEl.href = preferredHref;
+            linkEl.removeAttribute('target');
+            linkEl.removeAttribute('rel');
+            linkEl.classList.remove('is-disabled');
+            linkEl.removeAttribute('aria-disabled');
+
           } else {
             linkEl.href = '#';
             linkEl.removeAttribute('target');

@@ -77,6 +77,7 @@ def test_latest_stream_emits_latest_event(client):
     assert payload["status"] == "ok"
     assert payload["member_id"] == member_id
     assert payload["ad_url"].endswith(f"/ad/{member_id}")
+    assert payload["offer_url"].endswith(f"/ad/{member_id}/offer")
     assert payload["event_id"] == database.get_latest_upload_event().id
 
 

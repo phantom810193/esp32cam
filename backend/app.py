@@ -165,6 +165,7 @@ class _LatestAdHub:
         for queue in subscribers:
             queue.put(context)
 
+
 _latest_ad_hub = _LatestAdHub()
 _warmup_once_lock = Lock()
 _warmup_ran = False
@@ -229,16 +230,24 @@ def _persona_label_display(profile_label: str | None) -> str | None:
     )
 
 
-def _serialize_ad_context(context: AdContext) -> dict[str, object]:
 
+def _serialize_ad_context(context: AdContext) -> dict[str, object]:
     try:
         ad_url = url_for("render_ad", member_id=context.member_id, _external=True)
     except RuntimeError:
         ad_url = f"/ad/{context.member_id}"
 
+    try:
+        offer_url = url_for("render_ad_offer", member_id=context.member_id, _external=True)
+    except RuntimeError:
+        offer_url = f"/ad/{context.member_id}/offer"
+
+    audience = context.audience
     cta_href = context.cta_href or ""
-    if not cta_href or cta_href.startswith("#"):
-        cta_href = ad_url
+    if not cta_href:
+        cta_href = offer_url or ad_url
+    elif cta_href.startswith("#") and audience == "member":
+        cta_href = offer_url or ad_url
 
     payload: dict[str, object] = {
         "member_id": context.member_id,
@@ -272,14 +281,16 @@ def _serialize_ad_context(context: AdContext) -> dict[str, object]:
         payload["predicted"] = dict(context.predicted)
     if context.detected_at:
         payload["detected_at"] = context.detected_at
+
     payload["hero_image_url"] = _resolve_template_image(context.template_id)
     payload["status"] = "ok"
     payload["ad_url"] = ad_url
-
+    payload["offer_url"] = offer_url
     latest_event = database.get_latest_upload_event()
     if latest_event is not None:
         payload["event_id"] = latest_event.id
     return payload
+
 
 @app.get("/")
 def index() -> str:
@@ -547,6 +558,7 @@ def upload_face():
     )
     stale_images = database.cleanup_upload_events(keep_latest=1)
     _purge_upload_images(stale_images)
+
     hero_image_url = _resolve_template_image(context.template_id)
     payload = {
         "status": "ok",
@@ -554,6 +566,7 @@ def upload_face():
         "member_code": database.get_member_code(member_id),
         "new_member": new_member,
         "ad_url": url_for("render_ad", member_id=member_id, _external=True),
+        "offer_url": url_for("render_ad_offer", member_id=member_id, _external=True),
         "template_id": context.template_id,
         "audience": audience,
         "scenario_key": context.scenario_key,
@@ -568,8 +581,10 @@ def upload_face():
     if context.cta_text:
         payload["cta_text"] = context.cta_text
     cta_href = context.cta_href or ""
-    if not cta_href or cta_href.startswith("#"):
-        cta_href = payload["ad_url"]
+    if not cta_href:
+        cta_href = payload["offer_url"]
+    elif cta_href.startswith("#") and audience == "member":
+        cta_href = payload["offer_url"]
     payload["cta_href"] = cta_href
 
     if distance is not None:
@@ -621,8 +636,8 @@ def merge_members():
     ), 200
 
 
-@app.get("/ad/<member_id>")
-def render_ad(member_id: str):
+
+def _prepare_member_ad_context(member_id: str) -> tuple[dict[str, object], MemberProfile | None]:
     purchases = database.get_purchase_history(member_id)
     insights = analyse_purchase_intent(purchases)
     profile = database.get_member_profile(member_id)
@@ -631,10 +646,10 @@ def render_ad(member_id: str):
     predicted_dict = None
     try:
         prediction_result = predict_next_purchases(purchases, profile=profile, insights=insights)
-        predicted_item = prediction_result.items[0] if getattr(prediction_result, 'items', None) else None
+        predicted_item = prediction_result.items[0] if getattr(prediction_result, "items", None) else None
         predicted_dict = _prediction_to_dict(predicted_item)
     except Exception as exc:
-        logging.warning('Prediction pipeline unavailable for %s: %s', member_id, exc)
+        logging.warning("Prediction pipeline unavailable for %s: %s", member_id, exc)
         predicted_dict = None
 
     creative = None
@@ -681,11 +696,28 @@ def render_ad(member_id: str):
     if context.detected_at:
         context_dict["detected_at"] = context.detected_at
 
+    return context_dict, profile
+
+
+@app.get("/ad/<member_id>")
+def render_ad(member_id: str):
+    context_dict, profile = _prepare_member_ad_context(member_id)
+    resolved_profile = context_dict.get("profile") or profile
+    return render_template(
+        "ad_latest.html",
+        context=context_dict,
+        profile=resolved_profile,
+        stream_url=url_for("latest_ad_stream"),
+    )
+
+
+@app.get("/ad/<member_id>/offer")
+def render_ad_offer(member_id: str):
+    context_dict, _ = _prepare_member_ad_context(member_id)
     return render_template(
         "ad_offer.html",
         context=context_dict,
     )
-
 
 @app.get("/ad/latest")
 def render_latest_ad():
@@ -701,17 +733,30 @@ def render_latest_ad():
 @app.get("/ad/latest/stream")
 
 def latest_ad_stream():
+    interval_param = request.args.get("interval")
+    try:
+        interval = 15.0 if not interval_param else float(interval_param)
+        if interval <= 0:
+            raise ValueError
+    except ValueError:
+        return jsonify({"error": "Invalid interval"}), 400
+
+    once_flag = request.args.get("once", "").strip().lower()
+    send_once = once_flag in {"1", "true", "yes"}
+
     def event_stream():
         queue = _latest_ad_hub.subscribe()
         try:
             while True:
                 try:
-                    context = queue.get(timeout=15.0)
+                    context = queue.get(timeout=interval)
                 except Empty:
                     yield "event: ping\n\n"
                     continue
                 payload = json.dumps(context, ensure_ascii=False)
                 yield f"data: {payload}\n\n"
+                if send_once:
+                    break
         finally:
             _latest_ad_hub.unsubscribe(queue)
 
@@ -752,6 +797,7 @@ def latest_upload_dashboard():
         event=event,
         image_url=image_url,
         ad_url=url_for("render_ad", member_id=event.member_id, _external=True),
+        offer_url=url_for("render_ad_offer", member_id=event.member_id, _external=True),
         members_url=url_for("member_directory"),
         display_name=display_name,
         persona_label=persona_label,
@@ -814,6 +860,7 @@ def manager_dashboard_view():
             "hero_image_url": hero_image_url,
             "prediction": prediction,
             "ad_url": url_for("render_ad", member_id=selected_id, v2=1, _external=False),
+            "offer_url": url_for("render_ad_offer", member_id=selected_id, _external=False),
         }
     else:
         error = "尚未建立任何會員資料"
@@ -861,6 +908,7 @@ def ad_preview(filename: str):
         hero_image_url=hero_image_url,
         scenario_key=request.args.get("scenario_key", "brand_new"),
     )
+
 
 
 # ---------------------------------------------------------------------------

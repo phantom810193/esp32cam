@@ -390,23 +390,31 @@
         adHighlight.textContent = data.highlight || '';
         adTag.textContent = audienceCopy[data.audience] || `🎯 ${data.audience || '廣告預覽'}`;
 
-        const preferredHref = data.cta_href && !data.cta_href.startsWith('#')
-          ? data.cta_href
-          : data.ad_url;
-        const actionLink = toAbsoluteUrl(preferredHref);
+        let preferredHref;
+        if (data.cta_href && !data.cta_href.startsWith('#')) {
+          preferredHref = data.cta_href;
+        } else if (data.audience === 'member') {
+          preferredHref = data.offer_url || data.ad_url;
+        } else if (data.cta_href) {
+          preferredHref = data.cta_href;
+        } else {
+          preferredHref = data.ad_url;
+        }
+        const actionLink = preferredHref && !preferredHref.startsWith('#')
+          ? toAbsoluteUrl(preferredHref)
+          : null;
 
         if (data.cta_text || actionLink) {
           adCta.textContent = data.cta_text || '查看完整廣告';
           if (actionLink) {
             adCta.href = actionLink;
-
             adCta.target = '_blank';
             adCta.rel = 'noopener';
           } else {
             adCta.removeAttribute('href');
             adCta.removeAttribute('target');
             adCta.removeAttribute('rel');
-            
+
           }
           adCta.style.display = 'inline-flex';
         } else {

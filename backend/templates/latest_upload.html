@@ -121,7 +121,7 @@
             <dd>{{ persona_label }}</dd>
             {% endif %}
             <dt>廣告頁面</dt>
-            <dd><a class="button" href="{{ ad_url }}" target="_blank" rel="noopener">開啟個人化廣告頁</a></dd>
+            <dd><a class="button" href="{{ (offer_url or ad_url) }}" target="_blank" rel="noopener">開啟個人化廣告頁</a></dd>
             <dt>會員資料</dt>
             <dd><a class="button secondary" href="{{ members_url }}" target="_blank" rel="noopener">檢視會員資料與消費紀錄</a></dd>
           </dl>
