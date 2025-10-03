@@ -24,6 +24,7 @@
     {% set hero_image = payload.get('hero_image_url') or template_images.get(template_id) %}
     {% set raw_cta = payload.get('cta_href') %}
     {% set initial_cta_href = raw_cta if raw_cta and not raw_cta.startswith('#') else payload.get('ad_url') %}
+
     <header>
         <h1>你的專屬折扣</h1>
         <nav>
@@ -142,6 +143,7 @@
                                 <a class="cta-button{% if not initial_cta_href %} is-disabled{% endif %}" id="ad-cta" href="{{ initial_cta_href or '#' }}"{% if initial_cta_href %} target="_blank" rel="noopener"{% else %} aria-disabled="true"{% endif %}>{{ payload.get('cta_text') or '會員限定優惠立即領取' }}</a>
                             </div>
                         </div>
+
                         <ul class="page">
                             <li class="active"><a href="#" title="第1頁">1</a></li>
                             <li><a href="#" title="第2頁">2</a></li>
@@ -367,6 +369,7 @@
             highlightEl.classList.add('is-hidden');
             highlightEl.setAttribute('aria-hidden', 'true');
           }
+
         }
       }
 
