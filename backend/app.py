@@ -28,7 +28,9 @@ from flask import (
     stream_with_context,
     url_for,
 )
+
 from PIL import Image, ImageOps, UnidentifiedImageError
+
 from werkzeug.utils import safe_join
 
 from .advertising import (
@@ -86,6 +88,7 @@ app.register_blueprint(adgen_blueprint)
 # -----------------------------------------------------------------------------
 # Services (Gemini Text / AWS Rekognition / DB)
 # -----------------------------------------------------------------------------
+
 gemini = GeminiService()
 
 # ---- 重要：相容性 shim（避免其他模組仍 import `Gemini` 時失敗）----
@@ -278,7 +281,6 @@ def _serialize_ad_context(context: AdContext) -> dict[str, object]:
         payload["event_id"] = latest_event.id
     return payload
 
-
 @app.get("/")
 def index() -> str:
     return render_template("index.html")
@@ -293,6 +295,7 @@ def simple_upload_demo() -> str:
 @app.get("/dashboard")
 def dashboard() -> str:
     """Render the customer dashboard demo page."""
+
     requested_member_id = request.args.get("member_id")
     member_id = requested_member_id or None
 
@@ -544,6 +547,7 @@ def upload_face():
     )
     stale_images = database.cleanup_upload_events(keep_latest=1)
     _purge_upload_images(stale_images)
+
     hero_image_url = _resolve_template_image(context.template_id)
     payload = {
         "status": "ok",
@@ -560,6 +564,7 @@ def upload_face():
         "highlight": context.highlight,
         "detected_at": detected_at,
     }
+
     if predicted_dict:
         payload["predicted"] = predicted_dict
     if context.cta_text:
@@ -860,10 +865,10 @@ def ad_preview(filename: str):
         scenario_key=request.args.get("scenario_key", "brand_new"),
     )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _manager_hero_image(profile, scenario_key: str) -> str | None:
     if profile and profile.first_image_filename:
