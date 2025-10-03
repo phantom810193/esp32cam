@@ -678,10 +678,8 @@ def render_ad(member_id: str):
         context_dict["detected_at"] = context.detected_at
 
     return render_template(
-        "ad_latest.html",
+        "ad_offer.html",
         context=context_dict,
-        profile=context_dict.get("profile"),
-        stream_url=url_for("latest_ad_stream"),
     )
 
 
