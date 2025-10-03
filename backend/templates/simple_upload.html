@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>即時會員辨識上傳面板</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: "Noto Sans TC", "Microsoft JhengHei", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(circle at top, #0ea5e9 0%, #0f172a 45%, #020617 100%);
+      color: #f8fafc;
+      display: flex;
+      justify-content: center;
+      padding: 2rem 1rem 3rem;
+    }
+    main {
+      width: min(960px, 100%);
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      border-radius: 24px;
+      padding: 2.4rem clamp(1.5rem, 4vw, 3.2rem);
+      box-shadow: 0 24px 45px rgba(2, 6, 23, 0.55);
+      backdrop-filter: blur(14px);
+    }
+    h1 {
+      font-size: clamp(1.8rem, 4vw, 2.6rem);
+      margin: 0 0 0.75rem;
+    }
+    p.description {
+      margin: 0 0 2rem;
+      line-height: 1.7;
+      color: #cbd5f5;
+    }
+    form {
+      background: rgba(30, 41, 59, 0.9);
+      border-radius: 18px;
+      padding: clamp(1.5rem, 4vw, 2.5rem);
+      border: 1px dashed rgba(148, 163, 184, 0.4);
+      text-align: center;
+      position: relative;
+    }
+    form::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: 18px;
+      pointer-events: none;
+      border: 1px solid transparent;
+      background: linear-gradient(135deg, rgba(14, 165, 233, 0.6), rgba(236, 72, 153, 0.4)) border-box;
+      -webkit-mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+    form:focus-within::after,
+    form:hover::after {
+      opacity: 1;
+    }
+    label {
+      display: inline-flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      align-items: center;
+      justify-content: center;
+      color: #e2e8f0;
+      cursor: pointer;
+      width: 100%;
+    }
+    label svg {
+      width: 56px;
+      height: 56px;
+      color: #38bdf8;
+      filter: drop-shadow(0 0 12px rgba(56, 189, 248, 0.5));
+    }
+    input[type="file"] {
+      appearance: none;
+      border: 0;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+    }
+    .actions {
+      margin-top: 1.5rem;
+      display: flex;
+      justify-content: center;
+    }
+    button[type="submit"],
+    button[type="button"] {
+      appearance: none;
+      border: none;
+      border-radius: 999px;
+      padding: 0.75rem 2rem;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+      background: linear-gradient(135deg, #0ea5e9, #6366f1);
+      color: #0f172a;
+      box-shadow: 0 14px 30px rgba(14, 165, 233, 0.45);
+    }
+    button[type="submit"]:hover:not(:disabled),
+    button[type="button"]:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 18px 38px rgba(99, 102, 241, 0.5);
+    }
+    button[type="submit"]:disabled,
+    button[type="button"]:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+      transform: none;
+      box-shadow: none;
+    }
+    section.result {
+      margin-top: 2.5rem;
+      background: rgba(15, 23, 42, 0.72);
+      border-radius: 18px;
+      padding: 1.8rem;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+    }
+    section.result h2 {
+      margin-top: 0;
+      margin-bottom: 1rem;
+      font-size: 1.4rem;
+    }
+    .status-line {
+      font-size: 1.05rem;
+      color: #f8fafc;
+      margin-bottom: 1rem;
+    }
+    .result-grid {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      color: #cbd5f5;
+    }
+    .result-grid dt {
+      font-weight: 600;
+      color: #38bdf8;
+      margin-bottom: 0.3rem;
+    }
+    .result-grid dd {
+      margin: 0;
+      font-size: 1.05rem;
+      word-break: break-word;
+    }
+    .result-grid a {
+      color: #38bdf8;
+      text-decoration: none;
+      word-break: break-all;
+    }
+    .result-grid a:hover {
+      text-decoration: underline;
+    }
+    .ad-preview {
+      margin-top: 2rem;
+    }
+    .ad-card {
+      position: relative;
+      min-height: 360px;
+      border-radius: 22px;
+      background: #1f2937 center / cover no-repeat;
+      overflow: hidden;
+      display: flex;
+      align-items: flex-end;
+      box-shadow: 0 24px 40px rgba(15, 23, 42, 0.7);
+    }
+    .ad-overlay {
+      width: 100%;
+      padding: clamp(1.8rem, 5vw, 3.2rem);
+      background: linear-gradient(140deg, rgba(15, 23, 42, 0.8) 20%, rgba(15, 23, 42, 0.35) 100%);
+      backdrop-filter: blur(2px);
+    }
+    .ad-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: rgba(56, 189, 248, 0.2);
+      padding: 0.35rem 0.9rem;
+      border-radius: 999px;
+      font-size: 0.9rem;
+      letter-spacing: 0.04em;
+      color: #bae6fd;
+      margin-bottom: 1rem;
+    }
+    .ad-overlay h3 {
+      font-size: clamp(1.8rem, 4vw, 2.6rem);
+      margin: 0 0 0.75rem;
+      color: #f8fafc;
+    }
+    .ad-overlay p {
+      margin: 0 0 0.75rem;
+      font-size: clamp(1rem, 2.5vw, 1.15rem);
+      color: #e2e8f0;
+      line-height: 1.6;
+    }
+    .ad-highlight {
+      font-weight: 600;
+      color: #fde68a;
+    }
+    .ad-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.65rem 1.6rem;
+      border-radius: 999px;
+      text-decoration: none;
+      background: linear-gradient(135deg, #22d3ee, #818cf8);
+      color: #0f172a;
+      font-weight: 600;
+      margin-top: 0.5rem;
+      box-shadow: 0 14px 24px rgba(34, 211, 238, 0.35);
+    }
+    .ad-cta:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 18px 30px rgba(129, 140, 248, 0.45);
+    }
+    .hidden {
+      display: none;
+    }
+    .help {
+      margin-top: 2.5rem;
+      font-size: 0.95rem;
+      color: #94a3b8;
+      line-height: 1.6;
+    }
+    .help code {
+      font-family: "Fira Code", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      background: rgba(15, 23, 42, 0.6);
+      padding: 0.2rem 0.45rem;
+      border-radius: 6px;
+      color: #facc15;
+    }
+    @media (max-width: 640px) {
+      body {
+        padding: 1.2rem 0.75rem 2.5rem;
+      }
+      main {
+        padding: 1.6rem clamp(1rem, 6vw, 1.8rem);
+      }
+      .ad-card {
+        min-height: 320px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>即時會員辨識 Demo</h1>
+    <p class="description">
+      上傳現場拍攝的人像照片，後端會立即判斷是否為會員、更新資料庫，並透過 Gemini 生成個人化廣告文案。
+      確認成功後，點擊下方的「檢視廣告」即可預覽同一套背景圖與文案組合。
+    </p>
+    <form id="upload-form">
+      <label for="image-input">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 3a1 1 0 0 1 .894.553l1.382 2.764 3.05.443a1 1 0 0 1 .554 1.705l-2.207 2.15.52 3.034a1 1 0 0 1-1.451 1.054L12 13.347l-2.742 1.45a1 1 0 0 1-1.451-1.054l.52-3.034-2.207-2.15a1 1 0 0 1 .554-1.705l3.05-.443 1.382-2.764A1 1 0 0 1 12 3z" />
+          <path d="M5.5 19a1.5 1.5 0 0 1 0-3h13a1.5 1.5 0 0 1 0 3h-13z" />
+        </svg>
+        <strong>點擊或拖曳照片上傳</strong>
+        <span>建議使用 500KB ~ 3MB 的 JPEG/PNG 檔案</span>
+      </label>
+      <input id="image-input" name="image" type="file" accept="image/*" required>
+      <div class="actions">
+        <button id="submit-button" type="submit">上傳照片辨識</button>
+      </div>
+    </form>
+
+    <section id="result" class="result hidden" aria-live="polite">
+      <h2>辨識結果</h2>
+      <p id="status-text" class="status-line">尚未上傳任何照片。</p>
+      <dl class="result-grid">
+        <div>
+          <dt>會員 ID</dt>
+          <dd id="member-id">—</dd>
+        </div>
+        <div>
+          <dt>會員編號</dt>
+          <dd id="member-code">—</dd>
+        </div>
+        <div>
+          <dt>推播時間</dt>
+          <dd id="detected-at">—</dd>
+        </div>
+        <div id="ad-url-row" class="hidden">
+          <dt>廣告網址</dt>
+          <dd><a id="ad-url-link" href="#" target="_blank" rel="noopener">—</a></dd>
+        </div>
+      </dl>
+      <div class="actions">
+        <button id="view-ad" type="button" disabled>檢視廣告</button>
+      </div>
+    </section>
+
+    <section id="ad-preview" class="ad-preview hidden">
+      <div class="ad-card" id="ad-card">
+        <div class="ad-overlay">
+          <p class="ad-tag" id="ad-audience">—</p>
+          <h3 id="ad-headline">尚未載入</h3>
+          <p id="ad-subheading"></p>
+          <p id="ad-highlight" class="ad-highlight"></p>
+          <a id="ad-cta" class="ad-cta" href="#" target="_blank" rel="noopener">立即瞭解</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="help">
+      <p>若需重新載入其他會員，直接再次選擇檔案並上傳即可。此頁面會沿用後端 <code>/upload_face</code> API 的推播結果，與現有 HDMI 看板使用同一套 Gemini 文案與固定模板。</p>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      const form = document.getElementById('upload-form');
+      const fileInput = document.getElementById('image-input');
+      const submitButton = document.getElementById('submit-button');
+      const resultSection = document.getElementById('result');
+      const statusText = document.getElementById('status-text');
+      const memberIdEl = document.getElementById('member-id');
+      const memberCodeEl = document.getElementById('member-code');
+      const detectedAtEl = document.getElementById('detected-at');
+      const adUrlRow = document.getElementById('ad-url-row');
+      const adUrlLink = document.getElementById('ad-url-link');
+      const viewAdButton = document.getElementById('view-ad');
+      const adPreviewSection = document.getElementById('ad-preview');
+      const adCard = document.getElementById('ad-card');
+      const adHeadline = document.getElementById('ad-headline');
+      const adSubheading = document.getElementById('ad-subheading');
+      const adHighlight = document.getElementById('ad-highlight');
+      const adTag = document.getElementById('ad-audience');
+      const adCta = document.getElementById('ad-cta');
+
+      const audienceCopy = {
+        'new': '🎉 首次來訪',
+        'guest': '🌟 尚未入會',
+        'member': '💎 會員專屬'
+      };
+
+      let lastAdPayload = null;
+
+      function resetPreview() {
+        adPreviewSection.classList.add('hidden');
+        adCard.style.backgroundImage = '';
+        adHeadline.textContent = '尚未載入';
+        adSubheading.textContent = '';
+        adHighlight.textContent = '';
+        adTag.textContent = '—';
+        adCta.style.display = 'none';
+        adCta.removeAttribute('href');
+        adUrlLink.removeAttribute('href');
+        adUrlLink.textContent = '—';
+        adUrlLink.removeAttribute('title');
+        adUrlRow.classList.add('hidden');
+      }
+
+      function toAbsoluteUrl(url) {
+        if (!url) {
+          return null;
+        }
+        try {
+          return new URL(url, window.location.origin).toString();
+        } catch (err) {
+          return url;
+        }
+      }
+
+      function renderPreview(data) {
+        if (!data) {
+          return;
+        }
+        const backgroundUrl = toAbsoluteUrl(data.hero_image_url || data.template_image_url);
+        if (backgroundUrl) {
+          adCard.style.backgroundImage = `linear-gradient(140deg, rgba(15,23,42,0.2) 15%, rgba(15,23,42,0.65) 100%), url('${backgroundUrl}')`;
+        } else {
+          adCard.style.backgroundImage = '';
+        }
+        adHeadline.textContent = data.headline || '個人化推薦';
+        adSubheading.textContent = data.subheading || '';
+        adHighlight.textContent = data.highlight || '';
+        adTag.textContent = audienceCopy[data.audience] || `🎯 ${data.audience || '廣告預覽'}`;
+        const actionLink = toAbsoluteUrl(data.cta_href || data.ad_url);
+        if (data.cta_text || actionLink) {
+          adCta.textContent = data.cta_text || '查看完整廣告';
+          if (actionLink) {
+            adCta.href = actionLink;
+          } else {
+            adCta.removeAttribute('href');
+          }
+          adCta.style.display = 'inline-flex';
+        } else {
+          adCta.style.display = 'none';
+        }
+        adPreviewSection.classList.remove('hidden');
+        adPreviewSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        if (!fileInput.files || !fileInput.files[0]) {
+          statusText.textContent = '請先選擇一張照片再送出。';
+          statusText.classList.remove('hidden');
+          resultSection.classList.remove('hidden');
+          return;
+        }
+
+        resultSection.classList.remove('hidden');
+        statusText.textContent = '上傳中，請稍候…';
+        submitButton.disabled = true;
+        viewAdButton.disabled = true;
+        resetPreview();
+
+        const formData = new FormData();
+        formData.append('image', fileInput.files[0]);
+
+        try {
+          const response = await fetch('/upload_face', {
+            method: 'POST',
+            body: formData,
+          });
+          const data = await response.json().catch(() => ({}));
+
+          if (!response.ok || data.status !== 'ok') {
+            throw new Error(data.message || '辨識失敗，請稍後再試。');
+          }
+
+          lastAdPayload = data;
+          const statusPrefix = data.new_member ? '🎉 歡迎加入！' : '✅ 辨識完成。';
+          const membershipText = data.new_member
+            ? '系統已為新來賓建立匿名會員並送出歡迎禮。'
+            : data.member_code
+              ? `已辨識為會員（會員編號 ${data.member_code}）。`
+              : '此訪客已在系統建立匿名會員檔案。';
+          statusText.textContent = `${statusPrefix} ${membershipText}`;
+          memberIdEl.textContent = data.member_id || '—';
+          memberCodeEl.textContent = data.member_code || '—';
+          detectedAtEl.textContent = data.detected_at || new Date().toLocaleString();
+          const adUrl = toAbsoluteUrl(data.ad_url);
+          if (adUrl) {
+            adUrlLink.href = adUrl;
+            adUrlLink.textContent = adUrl;
+            adUrlLink.title = '在新視窗開啟完整廣告';
+            adUrlRow.classList.remove('hidden');
+          } else {
+            adUrlLink.removeAttribute('href');
+            adUrlLink.textContent = '—';
+            adUrlLink.removeAttribute('title');
+            adUrlRow.classList.add('hidden');
+          }
+          viewAdButton.disabled = false;
+        } catch (error) {
+          console.error(error);
+          statusText.textContent = error.message || '上傳時發生錯誤，請確認伺服器是否啟動。';
+          memberIdEl.textContent = '—';
+          memberCodeEl.textContent = '—';
+          detectedAtEl.textContent = '—';
+          adUrlLink.removeAttribute('href');
+          adUrlLink.textContent = '—';
+          adUrlLink.removeAttribute('title');
+          adUrlRow.classList.add('hidden');
+          viewAdButton.disabled = true;
+          lastAdPayload = null;
+        } finally {
+          submitButton.disabled = false;
+        }
+      });
+
+      viewAdButton.addEventListener('click', () => {
+        if (!lastAdPayload) {
+          return;
+        }
+        renderPreview(lastAdPayload);
+      });
+
+      resetPreview();
+    })();
+  </script>
+</body>
+</html>

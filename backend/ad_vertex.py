@@ -1,7 +1,4 @@
-"""
-Clean, single-pass implementation of `generate_ad_with_vertex`.
-Removes recursive wrappers and guarantees required keys.
-"""
+"""Legacy aliases for historical Vertex helpers now backed by Google Gemini."""
 from __future__ import annotations
 from typing import Any, Dict
 

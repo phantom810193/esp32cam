@@ -11,85 +11,31 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 # ---------------------------------------------------------------------------
-# Stub cloud SDKs that are unavailable in the execution environment.
+# Stub the Google Gemini SDK to avoid network calls during tests.
 # ---------------------------------------------------------------------------
 google_stub = types.ModuleType("google")
-cloud_stub = types.ModuleType("google.cloud")
-storage_stub = types.ModuleType("google.cloud.storage")
-aiplatform_stub = types.ModuleType("google.cloud.aiplatform")
-api_core_stub = types.ModuleType("google.api_core")
-api_core_exceptions_stub = types.ModuleType("google.api_core.exceptions")
-vertexai_stub = types.ModuleType("vertexai")
-vertexai_generative_stub = types.ModuleType("vertexai.generative_models")
-vertexai_preview_stub = types.ModuleType("vertexai.preview")
-vertexai_preview_vision_stub = types.ModuleType("vertexai.preview.vision_models")
-vertexai_vision_stub = types.ModuleType("vertexai.vision_models")
-
-
-class _StorageClient:  # pragma: no cover - just a safety stub
-    def __init__(self, *args, **kwargs):
-        raise RuntimeError("google.cloud.storage is not available in tests")
-
-
-def _noop(*_args, **_kwargs):  # pragma: no cover
-    return None
+generativeai_stub = types.ModuleType("google.generativeai")
 
 
 class _GenerativeModel:  # pragma: no cover - simple stub
     def __init__(self, name: str):
         self._name = name
 
-    def generate_content(self, parts, request_options=None):
+    def generate_content(self, prompt, generation_config=None):  # noqa: ARG002
         return types.SimpleNamespace(text="")
 
 
-class _Part:  # pragma: no cover
-    @classmethod
-    def from_data(cls, **kwargs):
-        return kwargs
+def _configure(api_key=None):  # pragma: no cover - mimic SDK signature
+    return None
 
 
-class _GenerationConfig:  # pragma: no cover
-    def __init__(self, **kwargs):
-        self.values = kwargs
+generativeai_stub.GenerativeModel = _GenerativeModel
+generativeai_stub.configure = _configure
 
-
-class _ImageGenerationModel:  # pragma: no cover
-    @classmethod
-    def from_pretrained(cls, name: str):
-        return cls()
-
-
-storage_stub.Client = _StorageClient
-cloud_stub.storage = storage_stub
-cloud_stub.aiplatform = aiplatform_stub
-api_core_exceptions_stub.NotFound = type("NotFound", (Exception,), {})
-api_core_stub.exceptions = api_core_exceptions_stub
-vertexai_generative_stub.GenerativeModel = _GenerativeModel
-vertexai_generative_stub.Part = _Part
-vertexai_preview_vision_stub.ImageGenerationModel = _ImageGenerationModel
-vertexai_vision_stub.ImageGenerationModel = _ImageGenerationModel
-vertexai_preview_stub.vision_models = vertexai_preview_vision_stub
-vertexai_generative_stub.GenerationConfig = _GenerationConfig
-vertexai_stub.generative_models = vertexai_generative_stub
-vertexai_stub.preview = vertexai_preview_stub
-vertexai_stub.vision_models = vertexai_vision_stub
-
-aiplatform_stub.init = _noop
-
-google_stub.cloud = cloud_stub
+google_stub.generativeai = generativeai_stub
 
 sys.modules.setdefault("google", google_stub)
-sys.modules.setdefault("google.cloud", cloud_stub)
-sys.modules.setdefault("google.cloud.storage", storage_stub)
-sys.modules.setdefault("google.cloud.aiplatform", aiplatform_stub)
-sys.modules.setdefault("google.api_core", api_core_stub)
-sys.modules.setdefault("google.api_core.exceptions", api_core_exceptions_stub)
-sys.modules.setdefault("vertexai", vertexai_stub)
-sys.modules.setdefault("vertexai.generative_models", vertexai_generative_stub)
-sys.modules.setdefault("vertexai.preview", vertexai_preview_stub)
-sys.modules.setdefault("vertexai.preview.vision_models", vertexai_preview_vision_stub)
-sys.modules.setdefault("vertexai.vision_models", vertexai_vision_stub)
+sys.modules.setdefault("google.generativeai", generativeai_stub)
 
 from backend.app import app, database
 
