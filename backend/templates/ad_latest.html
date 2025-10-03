@@ -14,6 +14,16 @@
     {% set predicted = payload.get('predicted', {}) %}
     {% set purchases = payload.get('purchases', []) %}
     {% set first_purchase = purchases[0] if purchases else None %}
+    {% set template_images = {
+        'ME0000': url_for('static', filename='images/ads/ME0000.jpg'),
+        'ME0001': url_for('static', filename='images/ads/ME0001.jpg'),
+        'ME0002': url_for('static', filename='images/ads/ME0002.jpg'),
+        'ME0003': url_for('static', filename='images/ads/ME0003.jpg')
+    } %}
+    {% set template_id = payload.get('template_id') %}
+    {% set hero_image = payload.get('hero_image_url') or template_images.get(template_id) %}
+    {% set raw_cta = payload.get('cta_href') %}
+    {% set initial_cta_href = raw_cta if raw_cta and not raw_cta.startswith('#') else payload.get('ad_url') %}
     <header>
         <h1>你的專屬折扣</h1>
         <nav>
@@ -118,8 +128,19 @@
                                 <li><span>辨識速度</span><span id="timing-recognition">{{ timings.get('recognition', '--') }}</span>秒</li>
                                 <li><span>廣告生成</span><span id="timing-generation">{{ timings.get('generation', '--') }}</span>秒</li>
                                 <li><span>總計耗時</span><span id="timing-total">{{ timings.get('total', '--') }}</span>秒</li>
-                                <li class="btn"><a href="{{ payload.get('cta_href', '#') }}" id="cta-link" title="開啟個人化廣告頁">{{ payload.get('cta_text', '檢視生成廣告') }}</a></li>
+                                <li class="btn"><a href="{{ initial_cta_href or '#' }}" id="cta-link"{% if initial_cta_href %} target="_blank" rel="noopener"{% else %} aria-disabled="true" class="is-disabled"{% endif %} title="開啟個人化廣告頁">{{ payload.get('cta_text', '檢視生成廣告') }}</a></li>
                             </ul>
+                        </div>
+                        <div class="member-offer" id="member-offer">
+                            <div class="member-offer__visual">
+                                <img id="ad-hero" src="{{ hero_image or url_for('static', filename='images/ads/ME0000.jpg') }}" alt="個人化優惠" loading="lazy" />
+                            </div>
+                            <div class="member-offer__copy">
+                                <h3 id="ad-headline">{{ payload.get('headline') or '專屬優惠推薦' }}</h3>
+                                <p class="subheading{% if not payload.get('subheading') %} is-hidden{% endif %}" id="ad-subheading"{% if not payload.get('subheading') %} aria-hidden="true"{% endif %}>{{ payload.get('subheading') or '' }}</p>
+                                <p class="highlight{% if not payload.get('highlight') %} is-hidden{% endif %}" id="ad-highlight"{% if not payload.get('highlight') %} aria-hidden="true"{% endif %}>{{ payload.get('highlight') or '' }}</p>
+                                <a class="cta-button{% if not initial_cta_href %} is-disabled{% endif %}" id="ad-cta" href="{{ initial_cta_href or '#' }}"{% if initial_cta_href %} target="_blank" rel="noopener"{% else %} aria-disabled="true"{% endif %}>{{ payload.get('cta_text') or '會員限定優惠立即領取' }}</a>
+                            </div>
                         </div>
                         <ul class="page">
                             <li class="active"><a href="#" title="第1頁">1</a></li>
@@ -127,7 +148,33 @@
                             <li><a href="#" title="第3頁">3</a></li>
                         </ul>
                     </div>
-                    <div class="tab-content-2"><p>內容-2</p></div>
+                    <div class="tab-content-2">
+                        <h3 class="hide">歷史消費紀錄</h3>
+                        <table class="history-table">
+                            <thead>
+                                <tr>
+                                    <th>消費日期</th>
+                                    <th>商品名稱</th>
+                                    <th>數量</th>
+                                    <th>總金額</th>
+                                </tr>
+                            </thead>
+                            <tbody id="history-rows">
+                                {% if purchases %}
+                                    {% for purchase in purchases[:10] %}
+                                    <tr>
+                                        <td>{{ purchase.purchased_at or '--' }}</td>
+                                        <td>{{ purchase.item or '--' }}</td>
+                                        <td>{{ purchase.quantity or 0 }}</td>
+                                        <td>{% if purchase.total_price is not none %}NT${{ '%.0f' % purchase.total_price }}{% else %}--{% endif %}</td>
+                                    </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    <tr><td colspan="4">尚無歷史消費紀錄。</td></tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
                     <div class="tab-content-3"><p>內容-3</p></div>
                     <div class="tab-content-4"><p>內容-4</p></div>
                 </div>
@@ -137,6 +184,13 @@
     <script>
       const templateImages = {
         'ME0000': '{{ url_for('static', filename='images/face.jpg') }}',
+        'ME0001': '{{ url_for('static', filename='images/ads/ME0001.jpg') }}',
+        'ME0002': '{{ url_for('static', filename='images/ads/ME0002.jpg') }}',
+        'ME0003': '{{ url_for('static', filename='images/ads/ME0003.jpg') }}',
+      };
+
+      const offerImages = {
+        'ME0000': '{{ url_for('static', filename='images/ads/ME0000.jpg') }}',
         'ME0001': '{{ url_for('static', filename='images/ads/ME0001.jpg') }}',
         'ME0002': '{{ url_for('static', filename='images/ads/ME0002.jpg') }}',
         'ME0003': '{{ url_for('static', filename='images/ads/ME0003.jpg') }}',
@@ -153,6 +207,18 @@
           return '<span class="medium">中</span>';
         }
         return '<span class="medium">中</span>';
+      }
+
+      function escapeHtml(value) {
+        if (value === undefined || value === null) {
+          return '--';
+        }
+        return String(value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
       }
 
       function buildRows(items) {
@@ -175,6 +241,24 @@
             <td>${adView}</td>
             <td>${matchRate}</td>
             <td>${formatProbabilityTag(typeof probability === 'number' ? probability : null)}</td>
+          </tr>`;
+        }).join('');
+      }
+
+      function buildHistoryRows(purchases) {
+        if (!purchases || !purchases.length) {
+          return '<tr><td colspan="4">尚無歷史消費紀錄。</td></tr>';
+        }
+        return purchases.slice(0, 10).map((purchase) => {
+          const date = escapeHtml(purchase.purchased_at || '--');
+          const item = escapeHtml(purchase.item || '--');
+          const quantity = purchase.quantity != null ? escapeHtml(purchase.quantity) : '0';
+          const total = purchase.total_price != null ? `NT$${Math.round(purchase.total_price)}` : '--';
+          return `<tr>
+            <td>${date}</td>
+            <td>${item}</td>
+            <td>${quantity}</td>
+            <td>${total}</td>
           </tr>`;
         }).join('');
       }
@@ -214,6 +298,7 @@
 
         const tableBody = document.getElementById('prediction-rows');
         tableBody.innerHTML = buildRows(payload.predicted_candidates || []);
+        document.getElementById('history-rows').innerHTML = buildHistoryRows(purchases);
 
         const timings = payload.timings || {};
         const getTiming = (key) => (timings[key] === undefined || timings[key] === null ? '--' : timings[key]);
@@ -222,9 +307,67 @@
         document.getElementById('timing-generation').textContent = getTiming('generation');
         document.getElementById('timing-total').textContent = getTiming('total');
 
-        const ctaLink = document.getElementById('cta-link');
-        ctaLink.textContent = payload.cta_text || '檢視生成廣告';
-        ctaLink.href = payload.cta_href || '#';
+        const preferredHref = payload.cta_href && !payload.cta_href.startsWith('#')
+          ? payload.cta_href
+          : payload.ad_url;
+
+        function syncLink(linkEl, defaultText) {
+          if (!linkEl) return;
+          linkEl.textContent = payload.cta_text || defaultText;
+          if (preferredHref) {
+            linkEl.href = preferredHref;
+            linkEl.target = '_blank';
+            linkEl.rel = 'noopener';
+            linkEl.classList.remove('is-disabled');
+            linkEl.removeAttribute('aria-disabled');
+          } else {
+            linkEl.href = '#';
+            linkEl.removeAttribute('target');
+            linkEl.removeAttribute('rel');
+            linkEl.classList.add('is-disabled');
+            linkEl.setAttribute('aria-disabled', 'true');
+          }
+        }
+
+        syncLink(document.getElementById('cta-link'), '檢視生成廣告');
+        syncLink(document.getElementById('ad-cta'), '會員限定優惠立即領取');
+
+        const heroEl = document.getElementById('ad-hero');
+        if (heroEl) {
+          const heroSrc = payload.hero_image_url || (payload.template_id && offerImages[payload.template_id]) || offerImages.ME0000;
+          heroEl.src = heroSrc;
+        }
+
+        const headlineEl = document.getElementById('ad-headline');
+        if (headlineEl) {
+          headlineEl.textContent = payload.headline || '專屬優惠推薦';
+        }
+
+        const subheadingEl = document.getElementById('ad-subheading');
+        if (subheadingEl) {
+          if (payload.subheading) {
+            subheadingEl.textContent = payload.subheading;
+            subheadingEl.classList.remove('is-hidden');
+            subheadingEl.removeAttribute('aria-hidden');
+          } else {
+            subheadingEl.textContent = '';
+            subheadingEl.classList.add('is-hidden');
+            subheadingEl.setAttribute('aria-hidden', 'true');
+          }
+        }
+
+        const highlightEl = document.getElementById('ad-highlight');
+        if (highlightEl) {
+          if (payload.highlight) {
+            highlightEl.textContent = payload.highlight;
+            highlightEl.classList.remove('is-hidden');
+            highlightEl.removeAttribute('aria-hidden');
+          } else {
+            highlightEl.textContent = '';
+            highlightEl.classList.add('is-hidden');
+            highlightEl.setAttribute('aria-hidden', 'true');
+          }
+        }
       }
 
       applyPayload({{ payload | tojson }});

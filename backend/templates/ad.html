@@ -12,6 +12,9 @@
 {% set purchases = purchases or context.purchases or [] %}
 {% set predicted = context.predicted or {} %}
 {% set first_purchase = purchases[0] if purchases else None %}
+{% set ad_url = url_for('render_ad', member_id=context.member_id) %}
+{% set effective_cta_href = context.cta_href if context.cta_href and not context.cta_href.startswith('#') else ad_url %}
+{% set cta_label = context.cta_text or '檢視生成廣告' %}
 <body>
     <header>
         <h1>你的專屬折扣</h1>
@@ -131,20 +134,20 @@
                                 <li><span>辨識速度</span>{{ timings.get('recognition', '--') }}秒</li>
                                 <li><span>廣告生成</span>{{ timings.get('generation', '--') }}秒</li>
                                 <li><span>總計耗時</span>{{ timings.get('total', '--') }}秒</li>
-                                <li class="btn"><a href="{{ context.cta_href or '#' }}" title="開啟個人化廣告頁">{{ context.cta_text or '檢視生成廣告' }}</a></li>
+                                <li class="btn"><a href="{{ effective_cta_href }}" target="_blank" rel="noopener" title="開啟個人化廣告頁">{{ cta_label }}</a></li>
                             </ul>
                         </div>
                         <div class="member-offer" id="member-offer">
-                            <h3>{{ context.headline or 'æå¡éå®åªæ ' }}</h3>
+                            <h3>{{ context.headline or '個人化優惠' }}</h3>
                             {% if context.subheading %}<p class="subheading">{{ context.subheading }}</p>{% endif %}
                             <figure>
-                                <img src="{{ hero_image_url or url_for('static', filename='images/ads/ME0000.jpg') }}" alt="æå¡éå®åªæ ">
+                                <img src="{{ hero_image_url or url_for('static', filename='images/ads/ME0000.jpg') }}" alt="個人化優惠">
                             </figure>
                             {% if context.highlight %}<p class="highlight">{{ context.highlight }}</p>{% endif %}
-                            {% if context.cta_href and not context.cta_href.startswith('#') %}
-                                <a class="cta-button" href="{{ context.cta_href }}">{{ context.cta_text or 'ç«å³æ¥çåªæ ' }}</a>
-                            {% else %}
-                                <p class="cta-text">{{ context.cta_text or 'ç«å³æ¥çåªæ ' }}</p>
+                            {% if effective_cta_href %}
+                                <a class="cta-button" href="{{ effective_cta_href }}" target="_blank" rel="noopener">{{ cta_label }}</a>
+                            {% elif cta_label %}
+                                <p class="cta-text">{{ cta_label }}</p>
                             {% endif %}
                         </div>
                         <ul class="page">
@@ -153,7 +156,33 @@
                             <li><a href="#" title="第3頁">3</a></li>
                         </ul>
                     </div>
-                    <div class="tab-content-2"><p>內容-2</p></div>
+                    <div class="tab-content-2">
+                        <h3 class="hide">歷史消費紀錄</h3>
+                        {% if purchases %}
+                            <table class="history-table">
+                                <thead>
+                                    <tr>
+                                        <th>消費日期</th>
+                                        <th>商品名稱</th>
+                                        <th>數量</th>
+                                        <th>總金額</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for purchase in purchases[:10] %}
+                                        <tr>
+                                            <td>{{ purchase.purchased_at or '--' }}</td>
+                                            <td>{{ purchase.item or '--' }}</td>
+                                            <td>{{ purchase.quantity or 0 }}</td>
+                                            <td>{% if purchase.total_price is not none %}NT${{ '%.0f' % purchase.total_price }}{% else %}--{% endif %}</td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        {% else %}
+                            <p class="empty-history">尚無歷史消費紀錄。</p>
+                        {% endif %}
+                    </div>
                     <div class="tab-content-3"><p>內容-3</p></div>
                     <div class="tab-content-4"><p>內容-4</p></div>
                 </div>
