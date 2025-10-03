@@ -28,7 +28,9 @@ from flask import (
     stream_with_context,
     url_for,
 )
+
 from PIL import Image, ImageOps, UnidentifiedImageError
+
 from werkzeug.utils import safe_join
 
 from .advertising import (
@@ -86,6 +88,7 @@ app.register_blueprint(adgen_blueprint)
 # -----------------------------------------------------------------------------
 # Services (Gemini Text / AWS Rekognition / DB)
 # -----------------------------------------------------------------------------
+
 gemini = GeminiService()
 
 # ---- 重要：相容性 shim（避免其他模組仍 import `Gemini` 時失敗）----
@@ -162,9 +165,13 @@ class _LatestAdHub:
         for queue in subscribers:
             queue.put(context)
 
+
 _latest_ad_hub = _LatestAdHub()
 _warmup_once_lock = Lock()
 _warmup_ran = False
+
+
+
 
 def _seed_latest_ad_hub() -> None:
     """Lazy warm-up: run on first incoming request, not at import time."""
@@ -214,6 +221,7 @@ def _seed_latest_ad_hub() -> None:
     except Exception as exc:
         logging.warning("Warmup seed failed (lazy): %s", exc)
 
+
 def _persona_label_display(profile_label: str | None) -> str | None:
     if not profile_label:
         return None
@@ -224,6 +232,15 @@ def _persona_label_display(profile_label: str | None) -> str | None:
 
 
 def _serialize_ad_context(context: AdContext) -> dict[str, object]:
+    try:
+        ad_url = url_for("render_ad", member_id=context.member_id, _external=True)
+    except RuntimeError:
+        ad_url = f"/ad/{context.member_id}"
+
+    cta_href = context.cta_href or ""
+    if not cta_href or cta_href.startswith("#"):
+        cta_href = ad_url
+
     payload: dict[str, object] = {
         "member_id": context.member_id,
         "member_code": context.member_code,
@@ -234,7 +251,7 @@ def _serialize_ad_context(context: AdContext) -> dict[str, object]:
         "audience": context.audience,
         "scenario_key": context.scenario_key,
         "cta_text": context.cta_text,
-        "cta_href": context.cta_href,
+        "cta_href": cta_href,
         "purchases": [
             {
                 "item": purchase.item,
@@ -258,10 +275,7 @@ def _serialize_ad_context(context: AdContext) -> dict[str, object]:
         payload["detected_at"] = context.detected_at
     payload["hero_image_url"] = _resolve_template_image(context.template_id)
     payload["status"] = "ok"
-    try:
-        payload["ad_url"] = url_for("render_ad", member_id=context.member_id, _external=True)
-    except RuntimeError:
-        payload["ad_url"] = f"/ad/{context.member_id}"
+    payload["ad_url"] = ad_url
     latest_event = database.get_latest_upload_event()
     if latest_event is not None:
         payload["event_id"] = latest_event.id
@@ -271,10 +285,12 @@ def _serialize_ad_context(context: AdContext) -> dict[str, object]:
 def index() -> str:
     return render_template("index.html")
 
+
 @app.get("/demo/upload-ad")
 def simple_upload_demo() -> str:
     """Serve a minimal uploader that drives the face recognition flow."""
     return render_template("simple_upload.html")
+
 
 @app.get("/dashboard")
 def dashboard() -> str:
@@ -531,7 +547,7 @@ def upload_face():
     )
     stale_images = database.cleanup_upload_events(keep_latest=1)
     _purge_upload_images(stale_images)
-    
+
     hero_image_url = _resolve_template_image(context.template_id)
     payload = {
         "status": "ok",
@@ -553,8 +569,10 @@ def upload_face():
         payload["predicted"] = predicted_dict
     if context.cta_text:
         payload["cta_text"] = context.cta_text
-    if context.cta_href:
-        payload["cta_href"] = context.cta_href
+    cta_href = context.cta_href or ""
+    if not cta_href or cta_href.startswith("#"):
+        cta_href = payload["ad_url"]
+    payload["cta_href"] = cta_href
     if distance is not None:
         payload["distance"] = distance
     return jsonify(payload), 201 if new_member else 200
@@ -847,10 +865,10 @@ def ad_preview(filename: str):
         scenario_key=request.args.get("scenario_key", "brand_new"),
     )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _manager_hero_image(profile, scenario_key: str) -> str | None:
     if profile and profile.first_image_filename:
@@ -1052,6 +1070,7 @@ def _profile_snapshot(
         "profile_label": getattr(profile, "profile_label", None) if profile else None,
         "photo_url": photo_url,
     }
+
 
 if hasattr(app, "before_first_request"):
 
