@@ -135,16 +135,16 @@
                             </ul>
                         </div>
                         <div class="member-offer" id="member-offer">
-                            <h3>{{ context.headline or '會員限定優惠' }}</h3>
+                            <h3>{{ context.headline or 'æå¡éå®åªæ ' }}</h3>
                             {% if context.subheading %}<p class="subheading">{{ context.subheading }}</p>{% endif %}
                             <figure>
-                                <img src="{{ hero_image_url or url_for('static', filename='images/ads/ME0000.jpg') }}" alt="??????">
+                                <img src="{{ hero_image_url or url_for('static', filename='images/ads/ME0000.jpg') }}" alt="æå¡éå®åªæ ">
                             </figure>
                             {% if context.highlight %}<p class="highlight">{{ context.highlight }}</p>{% endif %}
                             {% if context.cta_href and not context.cta_href.startswith('#') %}
-                                <a class="cta-button" href="{{ context.cta_href }}">{{ context.cta_text or '會員限定優惠' }}</a>
+                                <a class="cta-button" href="{{ context.cta_href }}">{{ context.cta_text or 'ç«å³æ¥çåªæ ' }}</a>
                             {% else %}
-                                <p class="cta-text">{{ context.cta_text or '會員限定優惠' }}</p>
+                                <p class="cta-text">{{ context.cta_text or 'ç«å³æ¥çåªæ ' }}</p>
                             {% endif %}
                         </div>
                         <ul class="page">

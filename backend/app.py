@@ -164,6 +164,9 @@ class _LatestAdHub:
             queue.put(context)
 
 
+_latest_ad_hub = _LatestAdHub()
+
+
 
 
 def _persona_label_display(profile_label: str | None) -> str | None:
@@ -199,9 +202,15 @@ def _serialize_ad_context(context: AdContext) -> dict[str, object]:
             }
             for purchase in context.purchases
         ],
+        "predicted_candidates": [dict(candidate) for candidate in context.predicted_candidates],
+        "timings": dict(context.timings or {}),
     }
+    if context.profile:
+        payload["profile"] = dict(context.profile)
     if context.predicted:
         payload["predicted"] = dict(context.predicted)
+    if context.detected_at:
+        payload["detected_at"] = context.detected_at
     payload["hero_image_url"] = _resolve_template_image(context.template_id)
     payload["status"] = "ok"
     try:
@@ -632,19 +641,21 @@ def render_ad(member_id: str):
         predicted_item=predicted_dict,
         audience=audience,
     )
-    hero_image_url = _resolve_template_image(context.template_id)
+    context_dict = _serialize_ad_context(context)
+    if "profile" not in context_dict:
+        context_dict["profile"] = context.profile or _profile_snapshot(profile, member_id=member_id)
+    if "predicted_candidates" not in context_dict or context_dict["predicted_candidates"] is None:
+        context_dict["predicted_candidates"] = [dict(candidate) for candidate in context.predicted_candidates]
+    if not context_dict.get("timings"):
+        context_dict["timings"] = dict(context.timings or {})
+    if context.detected_at:
+        context_dict["detected_at"] = context.detected_at
 
     return render_template(
-        "ad.html",
-        context=context,
-        profile=context.profile,
-        prediction_items=context.predicted_candidates,
-        timings=context.timings,
-        purchases=context.purchases,
-        hero_image_url=hero_image_url,
-        scenario_key=context.scenario_key,
-        template_id=context.template_id,
-        audience=audience,
+        "ad_latest.html",
+        context=context_dict,
+        profile=context_dict.get("profile"),
+        stream_url=url_for("latest_ad_stream"),
     )
 
 
