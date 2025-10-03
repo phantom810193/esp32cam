@@ -502,6 +502,28 @@ span~#tab>div:first-of-type,
 .tab-content-1 table td:nth-child(2){
     text-align: left
 }
+.history-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 12px;
+}
+.history-table th,
+.history-table td {
+    padding: 10px 8px;
+    text-align: center;
+    border-bottom: 1px solid #e2e2e2;
+}
+.history-table td:nth-child(2) {
+    text-align: left;
+}
+.history-table tbody tr:nth-child(even) {
+    background-color: #f8f8f8;
+}
+.empty-history {
+    margin: 16px 0;
+    color: #6b7280;
+    text-align: center;
+}
 .hight{
     padding: 4px 16px;
     border-radius: 8px;

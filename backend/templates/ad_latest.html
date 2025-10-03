@@ -118,7 +118,7 @@
                                 <li><span>辨識速度</span><span id="timing-recognition">{{ timings.get('recognition', '--') }}</span>秒</li>
                                 <li><span>廣告生成</span><span id="timing-generation">{{ timings.get('generation', '--') }}</span>秒</li>
                                 <li><span>總計耗時</span><span id="timing-total">{{ timings.get('total', '--') }}</span>秒</li>
-                                <li class="btn"><a href="{{ payload.get('cta_href', '#') }}" id="cta-link" title="開啟個人化廣告頁">{{ payload.get('cta_text', '檢視生成廣告') }}</a></li>
+                                <li class="btn"><a href="{{ payload.get('cta_href', payload.get('ad_url', '#')) }}" id="cta-link" target="_blank" rel="noopener" title="開啟個人化廣告頁">{{ payload.get('cta_text', '檢視生成廣告') }}</a></li>
                             </ul>
                         </div>
                         <ul class="page">
@@ -127,7 +127,33 @@
                             <li><a href="#" title="第3頁">3</a></li>
                         </ul>
                     </div>
-                    <div class="tab-content-2"><p>內容-2</p></div>
+                    <div class="tab-content-2">
+                        <h3 class="hide">歷史消費紀錄</h3>
+                        <table class="history-table">
+                            <thead>
+                                <tr>
+                                    <th>消費日期</th>
+                                    <th>商品名稱</th>
+                                    <th>數量</th>
+                                    <th>總金額</th>
+                                </tr>
+                            </thead>
+                            <tbody id="history-rows">
+                                {% if purchases %}
+                                    {% for purchase in purchases[:10] %}
+                                    <tr>
+                                        <td>{{ purchase.purchased_at or '--' }}</td>
+                                        <td>{{ purchase.item or '--' }}</td>
+                                        <td>{{ purchase.quantity or 0 }}</td>
+                                        <td>{% if purchase.total_price is not none %}NT${{ '%.0f' % purchase.total_price }}{% else %}--{% endif %}</td>
+                                    </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    <tr><td colspan="4">尚無歷史消費紀錄。</td></tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
                     <div class="tab-content-3"><p>內容-3</p></div>
                     <div class="tab-content-4"><p>內容-4</p></div>
                 </div>
@@ -155,6 +181,18 @@
         return '<span class="medium">中</span>';
       }
 
+      function escapeHtml(value) {
+        if (value === undefined || value === null) {
+          return '--';
+        }
+        return String(value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
       function buildRows(items) {
         if (!items || !items.length) {
           return '<tr><td colspan="8">暫無預測資料，歡迎加入會員以獲得更多推薦。</td></tr>';
@@ -175,6 +213,24 @@
             <td>${adView}</td>
             <td>${matchRate}</td>
             <td>${formatProbabilityTag(typeof probability === 'number' ? probability : null)}</td>
+          </tr>`;
+        }).join('');
+      }
+
+      function buildHistoryRows(purchases) {
+        if (!purchases || !purchases.length) {
+          return '<tr><td colspan="4">尚無歷史消費紀錄。</td></tr>';
+        }
+        return purchases.slice(0, 10).map((purchase) => {
+          const date = escapeHtml(purchase.purchased_at || '--');
+          const item = escapeHtml(purchase.item || '--');
+          const quantity = purchase.quantity != null ? escapeHtml(purchase.quantity) : '0';
+          const total = purchase.total_price != null ? `NT$${Math.round(purchase.total_price)}` : '--';
+          return `<tr>
+            <td>${date}</td>
+            <td>${item}</td>
+            <td>${quantity}</td>
+            <td>${total}</td>
           </tr>`;
         }).join('');
       }
@@ -214,6 +270,7 @@
 
         const tableBody = document.getElementById('prediction-rows');
         tableBody.innerHTML = buildRows(payload.predicted_candidates || []);
+        document.getElementById('history-rows').innerHTML = buildHistoryRows(purchases);
 
         const timings = payload.timings || {};
         const getTiming = (key) => (timings[key] === undefined || timings[key] === null ? '--' : timings[key]);
@@ -224,7 +281,18 @@
 
         const ctaLink = document.getElementById('cta-link');
         ctaLink.textContent = payload.cta_text || '檢視生成廣告';
-        ctaLink.href = payload.cta_href || '#';
+        const preferredHref = payload.cta_href && !payload.cta_href.startsWith('#')
+          ? payload.cta_href
+          : payload.ad_url;
+        if (preferredHref) {
+          ctaLink.href = preferredHref;
+          ctaLink.target = '_blank';
+          ctaLink.rel = 'noopener';
+        } else {
+          ctaLink.href = '#';
+          ctaLink.removeAttribute('target');
+          ctaLink.removeAttribute('rel');
+        }
       }
 
       applyPayload({{ payload | tojson }});
