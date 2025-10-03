@@ -223,51 +223,15 @@ def _serialize_ad_context(context: AdContext) -> dict[str, object]:
     return payload
 
 
-_existing_event = database.get_latest_upload_event()
-if _existing_event is not None:
-    _existing_purchases = database.get_purchase_history(_existing_event.member_id)
-    _existing_profile = database.get_member_profile(_existing_event.member_id)
-    _existing_prediction_items: list[Any] = []
-    try:
-        _existing_prediction = predict_next_purchases(_existing_purchases, profile=_existing_profile)
-        if getattr(_existing_prediction, 'items', None):
-            _existing_prediction_items = list(_existing_prediction.items)
-    except Exception as exc:  # pragma: no cover - defensive
-        logging.warning('Prediction pipeline unavailable for %s during warmup: %s', _existing_event.member_id, exc)
-        _existing_prediction_items = []
-
-    _existing_profile_snapshot = _profile_snapshot(
-        _existing_profile,
-        member_id=_existing_event.member_id,
-        image_filename=getattr(_existing_event, 'image_filename', None),
-    )
-    _existing_timings = {
-        'upload': getattr(_existing_event, 'upload_duration', None),
-        'recognition': getattr(_existing_event, 'recognition_duration', None),
-        'generation': getattr(_existing_event, 'ad_duration', None),
-        'total': getattr(_existing_event, 'total_duration', None),
-    }
-    _existing_context = build_ad_context(
-        _existing_event.member_id,
-        _existing_purchases,
-        profile=_existing_profile,
-        profile_snapshot=_existing_profile_snapshot,
-        prediction_items=_existing_prediction_items,
-        audience=_determine_audience(
-            new_member=False,
-            profile=_existing_profile,
-            purchases=_existing_purchases,
-        ),
-        timings=_existing_timings,
-        detected_at=getattr(_existing_event, 'created_at', None),
-    )
-    _latest_ad_hub.publish(_serialize_ad_context(_existing_context))
-    del (_existing_context, _existing_event, _existing_purchases, _existing_profile, _existing_prediction_items, _existing_profile_snapshot, _existing_timings)
-
-
 @app.get("/")
 def index() -> str:
     return render_template("index.html")
+
+
+@app.get("/demo/upload-ad")
+def simple_upload_demo() -> str:
+    """Serve a minimal uploader that drives the face recognition flow."""
+    return render_template("simple_upload.html")
 
 
 @app.get("/dashboard")
@@ -535,6 +499,10 @@ def upload_face():
         "audience": audience,
         "scenario_key": context.scenario_key,
         "hero_image_url": hero_image_url,
+        "headline": context.headline,
+        "subheading": context.subheading,
+        "highlight": context.highlight,
+        "detected_at": detected_at,
     }
     if predicted_dict:
         payload["predicted"] = predicted_dict
@@ -1104,6 +1072,61 @@ def _profile_snapshot(
     }
 
 
+_existing_event = database.get_latest_upload_event()
+if _existing_event is not None:
+    _existing_purchases = database.get_purchase_history(_existing_event.member_id)
+    _existing_profile = database.get_member_profile(_existing_event.member_id)
+    _existing_prediction_items: list[Any] = []
+    try:
+        _existing_prediction = predict_next_purchases(
+            _existing_purchases,
+            profile=_existing_profile,
+        )
+        if getattr(_existing_prediction, "items", None):
+            _existing_prediction_items = list(_existing_prediction.items)
+    except Exception as exc:  # pragma: no cover - defensive
+        logging.warning(
+            "Prediction pipeline unavailable for %s during warmup: %s",
+            _existing_event.member_id,
+            exc,
+        )
+        _existing_prediction_items = []
+
+    _existing_profile_snapshot = _profile_snapshot(
+        _existing_profile,
+        member_id=_existing_event.member_id,
+        image_filename=getattr(_existing_event, "image_filename", None),
+    )
+    _existing_timings = {
+        "upload": getattr(_existing_event, "upload_duration", None),
+        "recognition": getattr(_existing_event, "recognition_duration", None),
+        "generation": getattr(_existing_event, "ad_duration", None),
+        "total": getattr(_existing_event, "total_duration", None),
+    }
+    _existing_context = build_ad_context(
+        _existing_event.member_id,
+        _existing_purchases,
+        profile=_existing_profile,
+        profile_snapshot=_existing_profile_snapshot,
+        prediction_items=_existing_prediction_items,
+        audience=_determine_audience(
+            new_member=False,
+            profile=_existing_profile,
+            purchases=_existing_purchases,
+        ),
+        timings=_existing_timings,
+        detected_at=getattr(_existing_event, "created_at", None),
+    )
+    _latest_ad_hub.publish(_serialize_ad_context(_existing_context))
+    del (
+        _existing_context,
+        _existing_event,
+        _existing_purchases,
+        _existing_profile,
+        _existing_prediction_items,
+        _existing_profile_snapshot,
+        _existing_timings,
+    )
 
 
 if __name__ == "__main__":
