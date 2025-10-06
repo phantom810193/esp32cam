@@ -68,24 +68,45 @@
                 <section id="customer-tags">
                     <h2>顧客標籤</h2>
                     <ul class="customer-taglist">
-                        {% if persona_label %}
-                        <li>#{{ persona_label }}</li>
+                        {% if customer_tags %}
+                            {% for tag in customer_tags %}
+                                <li>#{{ tag }}</li>
+                            {% endfor %}
+                        {% elif persona_label %}
+                            <li>#{{ persona_label }}</li>
+                        {% else %}
+                            <li>#來店訪客</li>
                         {% endif %}
-                        <li>#健身族群</li>
-                        <li>#保健食品</li>
-                        <li>#蛋白粉</li>
-                        <li>#水果</li>
-                        <li>#美妝愛好</li>
                     </ul>
                 </section>
                 <section id="customer-preferences">
                     <h2 class="hide">顧客偏好</h2>
                     <ul class="customer-preferencelist">
                         <!-- <li><span>偏好品牌</span>Adidas, New Balance</li> -->
-                        <li><span>偏好商品類別</span>穀物 / 早餐、健康飲品</li>
-                        <li><span>最近消費時間</span><i>2天前</i> 2025/09/25</li>
-                        <li><span>本季消費頻率</span>每月 <i>4</i>次</li>
-                        <li><span>平均消費金額</span>NT$ <i>8,320</i></li>
+                        <li>
+                            <span>偏好商品類別</span>
+                            <i>{{ preferred_category or '—' }}</i>
+                        </li>
+                        <li>
+                            <span>最近消費時間</span>
+                            {% if last_purchase_display %}
+                                <i>{{ last_purchase_display }}</i>
+                            {% else %}
+                                <i>尚未有消費紀錄</i>
+                            {% endif %}
+                        </li>
+                        <li>
+                            <span>本季消費頻率</span>
+                            <span>每月 <i>{{ seasonal_frequency }}</i> 次</span>
+                        </li>
+                        <li>
+                            <span>平均消費金額</span>
+                            {% if average_purchase_amount is not none %}
+                                <span>NT$ <i>{{ '{:,.0f}'.format(average_purchase_amount) }}</i></span>
+                            {% else %}
+                                <span>NT$ <i>--</i></span>
+                            {% endif %}
+                        </li>
                     </ul>
                 </section>
                 <section id="customer-purchase-history">
