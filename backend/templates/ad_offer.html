@@ -17,21 +17,93 @@
   <body>
     <main class="offer" role="main">
       <figure class="offer__visual">
-        <img src="{{ hero_image }}" alt="專屬優惠主視覺" loading="lazy" />
+        <img id="offer-hero" src="{{ hero_image }}" alt="專屬優惠主視覺" loading="lazy" />
       </figure>
       <section class="offer__copy">
-        <p class="offer__tag">{{ audience_label }}</p>
-        <h1 class="offer__headline">{{ payload.get('headline') or '專屬優惠推薦' }}</h1>
-        {% if payload.get('subheading') %}
-          <p class="offer__subheading">{{ payload.get('subheading') }}</p>
-        {% endif %}
-        {% if payload.get('highlight') %}
-          <p class="offer__highlight">{{ payload.get('highlight') }}</p>
-        {% endif %}
-        {% if payload.get('cta_text') %}
-          <p class="offer__cta">{{ payload.get('cta_text') }}</p>
-        {% endif %}
+        <p class="offer__tag" id="offer-tag">{{ audience_label }}</p>
+        <h1 class="offer__headline" id="offer-headline">{{ payload.get('headline') or '專屬優惠推薦' }}</h1>
+        <p class="offer__subheading" id="offer-subheading"{% if not payload.get('subheading') %} hidden{% endif %}>{{ payload.get('subheading') or '' }}</p>
+        <p class="offer__highlight" id="offer-highlight"{% if not payload.get('highlight') %} hidden{% endif %}>{{ payload.get('highlight') or '' }}</p>
+        <p class="offer__cta" id="offer-cta"{% if not payload.get('cta_text') %} hidden{% endif %}>{{ payload.get('cta_text') or '' }}</p>
       </section>
     </main>
+    <script>
+      const FALLBACK_IMAGE = '{{ url_for('static', filename='images/ads/ME0000.jpg') }}';
+      const STREAM_URL = {{ (stream_url or '') | tojson }};
+      const initialPayload = {{ payload | tojson }};
+
+      const audienceLabels = {
+        member: '會員限定優惠',
+        guest: '訪客專屬優惠',
+        new: '首次到店禮',
+      };
+
+      function resolveAudienceLabel(audience) {
+        if (!audience) {
+          return '會員專屬優惠';
+        }
+        return audienceLabels[audience] || '會員專屬優惠';
+      }
+
+      function setTextContent(element, value) {
+        if (!element) {
+          return;
+        }
+        const text = value ? String(value) : '';
+        element.textContent = text;
+        if (text) {
+          element.hidden = false;
+        } else {
+          element.hidden = true;
+        }
+      }
+
+      function applyPayload(payload) {
+        if (!payload || typeof payload !== 'object') {
+          payload = {};
+        }
+        const heroEl = document.getElementById('offer-hero');
+        const tagEl = document.getElementById('offer-tag');
+        const headlineEl = document.getElementById('offer-headline');
+        const subheadingEl = document.getElementById('offer-subheading');
+        const highlightEl = document.getElementById('offer-highlight');
+        const ctaEl = document.getElementById('offer-cta');
+
+        const heroUrl = payload.hero_image_url || payload.template_image_url || FALLBACK_IMAGE;
+        if (heroEl) {
+          heroEl.src = heroUrl;
+        }
+
+        setTextContent(tagEl, resolveAudienceLabel(payload.audience));
+        setTextContent(headlineEl, payload.headline || '專屬優惠推薦');
+        setTextContent(subheadingEl, payload.subheading);
+        setTextContent(highlightEl, payload.highlight);
+        setTextContent(ctaEl, payload.cta_text);
+
+        if (payload.headline) {
+          document.title = payload.headline;
+        }
+      }
+
+      applyPayload(initialPayload);
+
+      if (STREAM_URL) {
+        (function initStream() {
+          if (!window.EventSource) {
+            console.warn('EventSource not supported in this browser.');
+            return;
+          }
+          const source = new EventSource(STREAM_URL);
+          source.onmessage = (event) => {
+            try {
+              const payload = JSON.parse(event.data);
+              applyPayload(payload);
+            } catch (error) {
+              console.error('Failed to apply payload', error);
+            }
+          };
+        })();
+      }
+    </script>
   </body>
 </html>

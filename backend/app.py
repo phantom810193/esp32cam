@@ -724,9 +724,8 @@ def render_ad_offer(member_id: str):
 def render_latest_ad():
     context = _latest_ad_hub.snapshot()
     return render_template(
-        "ad_latest.html",
+        "ad_offer.html",
         context=context or {},
-        profile=(context or {}).get("profile") if context else None,
         stream_url=url_for("latest_ad_stream"),
     )
 
