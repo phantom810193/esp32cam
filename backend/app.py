@@ -1,3 +1,4 @@
+
 # backend/app.py
 """Flask backend for the ESP32-CAM retail advertising MVP."""
 from __future__ import annotations

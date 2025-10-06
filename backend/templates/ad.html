@@ -125,56 +125,93 @@
                                 {% else %}
                                     <tr><td colspan="6">暫無預測資料，歡迎加入會員以獲得更多推薦。</td></tr>
 
-                                {% endif %}
-                            </tbody>
-                        </table>
-                        <div class="advertising">
-                            <ul class="advertising_info">
-                                <li><span>上傳速度</span>{{ timings.get('upload', '--') }}秒</li>
-                                <li><span>辨識速度</span>{{ timings.get('recognition', '--') }}秒</li>
-                                <li><span>廣告生成</span>{{ timings.get('generation', '--') }}秒</li>
-                                <li><span>總計耗時</span>{{ timings.get('total', '--') }}秒</li>
-                                <li class="btn"><a href="{{ effective_cta_href }}" target="_blank" rel="noopener" title="開啟個人化廣告頁">{{ cta_label }}</a></li>
-                            </ul>
-                        </div>
-                        <ul class="page">
-                            <li class="active"><a href="#" title="第1頁">1</a></li>
-                            <li><a href="#" title="第2頁">2</a></li>
-                            <li><a href="#" title="第3頁">3</a></li>
-                        </ul>
-                    </div>
-                    <div class="tab-content-2">
-                        <h3 class="hide">歷史消費紀錄</h3>
-                        {% if purchases %}
-                            <table class="history-table">
-                                <thead>
-                                    <tr>
-                                        <th>消費日期</th>
-                                        <th>商品名稱</th>
-                                        <th>數量</th>
-                                        <th>總金額</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for purchase in purchases[:10] %}
-                                        <tr>
-                                            <td>{{ purchase.purchased_at or '--' }}</td>
-                                            <td>{{ purchase.item or '--' }}</td>
-                                            <td>{{ purchase.quantity or 0 }}</td>
-                                            <td>{% if purchase.total_price is not none %}NT${{ '%.0f' % purchase.total_price }}{% else %}--{% endif %}</td>
-                                        </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        {% else %}
-                            <p class="empty-history">尚無歷史消費紀錄。</p>
-                        {% endif %}
-                    </div>
-                    <div class="tab-content-3"><p>內容-3</p></div>
-                    <div class="tab-content-4"><p>內容-4</p></div>
-                </div>
-            </section>
-        </article>
-    </main>
+{% set context = context if context is defined else None %}
+{% set purchases = purchases if purchases is defined else (context.purchases if context and context.purchases is defined else []) %}
+{% set insights = context.insights if context and context.insights is defined else None %}
+{% set scenario = scenario_key|default(insights.scenario if insights and insights.scenario is defined else '') %}
+{% set hero_image_url = hero_url %}
+{% set scenario_key = scenario %}
+
+{% if is_v2 %}
+  {# 新版樣式：partial（帶 debug 支援） #}
+  {% set debug = (request.args.get('debug') == '1') %}
+  {% include "partials/ad_hero.html" %}
+
+{% else %}
+  {# 舊版樣式（Codex 版）：保留 insight 卡片與歷史清單 #}
+  <div class="banner">
+    <div class="hero">
+      <img src="{{ hero_url }}"
+           alt="廣告主視覺 {{ scenario|default('') }}">
+    </div>
+
+    {% set legacy_copy = copy if copy is defined and copy else None %}
+    {% set headline = context.headline if context and context.headline is defined else (legacy_copy.title if legacy_copy and legacy_copy.title is defined else "智慧零售廣告看板") %}
+    <h1>{{ headline }}</h1>
+
+    <div class="member-code">
+      {% if context and context.member_code %}
+        商場會員代號：{{ context.member_code }}
+      {% else %}
+        尚未綁定商場會員代號，歡迎至服務台完成綁定
+      {% endif %}
+    </div>
+
+    <div class="subheading">
+      {% set subheading = context.subheading if context and context.subheading is defined else (legacy_copy.subtitle if legacy_copy and legacy_copy.subtitle is defined else "") %}
+      {{ subheading }}
+    </div>
+
+    <div class="highlight">
+      {% set highlight_text = context.highlight if context and context.highlight is defined else None %}
+      {% if highlight_text %}
+        {{ highlight_text }}
+      {% else %}
+        {% set bullets = legacy_copy.bullets if legacy_copy and legacy_copy.bullets is defined and legacy_copy.bullets else ["入會禮","生日禮","點數回饋"] %}
+        {{ bullets|join(" · ") }}
+      {% endif %}
+    </div>
+
+    <div class="insight-card">
+      {% if scenario == 'brand_new' %}
+        <span class="badge">新客偵測</span>
+        <p>第一次來店，尚未累積消費紀錄，立即推播加入會員與公版歡迎廣告。</p>
+        <p>完成註冊即可領取開卡禮，並於現場啟用專屬折扣。</p>
+      {% elif scenario == 'repeat_purchase' %}
+        <span class="badge">回購洞察</span>
+        <p>近期 {{ insights.repeat_count if insights and insights.repeat_count is defined else "多次" }} 次都選擇「{{ insights.recommended_item if insights and insights.recommended_item is defined else "熱門品項" }}」，系統自動生成此商品的個人化推播。</p>
+        <p>建議同步展示加價購組合或升級方案，提高客單價。</p>
+      {% else %}
+        <span class="badge">老會員預測</span>
+        <p>根據歷史消費，AI 預估再次購買「{{ insights.recommended_item if insights and insights.recommended_item is defined else "偏好品項" }}」的機率約 {{ insights.probability_percent if insights and insights.probability_percent is defined else "—" }}。</p>
+        <p>推播會員專屬優惠，並提醒可於收銀台加碼點數。</p>
+      {% endif %}
+    </div>
+
+    {% if purchases %}
+      <div class="history">
+        <h2>歷史消費紀錄</h2>
+        <ul>
+          {% for purchase in purchases %}
+            <li>
+              <span class="item">{{ purchase.item }}</span>
+              <span class="date">{{ purchase.purchased_at }}</span>
+              {% set qty = '{:g}'.format(purchase.quantity) if purchase.quantity is defined else '1' %}
+              <span class="meta">
+                單價：${{ '%.0f'|format(purchase.unit_price) if purchase.unit_price is defined else '—' }}
+                ｜數量：{{ qty }}
+                ｜總價：${{ '%.0f'|format(purchase.total_price) if purchase.total_price is defined else '—' }}
+              </span>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% else %}
+      <div class="history history-empty">尚無消費紀錄</div>
+    {% endif %}
+  </div>
+{% endif %}
+
+
 </body>
 </html>

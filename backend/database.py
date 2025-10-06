@@ -4,11 +4,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import random
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, TypedDict
 from zoneinfo import ZoneInfo
 
 from .recognizer import FaceEncoding, FaceRecognizer
@@ -34,10 +35,133 @@ SEED_PROFILE_LABELS: tuple[str, ...] = (
     "wellness-gourmet",
 )
 
-SEED_PROFILE_TO_MEMBER_ID: dict[str, str] = dict(zip(SEED_PROFILE_LABELS, SEED_MEMBER_IDS))
+
+PROFILE_LABEL_TO_SEED_MEMBER: dict[str, str] = {
+    "dessert-lover": "MEME0383FE3AA",
+    "family-groceries": "MEM692FFD0824",
+    "fitness-enthusiast": "MEMFITNESS2025",
+    "home-manager": "MEMHOMECARE2025",
+    "wellness-gourmet": "MEMHEALTH2025",
+}
+
 
 
 _TAIPEI_TZ = ZoneInfo("Asia/Taipei")
+
+
+class _PersonaPurchaseItem(TypedDict):
+    item: str
+    category: str
+    price: tuple[int, int]
+
+
+class _PersonaPurchaseConfig(TypedDict):
+    prefix: str
+    items: list[_PersonaPurchaseItem]
+
+
+_SEPTEMBER_2025_PURCHASE_CONFIG: dict[str, _PersonaPurchaseConfig] = {
+    "MEME0383FE3AA": {
+        "prefix": "DES",
+        "items": [
+            {"item": "7-11 早餐", "category": "咖啡廳", "price": (65, 150)},
+            {"item": "手作戚風蛋糕", "category": "甜點", "price": (180, 320)},
+            {"item": "草莓生乳捲", "category": "甜點", "price": (260, 420)},
+            {"item": "抹茶千層蛋糕", "category": "甜點", "price": (320, 520)},
+            {"item": "蜜桃水果茶", "category": "飲料", "price": (90, 160)},
+            {"item": "黑糖珍珠鮮奶", "category": "飲料", "price": (85, 160)},
+            {"item": "下午茶點心盒", "category": "甜點", "price": (220, 420)},
+            {"item": "焦糖布丁禮盒", "category": "甜點", "price": (260, 480)},
+            {"item": "手沖單品咖啡豆", "category": "咖啡廳", "price": (350, 580)},
+            {"item": "巷口咖啡拿鐵", "category": "咖啡廳", "price": (110, 190)},
+            {"item": "可可奶霜鬆餅", "category": "甜點", "price": (210, 360)},
+            {"item": "奶蓋紅茶", "category": "飲料", "price": (90, 150)},
+            {"item": "手工餅乾禮盒", "category": "甜點", "price": (320, 560)},
+            {"item": "冷萃咖啡瓶", "category": "咖啡廳", "price": (180, 260)},
+            {"item": "生巧克力塔", "category": "甜點", "price": (240, 420)},
+        ],
+    },
+    "MEM692FFD0824": {
+        "prefix": "FAM",
+        "items": [
+            {"item": "全聯購買洗衣精", "category": "家庭開銷", "price": (180, 320)},
+            {"item": "家樂福廚房紙巾", "category": "居家用品", "price": (120, 260)},
+            {"item": "寶寶尿布箱購", "category": "親子用品", "price": (520, 980)},
+            {"item": "兒童營養餅乾", "category": "親子用品", "price": (180, 320)},
+            {"item": "保鮮盒組", "category": "日用品", "price": (280, 520)},
+            {"item": "家庭洗衣精補充包", "category": "家庭開銷", "price": (180, 360)},
+            {"item": "超市蔬果採購", "category": "家庭開銷", "price": (350, 850)},
+            {"item": "兒童沐浴乳", "category": "親子用品", "price": (220, 420)},
+            {"item": "早餐麥片組合", "category": "日用品", "price": (150, 280)},
+            {"item": "週末家常菜食材", "category": "家庭開銷", "price": (420, 980)},
+            {"item": "親子DIY手作包", "category": "親子用品", "price": (260, 460)},
+            {"item": "家庭醫藥箱補充", "category": "日用品", "price": (320, 620)},
+            {"item": "超商儲值電費", "category": "家庭開銷", "price": (600, 1200)},
+            {"item": "兒童故事書組", "category": "親子用品", "price": (280, 520)},
+            {"item": "家庭清潔用品大採購", "category": "日用品", "price": (360, 820)},
+        ],
+    },
+    "MEMFITNESS2025": {
+        "prefix": "FIT",
+        "items": [
+            {"item": "健身房月卡", "category": "運動服務", "price": (1200, 1800)},
+            {"item": "高蛋白雞胸便當", "category": "健身餐", "price": (150, 250)},
+            {"item": "運動用品店阻力帶", "category": "運動用品", "price": (320, 580)},
+            {"item": "乳清蛋白補充罐", "category": "蛋白粉", "price": (950, 1500)},
+            {"item": "運動飲料箱購", "category": "健身餐", "price": (350, 620)},
+            {"item": "高蛋白燕麥棒", "category": "健身餐", "price": (220, 360)},
+            {"item": "健身手套", "category": "運動用品", "price": (380, 680)},
+            {"item": "BCAA 胺基酸", "category": "蛋白粉", "price": (780, 1300)},
+            {"item": "私人教練課程", "category": "運動服務", "price": (1500, 2000)},
+            {"item": "壓力褲", "category": "運動用品", "price": (680, 980)},
+            {"item": "藍莓優格冰沙", "category": "健身餐", "price": (120, 220)},
+            {"item": "高蛋白粉補充包", "category": "蛋白粉", "price": (880, 1400)},
+            {"item": "運動毛巾組", "category": "運動用品", "price": (240, 420)},
+            {"item": "能量膠補給", "category": "健身餐", "price": (90, 160)},
+            {"item": "體組成檢測", "category": "運動服務", "price": (600, 900)},
+        ],
+    },
+    "MEMHOMECARE2025": {
+        "prefix": "HOM",
+        "items": [
+            {"item": "家樂福廚房紙巾", "category": "廚房用品", "price": (120, 260)},
+            {"item": "IKEA 收納盒組", "category": "居家用品", "price": (320, 620)},
+            {"item": "掃地機器人濾網", "category": "家庭電器", "price": (450, 780)},
+            {"item": "香氛擴香補充瓶", "category": "居家用品", "price": (280, 520)},
+            {"item": "廚房不沾鍋", "category": "廚房用品", "price": (780, 1500)},
+            {"item": "智慧燈泡二入", "category": "家庭電器", "price": (420, 680)},
+            {"item": "衣物柔軟精大罐", "category": "居家用品", "price": (220, 360)},
+            {"item": "玻璃保鮮盒組", "category": "廚房用品", "price": (360, 620)},
+            {"item": "電熱水壺", "category": "家庭電器", "price": (680, 980)},
+            {"item": "烘碗機保養服務", "category": "家庭電器", "price": (950, 1600)},
+            {"item": "洗衣機清潔劑", "category": "居家用品", "price": (260, 420)},
+            {"item": "防蟲密封罐", "category": "廚房用品", "price": (180, 320)},
+            {"item": "家用工具箱", "category": "居家用品", "price": (520, 880)},
+            {"item": "除濕機濾網", "category": "家庭電器", "price": (480, 780)},
+            {"item": "餐具收納架", "category": "廚房用品", "price": (240, 420)},
+        ],
+    },
+    "MEMHEALTH2025": {
+        "prefix": "HLT",
+        "items": [
+            {"item": "冷壓果汁", "category": "健康食品", "price": (180, 280)},
+            {"item": "有機蔬菜箱", "category": "有機蔬果", "price": (520, 880)},
+            {"item": "保健綜合維他命", "category": "保健品", "price": (680, 1200)},
+            {"item": "無糖優格禮盒", "category": "健康食品", "price": (260, 420)},
+            {"item": "植物性膳食纖維", "category": "保健品", "price": (450, 760)},
+            {"item": "有機藍莓", "category": "有機蔬果", "price": (320, 520)},
+            {"item": "發芽糙米", "category": "健康食品", "price": (240, 360)},
+            {"item": "益生菌粉", "category": "保健品", "price": (680, 980)},
+            {"item": "養生堅果禮盒", "category": "健康食品", "price": (420, 780)},
+            {"item": "冷壓橄欖油", "category": "健康食品", "price": (520, 980)},
+            {"item": "有機紅蘿蔔汁", "category": "健康食品", "price": (180, 300)},
+            {"item": "養身漢方湯包", "category": "保健品", "price": (380, 650)},
+            {"item": "無麩質能量棒", "category": "健康食品", "price": (180, 260)},
+            {"item": "舒眠草本茶", "category": "健康食品", "price": (200, 320)},
+            {"item": "保健酵素飲", "category": "保健品", "price": (520, 850)},
+        ],
+    },
+}
 
 
 @dataclass
@@ -229,9 +353,12 @@ class Database:
                 "first_image_filename",
             ]
 
+            needs_drop = False
+            needs_rebuild = False
+
             if profile_columns:
                 if profile_columns != expected_profile_columns:
-                    conn.execute("DROP TABLE IF EXISTS member_profiles")
+                    needs_drop = True
                 else:
                     profile_meta = conn.execute("PRAGMA table_info(member_profiles)").fetchall()
                     nullable_columns = {
@@ -244,13 +371,20 @@ class Database:
                         "name",
                     }
                     if any(row["name"] in nullable_columns and row["notnull"] for row in profile_meta):
-                        conn.execute("DROP TABLE IF EXISTS member_profiles")
+                        needs_drop = True
+                    elif self._profile_label_has_unique_constraint(conn):
+                        needs_rebuild = True
+
+            if needs_drop:
+                conn.execute("DROP TABLE IF EXISTS member_profiles")
+            elif needs_rebuild:
+                self._rebuild_member_profiles_without_unique(conn, expected_profile_columns)
 
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS member_profiles (
                     profile_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    profile_label TEXT NOT NULL UNIQUE,
+                    profile_label TEXT NOT NULL,
                     name TEXT,
                     member_id TEXT UNIQUE,
                     mall_member_id TEXT,
@@ -318,8 +452,114 @@ class Database:
                 );
                 """
             )
-            
+
     # ------------------------------------------------------------------
+    @staticmethod
+    def _profile_label_has_unique_constraint(conn: sqlite3.Connection) -> bool:
+        indexes = conn.execute("PRAGMA index_list(member_profiles)").fetchall()
+        for index in indexes:
+            if not index["unique"]:
+                continue
+            index_name = str(index["name"])
+            columns = conn.execute(f"PRAGMA index_info({index_name})").fetchall()
+            if len(columns) != 1:
+                continue
+            column_name = columns[0]["name"]
+            if column_name == "profile_label":
+                return True
+        return False
+
+    def _rebuild_member_profiles_without_unique(
+        self, conn: sqlite3.Connection, expected_columns: Iterable[str]
+    ) -> None:
+        conn.execute("ALTER TABLE member_profiles RENAME TO member_profiles_legacy")
+        conn.execute(
+            """
+            CREATE TABLE member_profiles (
+                profile_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_label TEXT NOT NULL,
+                name TEXT,
+                member_id TEXT UNIQUE,
+                mall_member_id TEXT,
+                member_status TEXT DEFAULT '有效',
+                joined_at TEXT,
+                points_balance REAL DEFAULT 0,
+                gender TEXT,
+                birth_date TEXT,
+                phone TEXT,
+                email TEXT,
+                address TEXT,
+                occupation TEXT,
+                first_image_filename TEXT,
+                FOREIGN KEY(member_id) REFERENCES members(member_id)
+            );
+            """
+        )
+        columns_csv = ", ".join(expected_columns)
+        conn.execute(
+            f"INSERT INTO member_profiles ({columns_csv}) "
+            f"SELECT {columns_csv} FROM member_profiles_legacy"
+        )
+        conn.execute("DROP TABLE member_profiles_legacy")
+        conn.execute(
+            """
+            UPDATE sqlite_sequence
+            SET seq = (SELECT MAX(profile_id) FROM member_profiles)
+            WHERE name = 'member_profiles'
+            """
+        )
+
+    def _normalize_placeholder_profiles(
+        self,
+        conn: sqlite3.Connection | None = None,
+        *,
+        ensure_placeholders: bool = True,
+    ) -> None:
+        if conn is None:
+            with self._connect() as managed_conn:
+                self._normalize_placeholder_profiles(
+                    managed_conn, ensure_placeholders=ensure_placeholders
+                )
+            return
+
+        conn.execute(
+            """
+            UPDATE member_profiles
+            SET profile_label = 'unknown'
+            WHERE profile_label LIKE 'staging-slot-%'
+            """
+        )
+
+        if SEED_MEMBER_IDS:
+            placeholders = ",".join("?" for _ in SEED_MEMBER_IDS)
+            conn.execute(
+                f"""
+                UPDATE member_profiles
+                SET member_id = NULL,
+                    first_image_filename = NULL
+                WHERE profile_label = 'unknown' AND member_id IN ({placeholders})
+                """,
+                SEED_MEMBER_IDS,
+            )
+
+        unassigned_count = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM member_profiles
+            WHERE profile_label = 'unknown' AND member_id IS NULL
+            """
+        ).fetchone()[0]
+        if ensure_placeholders:
+            target_placeholders = 3
+            missing = target_placeholders - int(unassigned_count)
+            for _ in range(max(0, missing)):
+                conn.execute(
+                    """
+                    INSERT INTO member_profiles (profile_label, name, member_status)
+                    VALUES ('unknown', '未註冊客戶', '有效')
+                    """
+                )
+
     def find_member_by_encoding(
         self, encoding: FaceEncoding, recognizer: FaceRecognizer
     ) -> MemberMatch:
@@ -1081,6 +1321,7 @@ class Database:
     def ensure_demo_data(self) -> None:
         """Load deterministic demo data from ``data/mvp.sql`` when empty."""
 
+        self._normalize_placeholder_profiles(ensure_placeholders=False)
         self._profile_purchase_templates = {}
         self._profile_history_seeded.clear()
 
@@ -1097,14 +1338,91 @@ class Database:
             _LOGGER.warning("Seed file %s not found; skipping demo data load", sql_path)
             return
 
-        insert_statements: list[str] = []
-        for line in sql_path.read_text(encoding="utf-8", errors="ignore").splitlines():
-            stripped = line.strip()
-            if stripped.upper().startswith("INSERT "):
-                insert_statements.append(line)
-        if not insert_statements:
-            _LOGGER.warning("Seed file %s does not contain INSERT statements", sql_path)
-            return
+        self._profile_purchase_templates = {
+            "dessert-lover": dessert_history,
+            "family-groceries": kids_history,
+            "fitness-enthusiast": fitness_history,
+            "home-manager": homemaker_history,
+            "wellness-gourmet": health_history,
+        }
+
+        self._reset_seed_profiles()
+
+        self._seed_member_profile(
+            profile_label="dessert-lover",
+            name="李函霏",
+            member_id=None,
+            mall_member_id="ME0001",
+            member_status="有效",
+            joined_at="2021-06-12",
+            points_balance=1520,
+            gender="女",
+            birth_date="1988-07-12",
+            phone="0912-345-678",
+            email="dessertlover@example.com",
+            address="台北市信義區松壽路10號",
+            occupation="甜點教室講師",
+        )
+        self._seed_member_profile(
+            profile_label="family-groceries",
+            name="林位青",
+            member_id=None,
+            mall_member_id="ME0002",
+            member_status="有效",
+            joined_at="2020-09-01",
+            points_balance=980,
+            gender="男",
+            birth_date="1990-02-08",
+            phone="0923-556-789",
+            email="familybuyer@example.com",
+            address="新北市板橋區文化路100號",
+            occupation="幼兒園老師",
+        )
+        self._seed_member_profile(
+            profile_label="fitness-enthusiast",
+            name="范文華",
+            member_id=None,
+            mall_member_id="ME0003",
+            member_status="有效",
+            joined_at="2019-11-20",
+            points_balance=2040,
+            gender="女",
+            birth_date="1985-04-19",
+            phone="0955-112-233",
+            email="fitgoer@example.com",
+            address="台中市西屯區市政北二路88號",
+            occupation="企業健身顧問",
+        )
+        self._seed_member_profile(
+            profile_label="home-manager",
+            name="未註冊客戶",
+            member_id=None,
+            mall_member_id="",
+            member_status=None,
+            joined_at=None,
+            points_balance=None,
+            gender=None,
+            birth_date=None,
+            phone=None,
+            email=None,
+            address=None,
+            occupation=None,
+        )
+        self._seed_member_profile(
+            profile_label="wellness-gourmet",
+            name="未註冊客戶",
+            member_id=None,
+            mall_member_id="",
+            member_status=None,
+            joined_at=None,
+            points_balance=None,
+            gender=None,
+            birth_date=None,
+            phone=None,
+            email=None,
+            address=None,
+            occupation=None,
+
 
         with self._connect() as conn:
             conn.executescript("\n".join(insert_statements))
@@ -1121,6 +1439,14 @@ class Database:
                     (filename, member_id),
                 )
             conn.commit()
+
+        for profile_label, member_id in PROFILE_LABEL_TO_SEED_MEMBER.items():
+            template = self._profile_purchase_templates.get(profile_label)
+            if not template:
+                continue
+            self._seed_member_history(member_id, template)
+
+        self._normalize_placeholder_profiles()
 
     def _seed_member_history(
         self, member_id: str, purchases: list[dict[str, float | str]]
@@ -1150,6 +1476,48 @@ class Database:
 
         for purchase in purchases:
             self.add_purchase(member_id, **purchase)
+
+        config = _SEPTEMBER_2025_PURCHASE_CONFIG.get(member_id)
+        if not config:
+            return
+
+        rng = random.Random(f"{member_id}-2025-09")
+        member_code = self.get_member_code(member_id)
+        minute_choices = (0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55)
+        september_records: list[dict[str, float | str]] = []
+
+        for index in range(50):
+            choice = rng.choice(config["items"])
+            price_range = choice["price"]
+            low, high = int(price_range[0]), int(price_range[1])
+            if high <= low:
+                unit_price = float(low)
+            else:
+                step = 5 if high - low >= 5 else 1
+                unit_price = float(rng.randrange(low, high + 1, step))
+
+            purchase_time = datetime(2025, 9, 1) + timedelta(
+                days=rng.randint(0, 29),
+                hours=rng.randint(8, 21),
+                minutes=rng.choice(minute_choices),
+            )
+
+            september_records.append(
+                {
+                    "member_code": member_code,
+                    "product_category": choice["category"],
+                    "internal_item_code": f"{config['prefix']}-S25{index + 1:03d}",
+                    "item": choice["item"],
+                    "purchased_at": purchase_time.strftime("%Y-%m-%d %H:%M"),
+                    "unit_price": unit_price,
+                    "quantity": 1.0,
+                    "total_price": float(round(unit_price, 2)),
+                }
+            )
+
+        september_records.sort(key=lambda entry: entry["purchased_at"])
+        for record in september_records:
+            self.add_purchase(member_id, **record)
 
     def _seed_member_profile(
         self,
