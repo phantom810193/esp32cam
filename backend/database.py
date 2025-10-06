@@ -1422,6 +1422,7 @@ class Database:
             email=None,
             address=None,
             occupation=None,
+        )
 
 
         with self._connect() as conn:
