@@ -76,6 +76,7 @@ PERSONA_LABELS = {
     "fitness-enthusiast": "健身族",
     "home-manager": "家庭主婦",
     "wellness-gourmet": "健康食品愛好者",
+    "unknown": "未註冊客戶",
 }
 
 app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
