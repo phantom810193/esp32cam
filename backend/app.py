@@ -45,7 +45,7 @@ from .database import Database, Purchase, SEED_MEMBER_IDS
 
 from .prediction import predict_next_purchases
 from .recognizer import FaceRecognizer
-from .routes import adgen_blueprint
+from .routes import adgen_blueprint, ads_blueprint
 
 # -----------------------------------------------------------------------------
 # Logging
@@ -83,6 +83,7 @@ app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
 app.config["JSON_AS_ASCII"] = False
 app.config["ADS_DIR"] = str(ADS_DIR)  # 儲存為字串路徑
 app.register_blueprint(adgen_blueprint)
+app.register_blueprint(ads_blueprint)
 
 # -----------------------------------------------------------------------------
 # Services (Vertex AI / AWS Rekognition / DB)
