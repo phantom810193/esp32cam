@@ -44,6 +44,7 @@ CREATE TABLE purchases (
                     total_price REAL NOT NULL,
                     FOREIGN KEY(member_id) REFERENCES members(member_id)
                 );
+
 INSERT INTO "purchases" VALUES(51,'MEME0383FE3AA','ME0001','甜點與烘焙','DES-001','2025-01-04 10:30','草莓千層蛋糕',320.0,1.0,320.0);
 INSERT INTO "purchases" VALUES(52,'MEME0383FE3AA','ME0001','甜點與烘焙','DES-002','2025-01-08 11:41','香草可麗露禮盒',480.0,1.0,480.0);
 INSERT INTO "purchases" VALUES(53,'MEME0383FE3AA','ME0001','甜點與烘焙','DES-003','2025-01-12 12:52','抹茶生乳捲',280.0,1.0,280.0);
@@ -548,6 +549,7 @@ INSERT INTO "purchases" VALUES(755,'MEME0383FE3AA','ME0001','飲料','DES-S25046
 INSERT INTO "purchases" VALUES(756,'MEMHOMECARE2025','','居家用品','HOM-S25013','2025-09-30 17:30','香氛擴香補充瓶',455.0,1.0,455.0);
 INSERT INTO "purchases" VALUES(757,'MEMFITNESS2025','ME0003','運動用品','FIT-S25023','2025-09-30 18:35','健身手套',615.0,1.0,615.0);
 INSERT INTO "purchases" VALUES(758,'MEMHEALTH2025','','健康食品','HLT-S25034','2025-09-30 21:50','有機紅蘿蔔汁',255.0,1.0,255.0);
+
 
 CREATE TABLE upload_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,

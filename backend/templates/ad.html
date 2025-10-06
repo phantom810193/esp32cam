@@ -1,52 +1,129 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-  <meta charset="utf-8" />
-  <title>{{ page_title|default("智慧推播廣告") }}</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- 每 5 秒刷新；可用 refresh_sec 覆蓋 -->
-  <meta http-equiv="refresh" content="{{ refresh_sec|default(5) }}">
-
-  {% set is_v2 = request.args.get('v2') == '1' %}
-  {% set hero_default = url_for('static', filename='images/ads/ME0000.jpg') %}
-  {% set hero_url = hero_image_url|default(hero_default) %}
-
-  {% if is_v2 %}
-    <link rel="preload" as="image" href="{{ hero_url }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/ads.css') }}">
-  {% else %}
-    {# 舊版樣式：沿用 Codex 的設計（不動你的既有行為） #}
-    <style>
-      body { margin:0; font-family:"Noto Sans TC","PingFang TC",sans-serif;
-        background: radial-gradient(circle at top, #fef3c7, #f8fafc); color:#111827; }
-      .banner { display:flex; flex-direction:column; justify-content:center; align-items:center;
-        min-height:100vh; text-align:center; padding:3rem 2rem; }
-      .hero { width:min(72rem, 90vw); margin-bottom:2.5rem; border-radius:2rem; overflow:hidden;
-        box-shadow:0 25px 50px rgba(15,23,42,.18); }
-      .hero img { width:100%; height:auto; display:block; }
-      h1 { font-size:3rem; margin-bottom:.75rem; color:#1d4ed8; }
-      .subheading { font-size:1.5rem; margin-bottom:2rem; color:#334155; white-space:pre-line; }
-      .member-code { font-size:1.1rem; margin:.5rem 0 1.25rem; color:#0f172a; }
-      .highlight { background:#ef4444; color:#fff; padding:1.25rem 2rem; border-radius:1.5rem;
-        font-size:1.75rem; font-weight:600; box-shadow:0 10px 30px rgba(239,68,68,.35);
-        max-width:60rem; white-space:pre-line; }
-      .insight-card { margin-top:2rem; background:rgba(255,255,255,.85); border-radius:1.25rem;
-        padding:1.5rem 2rem; box-shadow:0 12px 28px rgba(15,23,42,.12); max-width:56rem; color:#1f2937; }
-      .insight-card .badge { display:inline-block; padding:.35rem .9rem; border-radius:999px;
-        background:#1d4ed8; color:#fff; font-size:.9rem; margin-bottom:.75rem; letter-spacing:.08em; }
-      .insight-card p { margin:.25rem 0; line-height:1.6; font-size:1.05rem; }
-      .history { margin-top:3rem; max-width:70rem; width:100%; }
-      .history h2 { margin-bottom:1rem; font-size:1.75rem; color:#0f172a; }
-      .history ul { list-style:none; padding:0; margin:0; display:grid;
-        grid-template-columns:repeat(auto-fit,minmax(16rem,1fr)); gap:1rem; }
-      .history li { background:#fff; border-radius:1rem; padding:1.25rem; box-shadow:0 10px 25px rgba(15,23,42,.08); }
-      .history .item { display:block; font-size:1.3rem; font-weight:600; margin-bottom:.5rem; }
-      .history .date, .history .meta { display:block; color:#475569; }
-      .history-empty { margin-top:2rem; font-size:1.25rem; color:#1e293b; }
-    </style>
-  {% endif %}
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>你的專屬折扣</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/customer-board.css') }}">
 </head>
+{% set profile = profile or context.profile or {} %}
+{% set items = prediction_items or context.predicted_candidates or [] %}
+{% set timings = timings or context.timings or {} %}
+{% set purchases = purchases or context.purchases or [] %}
+{% set predicted = context.predicted or {} %}
+{% set first_purchase = purchases[0] if purchases else None %}
+{% set ad_url = url_for('render_ad', member_id=context.member_id) %}
+{% set effective_cta_href = context.cta_href if context.cta_href and not context.cta_href.startswith('#') else ad_url %}
+{% set cta_label = context.cta_text or '檢視生成廣告' %}
 <body>
+    <header>
+        <h1>你的專屬折扣</h1>
+        <nav>
+            <ul id="nav-links">
+                <li class="event"><a href="#" title="促銷活動">促銷活動</a></li>
+                <li class="shop"><a href="#" title="店舖管理">店舖管理</a></li>
+                <li class="product"><a href="#" title="商品管理">商品管理</a></li>
+                <li class="payment"><a href="#" title="金流管理">金流管理</a></li>
+                <li class="customer active"><a href="#" title="顧客資料">顧客資料</a></li>
+            </ul>
+        </nav>
+    </header>
+    <main id="customer-profile">
+        <article id="customer-information">
+            <h2 class="hide">顧客資料</h2>
+            <figure class="customer-photo">
+                <img src="{{ profile.photo_url or url_for('static', filename='images/face.jpg') }}" alt="Customer Photo">
+                <figcaption>{{ context.detected_at or timings.get('detected_at') or '--' }}</figcaption>
+            </figure>
+            <section class="customer-infolist">
+                <ul class="customer-basic-info">
+                    <li class="customer-name">{{ profile.name or '匿名顧客' }}</li>
+                    <li class="customer-level general">{{ profile.member_status or (context.audience == 'new' and '訪客' or '一般會員') }}</li>
+                    <li>Face ID：{{ context.member_id }}</li>
+                    <li>會員編號：{{ profile.member_code or '尚未註冊' }}</li>
+                    <li>會員狀態：{{ profile.member_status or '未知' }}</li>
+                    <li>加入日期：{{ profile.joined_at or '--' }}</li>
+                    <li>點數餘額：{{ profile.points_balance if profile.points_balance is not none else 0 }} 點</li>
+                </ul>
+                <ul class="customer-contact-info">
+                    <li>性別：{{ profile.gender or '未填寫' }}</li>
+                    <li>出生年月：{{ profile.birth_date or '未填寫' }}</li>
+                    <li>聯絡電話：{{ profile.phone or '未填寫' }}</li>
+                    <li>電子郵件：{{ profile.email or '未填寫' }}</li>
+                    <li>郵遞地址：{{ profile.address or '未填寫' }}</li>
+                    <li>職業 / 產業別：{{ profile.occupation or '未填寫' }}</li>
+                </ul>
+            </section>
+        </article>
+        <article id="customer-details">
+            <section id="customer-tags">
+                <h2>顧客標籤</h2>
+                <ul class="customer-taglist">
+                    {% if profile.profile_label %}<li>#{{ profile.profile_label }}</li>{% endif %}
+                    {% if predicted.category_label %}<li>#{{ predicted.category_label }}</li>{% endif %}
+                </ul>
+            </section>
+            <section id="customer-preferences">
+                <h2 class="hide">顧客偏好</h2>
+                <ul class="customer-preferencelist">
+                    <li><span>偏好商品類別</span>{{ predicted.category_label or '健康飲品' }}</li>
+                    <li><span>最近消費時間</span><i>{{ first_purchase.purchased_at if first_purchase else '--' }}</i></li>
+                    <li><span>本季消費頻率</span>每月 <i>{{ purchases|length }}</i> 次</li>
+                    <li><span>平均消費金額</span>NT$ <i>{{ '%.0f' % (first_purchase.total_price or 0) if first_purchase else '0' }}</i></li>
+                </ul>
+            </section>
+            <section id="customer-purchase-history">
+                <h2 class="hide">顧客購買歷史</h2>
+                <span id="tab-1">1</span>
+                <span id="tab-2">2</span>
+                <span id="tab-3">3</span>
+                <span id="tab-4">4</span>
+                <div id="tab">
+                    <ul>
+                        <li><a href="#tab-1" title="感興趣商品推估">感興趣商品推估</a></li>
+                        <li><a href="#tab-2" title="歷史消費紀錄">歷史消費紀錄</a></li>
+                        <li><a href="#tab-3" title="動線區域停留時間">動線區域停留時間</a></li>
+                        <li><a href="#tab-4" title="參與活動紀錄">參與活動紀錄</a></li>
+                    </ul>
+                    <div class="tab-content-1">
+                        <h3 class="hide">感興趣商品推估</h3>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>內部商品編號</th>
+                                    <th>商品名稱</th>
+                                    <th>商品類別</th>
+                                    <th>商品價格</th>
+                                    <th>商品<br/>查閱率</th>
+                                    <th>預估購買機率</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% if items %}
+                                    {% for item in items[:7] %}
+                                        <tr>
+                                            <td>{{ item.product_code or '--' }}</td>
+                                            <td>{{ item.product_name or '--' }}</td>
+                                            <td>{{ item.category_label or item.category or '--' }}</td>
+                                            <td>{% if item.price is not none %}${{ '%.0f' % item.price }}{% else %}--{% endif %}</td>
+                                            <td>
+                                                {% if item.view_rate_percent is not none %}
+                                                    {{ '%.1f' % item.view_rate_percent }}%
+                                                {% else %}
+                                                    --
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if item.probability_percent is not none %}
+                                                    {{ '%.1f' % item.probability_percent }}%
+                                                {% else %}
+                                                    --
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    <tr><td colspan="6">暫無預測資料，歡迎加入會員以獲得更多推薦。</td></tr>
 
 {% set context = context if context is defined else None %}
 {% set purchases = purchases if purchases is defined else (context.purchases if context and context.purchases is defined else []) %}
@@ -134,6 +211,7 @@
     {% endif %}
   </div>
 {% endif %}
+
 
 </body>
 </html>

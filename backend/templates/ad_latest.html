@@ -2,198 +2,361 @@
 <html lang="zh-Hant">
   <head>
     <meta charset="utf-8" />
-    <title>智慧零售廣告看板（即時）</title>
-    <style>
-      body {
-        margin: 0;
-        font-family: "Noto Sans TC", "PingFang TC", sans-serif;
-        background: radial-gradient(circle at top, #fef3c7, #f8fafc);
-        color: #111827;
-      }
-      .banner {
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        min-height: 100vh;
-        text-align: center;
-        padding: 3rem 2rem;
-      }
-      h1 {
-        font-size: 3rem;
-        margin-bottom: 0.75rem;
-        color: #1d4ed8;
-      }
-      .member-code {
-        font-size: 1.1rem;
-        margin: 0.5rem 0 1.25rem;
-        color: #0f172a;
-      }
-      .subheading {
-        font-size: 1.5rem;
-        margin-bottom: 2rem;
-        color: #334155;
-        white-space: pre-line;
-      }
-      .highlight {
-        background: #ef4444;
-        color: white;
-        padding: 1.25rem 2rem;
-        border-radius: 1.5rem;
-        font-size: 1.75rem;
-        font-weight: 600;
-        box-shadow: 0 10px 30px rgba(239, 68, 68, 0.35);
-        max-width: 60rem;
-        white-space: pre-line;
-      }
-      .history {
-        margin-top: 3rem;
-        max-width: 70rem;
-        width: 100%;
-      }
-      .history h2 {
-        margin-bottom: 1rem;
-        font-size: 1.75rem;
-        color: #0f172a;
-      }
-      .history ul {
-        list-style: none;
-        padding: 0;
-        margin: 0;
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
-        gap: 1rem;
-      }
-      .history li {
-        background: white;
-        border-radius: 1rem;
-        padding: 1.25rem;
-        box-shadow: 0 10px 25px rgba(15, 23, 42, 0.08);
-      }
-      .history .item {
-        display: block;
-        font-size: 1.3rem;
-        font-weight: 600;
-        margin-bottom: 0.5rem;
-      }
-      .history .date,
-      .history .meta {
-        display: block;
-        color: #475569;
-      }
-      .history-empty {
-        margin-top: 2rem;
-        font-size: 1.25rem;
-        color: #1e293b;
-      }
-    </style>
+    <title>你的專屬折扣</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/customer-board.css') }}">
   </head>
   <body>
-    <div class="banner">
-      <h1 id="headline">等待辨識中…</h1>
-      <div class="member-code" id="member-code">
-        請面向攝影機，系統將即時顯示您的專屬優惠
-      </div>
-      <div class="subheading" id="subheading"></div>
-      <div class="highlight" id="highlight" style="display: none"></div>
-      <div class="history" id="history" style="display: none">
-        <h2>歷史消費紀錄</h2>
-        <ul id="purchase-list"></ul>
-      </div>
-      <div class="history-empty" id="history-empty" style="display: none">
-        尚無歷史紀錄，立即開啟您的專屬優惠！
-      </div>
-    </div>
+    {% set payload = context or {} %}
+    {% set profile = payload.get('profile', {}) %}
+    {% set items = payload.get('predicted_candidates', []) %}
+    {% set timings = payload.get('timings', {}) %}
+    {% set predicted = payload.get('predicted', {}) %}
+    {% set purchases = payload.get('purchases', []) %}
+    {% set first_purchase = purchases[0] if purchases else None %}
+    {% set template_images = {
+        'ME0000': url_for('static', filename='images/ads/ME0000.jpg'),
+        'ME0001': url_for('static', filename='images/ads/ME0001.jpg'),
+        'ME0002': url_for('static', filename='images/ads/ME0002.jpg'),
+        'ME0003': url_for('static', filename='images/ads/ME0003.jpg')
+    } %}
+    {% set template_id = payload.get('template_id') %}
+    {% set raw_cta = payload.get('cta_href') %}
+    {% if raw_cta and not raw_cta.startswith('#') %}
+        {% set initial_cta_href = raw_cta %}
+    {% elif payload.get('audience') == 'member' %}
+        {% set initial_cta_href = payload.get('offer_url') or payload.get('ad_url') %}
+    {% else %}
+        {% set initial_cta_href = raw_cta or payload.get('ad_url') %}
+    {% endif %}
+
+    <header>
+        <h1>你的專屬折扣</h1>
+        <nav>
+            <ul id="nav-links">
+                <li class="event"><a href="#" title="促銷活動">促銷活動</a></li>
+                <li class="shop"><a href="#" title="店舖管理">店舖管理</a></li>
+                <li class="product"><a href="#" title="商品管理">商品管理</a></li>
+                <li class="payment"><a href="#" title="金流管理">金流管理</a></li>
+                <li class="customer active"><a href="#" title="顧客資料">顧客資料</a></li>
+            </ul>
+        </nav>
+    </header>
+    <main id="customer-profile">
+        <article id="customer-information">
+            <h2 class="hide">顧客資料</h2>
+            <figure class="customer-photo">
+                <img id="customer-photo" src="{{ profile.get('photo_url') or url_for('static', filename='images/face.jpg') }}" alt="Customer Photo">
+                <figcaption id="detected-at">{{ payload.get('detected_at', '--') }}</figcaption>
+            </figure>
+            <section class="customer-infolist">
+                <ul class="customer-basic-info">
+                    <li class="customer-name" id="customer-name">{{ profile.get('name') or '匿名顧客' }}</li>
+                    <li class="customer-level general" id="member-status">{{ profile.get('member_status') or ('訪客' if payload.get('audience') == 'new' else '一般會員') }}</li>
+                    <li>Face ID：<span id="face-id">{{ payload.get('member_id', '--') }}</span></li>
+                    <li>會員編號：<span id="member-code">{{ profile.get('member_code') or '尚未註冊' }}</span></li>
+                    <li>會員狀態：<span id="member-state">{{ profile.get('member_status') or '未知' }}</span></li>
+                    <li>加入日期：<span id="joined-at">{{ profile.get('joined_at') or '--' }}</span></li>
+                    <li>點數餘額：<span id="points-balance">{{ profile.get('points_balance', 0) }}</span> 點</li>
+                </ul>
+                <ul class="customer-contact-info">
+                    <li>性別：<span id="member-gender">{{ profile.get('gender') or '未填寫' }}</span></li>
+                    <li>出生年月：<span id="member-birth">{{ profile.get('birth_date') or '未填寫' }}</span></li>
+                    <li>聯絡電話：<span id="member-phone">{{ profile.get('phone') or '未填寫' }}</span></li>
+                    <li>電子郵件：<span id="member-email">{{ profile.get('email') or '未填寫' }}</span></li>
+                    <li>郵遞地址：<span id="member-address">{{ profile.get('address') or '未填寫' }}</span></li>
+                    <li>職業 / 產業別：<span id="member-occupation">{{ profile.get('occupation') or '未填寫' }}</span></li>
+                </ul>
+            </section>
+        </article>
+        <article id="customer-details">
+            <section id="customer-tags">
+                <h2>顧客標籤</h2>
+                <ul class="customer-taglist" id="member-tags">
+                    <li>#{{ profile.get('profile_label') or '來店訪客' }}</li>
+                </ul>
+            </section>
+            <section id="customer-preferences">
+                <h2 class="hide">顧客偏好</h2>
+                <ul class="customer-preferencelist">
+                    <li><span>偏好商品類別</span><span id="preference-category">{{ predicted.get('category_label') or predicted.get('category') or '健康飲品' }}</span></li>
+                    <li><span>最近消費時間</span><i id="last-purchase">{{ first_purchase['purchased_at'] if first_purchase else '--' }}</i></li>
+                    <li><span>本季消費頻率</span>每月 <i id="season-frequency">{{ purchases|length }}</i> 次</li>
+                    <li><span>平均消費金額</span>NT$ <i id="avg-amount">{{ first_purchase['total_price']|int if first_purchase else 0 }}</i></li>
+                </ul>
+            </section>
+            <section id="customer-purchase-history">
+                <h2 class="hide">顧客購買歷史</h2>
+                <span id="tab-1">1</span>
+                <span id="tab-2">2</span>
+                <span id="tab-3">3</span>
+                <span id="tab-4">4</span>
+                <div id="tab">
+                    <ul>
+                        <li><a href="#tab-1" title="感興趣商品推估">感興趣商品推估</a></li>
+                        <li><a href="#tab-2" title="歷史消費紀錄">歷史消費紀錄</a></li>
+                        <li><a href="#tab-3" title="動線區域停留時間">動線區域停留時間</a></li>
+                        <li><a href="#tab-4" title="參與活動紀錄">參與活動紀錄</a></li>
+                    </ul>
+                    <div class="tab-content-1">
+                        <h3 class="hide">感興趣商品推估</h3>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>內部商品編號</th>
+                                    <th>商品名稱</th>
+                                    <th>商品類別</th>
+                                    <th>商品價格</th>
+                                    <th>商品<br/>查閱率</th>
+                                    <th>預估購買機率</th>
+                                </tr>
+                            </thead>
+                            <tbody id="prediction-rows">
+                                {% for item in items[:7] %}
+                                <tr>
+                                    <td>{{ item.product_code or '--' }}</td>
+                                    <td>{{ item.product_name or '--' }}</td>
+                                    <td>{{ item.category_label or item.category or '--' }}</td>
+                                    <td>{% if item.price is not none %}${{ '%.0f' % item.price }}{% else %}--{% endif %}</td>
+                                    <td>
+                                        {% if item.view_rate_percent is not none %}
+                                            {{ '%.1f' % item.view_rate_percent }}%
+                                        {% else %}
+                                            --
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if item.probability_percent is not none %}
+                                            {{ '%.1f' % item.probability_percent }}%
+                                        {% else %}
+                                            --
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        <div class="advertising">
+                            <ul class="advertising_info" id="timing-metrics">
+                                <li><span>上傳速度</span><span id="timing-upload">{{ timings.get('upload', '--') }}</span>秒</li>
+                                <li><span>辨識速度</span><span id="timing-recognition">{{ timings.get('recognition', '--') }}</span>秒</li>
+                                <li><span>廣告生成</span><span id="timing-generation">{{ timings.get('generation', '--') }}</span>秒</li>
+                                <li><span>總計耗時</span><span id="timing-total">{{ timings.get('total', '--') }}</span>秒</li>
+                                <li class="btn"><a href="{{ initial_cta_href or '#' }}" id="cta-link"{% if initial_cta_href %} target="_blank" rel="noopener"{% else %} aria-disabled="true" class="is-disabled"{% endif %} title="開啟個人化廣告頁">{{ payload.get('cta_text', '檢視生成廣告') }}</a></li>
+                            </ul>
+                        </div>
+                        <ul class="page">
+                            <li class="active"><a href="#" title="第1頁">1</a></li>
+                            <li><a href="#" title="第2頁">2</a></li>
+                            <li><a href="#" title="第3頁">3</a></li>
+                        </ul>
+                    </div>
+                    <div class="tab-content-2">
+                        <h3 class="hide">歷史消費紀錄</h3>
+                        <table class="history-table">
+                            <thead>
+                                <tr>
+                                    <th>消費日期</th>
+                                    <th>商品名稱</th>
+                                    <th>數量</th>
+                                    <th>總金額</th>
+                                </tr>
+                            </thead>
+                            <tbody id="history-rows">
+                                {% if purchases %}
+                                    {% for purchase in purchases[:10] %}
+                                    <tr>
+                                        <td>{{ purchase.purchased_at or '--' }}</td>
+                                        <td>{{ purchase.item or '--' }}</td>
+                                        <td>{{ purchase.quantity or 0 }}</td>
+                                        <td>{% if purchase.total_price is not none %}NT${{ '%.0f' % purchase.total_price }}{% else %}--{% endif %}</td>
+                                    </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    <tr><td colspan="4">尚無歷史消費紀錄。</td></tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="tab-content-3"><p>內容-3</p></div>
+                    <div class="tab-content-4"><p>內容-4</p></div>
+                </div>
+            </section>
+        </article>
+    </main>
     <script>
-      const streamUrl = {{ stream_url|tojson }};
-      const initialContext = {{ context|tojson }};
+      const templateImages = {
+        'ME0000': '{{ url_for('static', filename='images/face.jpg') }}',
+        'ME0001': '{{ url_for('static', filename='images/ads/ME0001.jpg') }}',
+        'ME0002': '{{ url_for('static', filename='images/ads/ME0002.jpg') }}',
+        'ME0003': '{{ url_for('static', filename='images/ads/ME0003.jpg') }}',
+      };
 
-      function formatCurrency(value) {
-        return new Intl.NumberFormat('zh-Hant', { style: 'currency', currency: 'TWD', maximumFractionDigits: 0 }).format(value);
+      function formatProbability(probability) {
+        const value = Number(probability);
+        if (Number.isNaN(value)) {
+          return '--';
+        }
+        return `${value.toFixed(1)}%`;
       }
 
-      function formatQuantity(value) {
-        return Number.isInteger(value) ? value.toString() : value.toFixed(1);
+      function escapeHtml(value) {
+        if (value === undefined || value === null) {
+          return '--';
+        }
+        return String(value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
       }
 
-      function updateView(context) {
-        const headlineEl = document.getElementById('headline');
-        const memberCodeEl = document.getElementById('member-code');
-        const subheadingEl = document.getElementById('subheading');
-        const highlightEl = document.getElementById('highlight');
-        const historyEl = document.getElementById('history');
-        const emptyEl = document.getElementById('history-empty');
-        const listEl = document.getElementById('purchase-list');
+      function buildRows(items) {
+        if (!items || !items.length) {
+          return '<tr><td colspan="6">暫無預測資料，歡迎加入會員以獲得更多推薦。</td></tr>';
 
-        if (!context) {
-          headlineEl.textContent = '等待辨識中…';
-          memberCodeEl.textContent = '請面向攝影機，系統將即時顯示您的專屬優惠';
-          subheadingEl.textContent = '';
-          highlightEl.style.display = 'none';
-          historyEl.style.display = 'none';
-          emptyEl.style.display = 'none';
-          listEl.innerHTML = '';
+        }
+        return items.slice(0, 7).map((item) => {
+          const price = item.price != null ? `$${Math.round(item.price)}` : '--';
+          const category = item.category_label || item.category || '--';
+          const viewRate = item.view_rate_percent != null ? `${Number(item.view_rate_percent).toFixed(1)}%` : '--';
+          const probability = item.probability_percent;
+          return `<tr>
+            <td>${item.product_code || '--'}</td>
+            <td>${item.product_name || '--'}</td>
+            <td>${category}</td>
+            <td>${price}</td>
+            <td>${viewRate}</td>
+            <td>${formatProbability(probability)}</td>
+
+          </tr>`;
+        }).join('');
+      }
+
+      function buildHistoryRows(purchases) {
+        if (!purchases || !purchases.length) {
+          return '<tr><td colspan="4">尚無歷史消費紀錄。</td></tr>';
+        }
+        return purchases.slice(0, 10).map((purchase) => {
+          const date = escapeHtml(purchase.purchased_at || '--');
+          const item = escapeHtml(purchase.item || '--');
+          const quantity = purchase.quantity != null ? escapeHtml(purchase.quantity) : '0';
+          const total = purchase.total_price != null ? `NT$${Math.round(purchase.total_price)}` : '--';
+          return `<tr>
+            <td>${date}</td>
+            <td>${item}</td>
+            <td>${quantity}</td>
+            <td>${total}</td>
+          </tr>`;
+        }).join('');
+      }
+
+      function applyPayload(payload) {
+        if (!payload) { return; }
+        const profile = payload.profile || {};
+        document.getElementById('customer-name').textContent = profile.name || '匿名顧客';
+        document.getElementById('member-status').textContent = profile.member_status || (payload.audience === 'new' ? '訪客' : '一般會員');
+        document.getElementById('face-id').textContent = payload.member_id || '--';
+        document.getElementById('member-code').textContent = profile.member_code || '尚未註冊';
+        document.getElementById('member-state').textContent = profile.member_status || '未知';
+        document.getElementById('joined-at').textContent = profile.joined_at || '--';
+        document.getElementById('points-balance').textContent = profile.points_balance != null ? profile.points_balance : 0;
+        document.getElementById('member-gender').textContent = profile.gender || '未填寫';
+        document.getElementById('member-birth').textContent = profile.birth_date || '未填寫';
+        document.getElementById('member-phone').textContent = profile.phone || '未填寫';
+        document.getElementById('member-email').textContent = profile.email || '未填寫';
+        document.getElementById('member-address').textContent = profile.address || '未填寫';
+        document.getElementById('member-occupation').textContent = profile.occupation || '未填寫';
+
+        const photoEl = document.getElementById('customer-photo');
+        const photoUrl = profile.photo_url || templateImages[payload.template_id] || templateImages.ME0000;
+        if (photoEl && photoUrl) {
+          photoEl.src = photoUrl;
+        }
+
+        document.getElementById('detected-at').textContent = payload.detected_at || '--';
+        document.getElementById('member-tags').innerHTML = `<li>#${profile.profile_label || '來店訪客'}</li>`;
+
+        const predicted = payload.predicted || {};
+        document.getElementById('preference-category').textContent = predicted.category_label || predicted.category || '健康飲品';
+        const purchases = payload.purchases || [];
+        document.getElementById('last-purchase').textContent = purchases.length ? purchases[0].purchased_at : '--';
+        document.getElementById('season-frequency').textContent = purchases.length;
+        document.getElementById('avg-amount').textContent = purchases.length ? Math.round(purchases[0].total_price || 0) : 0;
+
+        const tableBody = document.getElementById('prediction-rows');
+        tableBody.innerHTML = buildRows(payload.predicted_candidates || []);
+        document.getElementById('history-rows').innerHTML = buildHistoryRows(purchases);
+
+        const timings = payload.timings || {};
+        const getTiming = (key) => (timings[key] === undefined || timings[key] === null ? '--' : timings[key]);
+        document.getElementById('timing-upload').textContent = getTiming('upload');
+        document.getElementById('timing-recognition').textContent = getTiming('recognition');
+        document.getElementById('timing-generation').textContent = getTiming('generation');
+        document.getElementById('timing-total').textContent = getTiming('total');
+
+        let preferredHref;
+        if (payload.cta_href && !payload.cta_href.startsWith('#')) {
+          preferredHref = payload.cta_href;
+        } else if (payload.audience === 'member') {
+          preferredHref = payload.offer_url || payload.ad_url;
+        } else if (payload.cta_href) {
+          preferredHref = payload.cta_href;
+        } else {
+          preferredHref = payload.ad_url;
+        }
+
+
+        function syncLink(linkEl, defaultText) {
+          if (!linkEl) return;
+          linkEl.textContent = payload.cta_text || defaultText;
+
+          if (preferredHref && !preferredHref.startsWith('#')) {
+
+            linkEl.href = preferredHref;
+            linkEl.target = '_blank';
+            linkEl.rel = 'noopener';
+            linkEl.classList.remove('is-disabled');
+            linkEl.removeAttribute('aria-disabled');
+
+          } else if (preferredHref) {
+            linkEl.href = preferredHref;
+            linkEl.removeAttribute('target');
+            linkEl.removeAttribute('rel');
+            linkEl.classList.remove('is-disabled');
+            linkEl.removeAttribute('aria-disabled');
+
+          } else {
+            linkEl.href = '#';
+            linkEl.removeAttribute('target');
+            linkEl.removeAttribute('rel');
+            linkEl.classList.add('is-disabled');
+            linkEl.setAttribute('aria-disabled', 'true');
+          }
+        }
+
+        syncLink(document.getElementById('cta-link'), '檢視生成廣告');
+
+      }
+
+      applyPayload({{ payload | tojson }});
+
+      (function initStream() {
+        if (!window.EventSource) {
+          console.warn('EventSource not supported in this browser.');
           return;
         }
-
-        headlineEl.textContent = context.headline;
-        if (context.member_code) {
-          memberCodeEl.textContent = `商場會員代號：${context.member_code}`;
-        } else {
-          memberCodeEl.textContent = '尚未綁定商場會員代號，歡迎至服務台完成綁定';
-        }
-        subheadingEl.textContent = context.subheading;
-        highlightEl.textContent = context.highlight;
-        highlightEl.style.display = 'block';
-
-        const purchases = Array.isArray(context.purchases) ? context.purchases : [];
-        listEl.innerHTML = '';
-        if (purchases.length === 0) {
-          historyEl.style.display = 'none';
-          emptyEl.style.display = 'block';
-        } else {
-          emptyEl.style.display = 'none';
-          historyEl.style.display = 'block';
-          purchases.forEach((purchase) => {
-            const item = document.createElement('li');
-            const name = document.createElement('span');
-            name.className = 'item';
-            name.textContent = purchase.item;
-            const date = document.createElement('span');
-            date.className = 'date';
-            date.textContent = purchase.purchased_at;
-            const meta = document.createElement('span');
-            meta.className = 'meta';
-            const unitPrice = formatCurrency(purchase.unit_price);
-            const totalPrice = formatCurrency(purchase.total_price);
-            const quantity = formatQuantity(purchase.quantity);
-            meta.textContent = `單價：${unitPrice}｜數量：${quantity}｜總價：${totalPrice}`;
-            item.appendChild(name);
-            item.appendChild(date);
-            item.appendChild(meta);
-            listEl.appendChild(item);
-          });
-        }
-      }
-
-      function connectStream() {
-        const source = new EventSource(streamUrl);
+        const source = new EventSource('{{ stream_url }}');
         source.onmessage = (event) => {
           try {
             const payload = JSON.parse(event.data);
-            updateView(payload);
-          } catch (err) {
-            console.error('Failed to parse SSE payload', err);
+            applyPayload(payload);
+          } catch (error) {
+            console.error('Failed to apply payload', error);
           }
         };
-        source.onerror = () => {
-          source.close();
-          setTimeout(connectStream, 3000);
-        };
-      }
-
-      updateView(initialContext);
-      connectStream();
+      })();
     </script>
   </body>
 </html>
