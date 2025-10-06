@@ -1,7 +1,7 @@
 BEGIN TRANSACTION;
 CREATE TABLE member_profiles (
                     profile_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    profile_label TEXT NOT NULL UNIQUE,
+                    profile_label TEXT NOT NULL,
                     name TEXT,
                     member_id TEXT UNIQUE,
                     mall_member_id TEXT,

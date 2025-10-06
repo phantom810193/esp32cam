@@ -330,9 +330,12 @@ class Database:
                 "first_image_filename",
             ]
 
+            needs_drop = False
+            needs_rebuild = False
+
             if profile_columns:
                 if profile_columns != expected_profile_columns:
-                    conn.execute("DROP TABLE IF EXISTS member_profiles")
+                    needs_drop = True
                 else:
                     profile_meta = conn.execute("PRAGMA table_info(member_profiles)").fetchall()
                     nullable_columns = {
@@ -345,13 +348,20 @@ class Database:
                         "name",
                     }
                     if any(row["name"] in nullable_columns and row["notnull"] for row in profile_meta):
-                        conn.execute("DROP TABLE IF EXISTS member_profiles")
+                        needs_drop = True
+                    elif self._profile_label_has_unique_constraint(conn):
+                        needs_rebuild = True
+
+            if needs_drop:
+                conn.execute("DROP TABLE IF EXISTS member_profiles")
+            elif needs_rebuild:
+                self._rebuild_member_profiles_without_unique(conn, expected_profile_columns)
 
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS member_profiles (
                     profile_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    profile_label TEXT NOT NULL UNIQUE,
+                    profile_label TEXT NOT NULL,
                     name TEXT,
                     member_id TEXT UNIQUE,
                     mall_member_id TEXT,
@@ -419,8 +429,114 @@ class Database:
                 );
                 """
             )
-            
+
     # ------------------------------------------------------------------
+    @staticmethod
+    def _profile_label_has_unique_constraint(conn: sqlite3.Connection) -> bool:
+        indexes = conn.execute("PRAGMA index_list(member_profiles)").fetchall()
+        for index in indexes:
+            if not index["unique"]:
+                continue
+            index_name = str(index["name"])
+            columns = conn.execute(f"PRAGMA index_info({index_name})").fetchall()
+            if len(columns) != 1:
+                continue
+            column_name = columns[0]["name"]
+            if column_name == "profile_label":
+                return True
+        return False
+
+    def _rebuild_member_profiles_without_unique(
+        self, conn: sqlite3.Connection, expected_columns: Iterable[str]
+    ) -> None:
+        conn.execute("ALTER TABLE member_profiles RENAME TO member_profiles_legacy")
+        conn.execute(
+            """
+            CREATE TABLE member_profiles (
+                profile_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_label TEXT NOT NULL,
+                name TEXT,
+                member_id TEXT UNIQUE,
+                mall_member_id TEXT,
+                member_status TEXT DEFAULT '有效',
+                joined_at TEXT,
+                points_balance REAL DEFAULT 0,
+                gender TEXT,
+                birth_date TEXT,
+                phone TEXT,
+                email TEXT,
+                address TEXT,
+                occupation TEXT,
+                first_image_filename TEXT,
+                FOREIGN KEY(member_id) REFERENCES members(member_id)
+            );
+            """
+        )
+        columns_csv = ", ".join(expected_columns)
+        conn.execute(
+            f"INSERT INTO member_profiles ({columns_csv}) "
+            f"SELECT {columns_csv} FROM member_profiles_legacy"
+        )
+        conn.execute("DROP TABLE member_profiles_legacy")
+        conn.execute(
+            """
+            UPDATE sqlite_sequence
+            SET seq = (SELECT MAX(profile_id) FROM member_profiles)
+            WHERE name = 'member_profiles'
+            """
+        )
+
+    def _normalize_placeholder_profiles(
+        self,
+        conn: sqlite3.Connection | None = None,
+        *,
+        ensure_placeholders: bool = True,
+    ) -> None:
+        if conn is None:
+            with self._connect() as managed_conn:
+                self._normalize_placeholder_profiles(
+                    managed_conn, ensure_placeholders=ensure_placeholders
+                )
+            return
+
+        conn.execute(
+            """
+            UPDATE member_profiles
+            SET profile_label = 'unknown'
+            WHERE profile_label LIKE 'staging-slot-%'
+            """
+        )
+
+        if SEED_MEMBER_IDS:
+            placeholders = ",".join("?" for _ in SEED_MEMBER_IDS)
+            conn.execute(
+                f"""
+                UPDATE member_profiles
+                SET member_id = NULL,
+                    first_image_filename = NULL
+                WHERE profile_label = 'unknown' AND member_id IN ({placeholders})
+                """,
+                SEED_MEMBER_IDS,
+            )
+
+        unassigned_count = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM member_profiles
+            WHERE profile_label = 'unknown' AND member_id IS NULL
+            """
+        ).fetchone()[0]
+        if ensure_placeholders:
+            target_placeholders = 3
+            missing = target_placeholders - int(unassigned_count)
+            for _ in range(max(0, missing)):
+                conn.execute(
+                    """
+                    INSERT INTO member_profiles (profile_label, name, member_status)
+                    VALUES ('unknown', '未註冊客戶', '有效')
+                    """
+                )
+
     def find_member_by_encoding(
         self, encoding: FaceEncoding, recognizer: FaceRecognizer
     ) -> tuple[str | None, float | None]:
@@ -1049,6 +1165,7 @@ class Database:
     def ensure_demo_data(self) -> None:
         """Seed deterministic purchase histories for demo members."""
 
+        self._normalize_placeholder_profiles(ensure_placeholders=False)
         self._profile_purchase_templates = {}
         self._profile_history_seeded.clear()
 
@@ -1454,6 +1571,8 @@ class Database:
             if not template:
                 continue
             self._seed_member_history(member_id, template)
+
+        self._normalize_placeholder_profiles()
 
     def _seed_member_history(
         self, member_id: str, purchases: list[dict[str, float | str]]
