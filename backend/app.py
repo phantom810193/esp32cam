@@ -335,6 +335,7 @@ def dashboard() -> str:
                 profile = seeded_profile
                 break
 
+    full_history: list[Purchase] = []
     purchases: list[Purchase] = []
     page = 1
     page_count = 1
@@ -393,6 +394,30 @@ def dashboard() -> str:
     if display_name is None:
         display_name = "尚未命名會員"
 
+    customer_tags: list[str] = []
+    if profile and profile.profile_label:
+        customer_tags.append(profile.profile_label)
+    if persona_label and persona_label not in customer_tags:
+        customer_tags.append(persona_label)
+
+    preferred_category: str | None = None
+    if predicted_items:
+        top_item = predicted_items[0]
+        preferred_category = getattr(top_item, "category_label", None) or getattr(top_item, "category", None)
+        if not preferred_category and isinstance(top_item, dict):
+            preferred_category = top_item.get("category_label") or top_item.get("category")
+
+    seasonal_frequency = len(full_history) if full_history else 0
+
+    last_purchase_display: str | None = None
+    average_purchase_amount: float | None = None
+    if full_history:
+        first_purchase = full_history[0]
+        last_purchase_display = first_purchase.purchased_at
+        valid_totals = [float(purchase.total_price) for purchase in full_history if purchase.total_price is not None]
+        if valid_totals:
+            average_purchase_amount = sum(valid_totals) / len(valid_totals)
+
     profile_image_url: str | None = None
     if profile and profile.first_image_filename:
         static_upload_path = Path(app.static_folder or "") / "uploads" / profile.first_image_filename
@@ -416,6 +441,11 @@ def dashboard() -> str:
         points_balance_display=points_balance_display,
         joined_at_display=joined_at_display,
         profile_image_url=profile_image_url,
+        customer_tags=customer_tags,
+        preferred_category=preferred_category,
+        last_purchase_display=last_purchase_display,
+        seasonal_frequency=seasonal_frequency,
+        average_purchase_amount=average_purchase_amount,
         requested_member_id=requested_member_id,
         resolved_member_id=member_id,
         page=page,
