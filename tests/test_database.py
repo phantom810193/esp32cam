@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from backend.database import Database, SEED_MEMBER_IDS
+from backend.database import Database, PROFILE_LABEL_TO_SEED_MEMBER, SEED_MEMBER_IDS
 from backend.recognizer import FaceEncoding, FaceRecognizer
 
 
@@ -101,3 +101,82 @@ def test_resolve_member_id_merges_into_seed_member(temp_db: Database) -> None:
         rows = conn.execute('SELECT member_id FROM members').fetchall()
     member_ids = {row[0] for row in rows}
     assert member_ids == {seed_id}
+
+
+def test_merge_members_preserves_unique_profile_constraint(temp_db: Database) -> None:
+    target_id = temp_db.create_member(_face_encoding(0.0, 'target'), member_id='MEMTARGET')
+    source_id = temp_db.create_member(_face_encoding(0.1, 'source'), member_id='MEMSOURCE')
+
+    with temp_db._connect() as conn:
+        conn.execute(
+            "INSERT INTO member_profiles (profile_label, name, member_id, first_image_filename) VALUES (?, ?, ?, ?)",
+            ('target-profile', 'Target', target_id, None),
+        )
+        conn.execute(
+            "INSERT INTO member_profiles (profile_label, name, member_id, first_image_filename) VALUES (?, ?, ?, ?)",
+            ('source-profile', 'Source', source_id, 'face.png'),
+        )
+        conn.commit()
+
+    temp_db.merge_members(source_id, target_id)
+
+    with temp_db._connect() as conn:
+        rows = conn.execute(
+            "SELECT member_id, first_image_filename FROM member_profiles ORDER BY profile_id"
+        ).fetchall()
+
+    assert any(row["member_id"] == target_id for row in rows)
+    assert any(row["member_id"] is None for row in rows)
+    for row in rows:
+        if row["member_id"] == target_id:
+            assert row["first_image_filename"] == 'face.png'
+
+
+def test_ensure_demo_data_populates_seed_profiles(tmp_path: Path) -> None:
+    db = Database(tmp_path / 'seed.sqlite3')
+    db.ensure_demo_data()
+
+    dessert = db.get_member_profile('MEME0383FE3AA')
+    family = db.get_member_profile('MEM692FFD0824')
+
+    assert dessert is not None
+    assert dessert.name == '李函霏'
+    assert dessert.mall_member_id == 'ME0001'
+
+    assert family is not None
+    assert family.name == '林位青'
+    assert family.mall_member_id == 'ME0002'
+
+
+def test_ensure_demo_data_repairs_seed_profiles(tmp_path: Path) -> None:
+    db = Database(tmp_path / 'seed-repair.sqlite3')
+    db.ensure_demo_data()
+
+    with db._connect() as conn:
+        conn.execute(
+            "UPDATE member_profiles SET name = ?, mall_member_id = ? WHERE member_id = ?",
+            ('林悅心', 'WRONG', 'MEME0383FE3AA'),
+        )
+        conn.execute(
+            "UPDATE member_profiles SET name = ?, member_id = NULL WHERE profile_label = ?",
+            ('錯誤資料', 'family-groceries'),
+        )
+        conn.commit()
+
+    db.ensure_demo_data()
+
+    dessert = db.get_member_profile('MEME0383FE3AA')
+    family = db.get_member_profile('MEM692FFD0824')
+
+    assert dessert is not None
+    assert dessert.name == '李函霏'
+    assert dessert.mall_member_id == 'ME0001'
+
+    assert family is not None
+    assert family.name == '林位青'
+    assert family.member_id == 'MEM692FFD0824'
+
+
+def test_profile_label_mapping_supports_aliases() -> None:
+    assert PROFILE_LABEL_TO_SEED_MEMBER['dessert-lover'] == 'MEME0383FE3AA'
+    assert PROFILE_LABEL_TO_SEED_MEMBER['dessert_lover'] == 'MEME0383FE3AA'
