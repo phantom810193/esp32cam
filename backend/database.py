@@ -891,7 +891,9 @@ class Database:
             return
 
         for purchase in template:
-            self.add_purchase(member_id, **purchase)
+            purchase_params = dict(purchase)
+            purchase_params.pop("member_id", None)
+            self.add_purchase(member_id, **purchase_params)
 
         self._profile_history_seeded.add(profile_label)
         _LOGGER.info(
@@ -1068,25 +1070,59 @@ class Database:
         return ""
 
     # ------------------------------------------------------------------
-    def add_purchase(
+    def add_purchase(self, *args, **kwargs) -> None:
+        """Add a purchase record while accepting positional or keyword member IDs."""
+
+        member_id_arg = args[0] if len(args) >= 1 else None
+        member_id_kw = kwargs.pop("member_id", None)
+        if member_id_arg is not None and member_id_kw is not None:
+            raise TypeError("member_id specified twice")
+        member_id = member_id_arg if member_id_arg is not None else member_id_kw
+        if member_id is None:
+            raise TypeError("member_id is required")
+
+        member_code: str | None = kwargs.pop("member_code", None)
+        product_category: str | None = kwargs.pop("product_category", None)
+        internal_item_code: str | None = kwargs.pop("internal_item_code", None)
+
+        try:
+            item: str = kwargs.pop("item")
+            purchased_at: str = kwargs.pop("purchased_at")
+            unit_price = kwargs.pop("unit_price")
+            quantity = kwargs.pop("quantity")
+            total_price = kwargs.pop("total_price")
+        except KeyError as exc:  # pragma: no cover - defensive guard
+            raise TypeError(f"missing required argument: {exc.args[0]}") from exc
+
+        resolved_code = self.get_member_code(member_id) if member_code is None else member_code
+        resolved_category = product_category or ""
+        resolved_internal_code = internal_item_code or ""
+
+        self._insert_purchase(
+            member_id=member_id,
+            member_code=resolved_code,
+            product_category=resolved_category,
+            internal_item_code=resolved_internal_code,
+            purchased_at=purchased_at,
+            item=item,
+            unit_price=float(unit_price),
+            quantity=float(quantity),
+            total_price=float(total_price),
+        )
+
+    def _insert_purchase(
         self,
-        member_id: str,
         *,
-        member_code: str | None = None,
-        product_category: str | None = None,
-        internal_item_code: str | None = None,
-        item: str,
+        member_id: str,
+        member_code: str | None,
+        product_category: str,
+        internal_item_code: str,
         purchased_at: str,
+        item: str,
         unit_price: float,
         quantity: float,
         total_price: float,
     ) -> None:
-        if member_code is None:
-            resolved_code = self.get_member_code(member_id)
-        else:
-            resolved_code = member_code
-        resolved_category = product_category or ""
-        resolved_internal_code = internal_item_code or ""
         with self._connect() as conn:
             conn.execute(
                 """
@@ -1105,14 +1141,14 @@ class Database:
                 """,
                 (
                     member_id,
-                    resolved_code,
-                    resolved_category,
-                    resolved_internal_code,
+                    member_code,
+                    product_category,
+                    internal_item_code,
                     purchased_at,
                     item,
-                    float(unit_price),
-                    float(quantity),
-                    float(total_price),
+                    unit_price,
+                    quantity,
+                    total_price,
                 ),
             )
             conn.commit()
@@ -1476,7 +1512,9 @@ class Database:
             conn.commit()
 
         for purchase in purchases:
-            self.add_purchase(member_id, **purchase)
+            purchase_params = dict(purchase)
+            purchase_params.pop("member_id", None)
+            self.add_purchase(member_id, **purchase_params)
 
         config = _SEPTEMBER_2025_PURCHASE_CONFIG.get(member_id)
         if not config:
@@ -1518,7 +1556,9 @@ class Database:
 
         september_records.sort(key=lambda entry: entry["purchased_at"])
         for record in september_records:
-            self.add_purchase(member_id, **record)
+            record_params = dict(record)
+            record_params.pop("member_id", None)
+            self.add_purchase(member_id, **record_params)
 
     def _seed_member_profile(
         self,
