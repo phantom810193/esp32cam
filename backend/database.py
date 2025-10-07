@@ -164,6 +164,15 @@ _SEPTEMBER_2025_PURCHASE_CONFIG: dict[str, _PersonaPurchaseConfig] = {
 }
 
 
+_SCRIPT_LABEL_TO_PROFILE: dict[str, str] = {
+    "甜點收藏家": "dessert-lover",
+    "幼兒園家長": "family-groceries",
+    "健身族": "fitness-enthusiast",
+    "家庭主婦": "home-manager",
+    "健康食品愛好者": "wellness-gourmet",
+}
+
+
 @dataclass
 class Purchase:
     member_id: str
@@ -891,7 +900,27 @@ class Database:
             return
 
         for purchase in template:
-            self.add_purchase(member_id, **purchase)
+            purchase_params = dict(purchase)
+            purchase_params.pop("member_id", None)
+            if "product_category" not in purchase_params and "category" in purchase_params:
+                purchase_params["product_category"] = purchase_params.pop("category")
+
+            if "unit_price" not in purchase_params:
+                price_value = purchase_params.pop("price", None)
+                if price_value is not None:
+                    purchase_params["unit_price"] = float(price_value)
+                else:
+                    purchase_params["unit_price"] = 0.0
+
+            if "quantity" not in purchase_params:
+                purchase_params["quantity"] = float(purchase_params.pop("qty", 1.0))
+
+            if "total_price" not in purchase_params:
+                unit_price_val = float(purchase_params.get("unit_price", 0.0))
+                quantity_val = float(purchase_params.get("quantity", 1.0))
+                purchase_params["total_price"] = unit_price_val * quantity_val
+
+            self.add_purchase(member_id, **purchase_params)
 
         self._profile_history_seeded.add(profile_label)
         _LOGGER.info(
@@ -1068,25 +1097,59 @@ class Database:
         return ""
 
     # ------------------------------------------------------------------
-    def add_purchase(
+    def add_purchase(self, *args, **kwargs) -> None:
+        """Add a purchase record while accepting positional or keyword member IDs."""
+
+        member_id_arg = args[0] if len(args) >= 1 else None
+        member_id_kw = kwargs.pop("member_id", None)
+        if member_id_arg is not None and member_id_kw is not None:
+            raise TypeError("member_id specified twice")
+        member_id = member_id_arg if member_id_arg is not None else member_id_kw
+        if member_id is None:
+            raise TypeError("member_id is required")
+
+        member_code: str | None = kwargs.pop("member_code", None)
+        product_category: str | None = kwargs.pop("product_category", None)
+        internal_item_code: str | None = kwargs.pop("internal_item_code", None)
+
+        try:
+            item: str = kwargs.pop("item")
+            purchased_at: str = kwargs.pop("purchased_at")
+            unit_price = kwargs.pop("unit_price")
+            quantity = kwargs.pop("quantity")
+            total_price = kwargs.pop("total_price")
+        except KeyError as exc:  # pragma: no cover - defensive guard
+            raise TypeError(f"missing required argument: {exc.args[0]}") from exc
+
+        resolved_code = self.get_member_code(member_id) if member_code is None else member_code
+        resolved_category = product_category or ""
+        resolved_internal_code = internal_item_code or ""
+
+        self._insert_purchase(
+            member_id=member_id,
+            member_code=resolved_code,
+            product_category=resolved_category,
+            internal_item_code=resolved_internal_code,
+            purchased_at=purchased_at,
+            item=item,
+            unit_price=float(unit_price),
+            quantity=float(quantity),
+            total_price=float(total_price),
+        )
+
+    def _insert_purchase(
         self,
-        member_id: str,
         *,
-        member_code: str | None = None,
-        product_category: str | None = None,
-        internal_item_code: str | None = None,
-        item: str,
+        member_id: str,
+        member_code: str | None,
+        product_category: str,
+        internal_item_code: str,
         purchased_at: str,
+        item: str,
         unit_price: float,
         quantity: float,
         total_price: float,
     ) -> None:
-        if member_code is None:
-            resolved_code = self.get_member_code(member_id)
-        else:
-            resolved_code = member_code
-        resolved_category = product_category or ""
-        resolved_internal_code = internal_item_code or ""
         with self._connect() as conn:
             conn.execute(
                 """
@@ -1105,14 +1168,14 @@ class Database:
                 """,
                 (
                     member_id,
-                    resolved_code,
-                    resolved_category,
-                    resolved_internal_code,
+                    member_code,
+                    product_category,
+                    internal_item_code,
                     purchased_at,
                     item,
-                    float(unit_price),
-                    float(quantity),
-                    float(total_price),
+                    unit_price,
+                    quantity,
+                    total_price,
                 ),
             )
             conn.commit()
@@ -1330,123 +1393,124 @@ class Database:
                 (count,) = conn.execute("SELECT COUNT(*) FROM member_profiles").fetchone()
             except sqlite3.OperationalError:
                 count = 0
-            if count:
+
+        if count == 0:
+            sql_path = Path(__file__).resolve().parent / "data" / "mvp.sql"
+            if not sql_path.exists():  # pragma: no cover - defensive guard
+                _LOGGER.warning("Seed file %s not found; skipping demo data load", sql_path)
                 return
 
-        sql_path = Path(__file__).resolve().parent / "data" / "mvp.sql"
-        if not sql_path.exists():  # pragma: no cover - defensive guard
-            _LOGGER.warning("Seed file %s not found; skipping demo data load", sql_path)
-            return
-
-        self._profile_purchase_templates = {
-            "dessert-lover": dessert_history,
-            "family-groceries": kids_history,
-            "fitness-enthusiast": fitness_history,
-            "home-manager": homemaker_history,
-            "wellness-gourmet": health_history,
-        }
-
-        self._reset_seed_profiles()
-
-        self._seed_member_profile(
-            profile_label="dessert-lover",
-            name="李函霏",
-            member_id=None,
-            mall_member_id="ME0001",
-            member_status="有效",
-            joined_at="2021-06-12",
-            points_balance=1520,
-            gender="女",
-            birth_date="1988-07-12",
-            phone="0912-345-678",
-            email="dessertlover@example.com",
-            address="台北市信義區松壽路10號",
-            occupation="甜點教室講師",
-        )
-        self._seed_member_profile(
-            profile_label="family-groceries",
-            name="林位青",
-            member_id=None,
-            mall_member_id="ME0002",
-            member_status="有效",
-            joined_at="2020-09-01",
-            points_balance=980,
-            gender="男",
-            birth_date="1990-02-08",
-            phone="0923-556-789",
-            email="familybuyer@example.com",
-            address="新北市板橋區文化路100號",
-            occupation="幼兒園老師",
-        )
-        self._seed_member_profile(
-            profile_label="fitness-enthusiast",
-            name="范文華",
-            member_id=None,
-            mall_member_id="ME0003",
-            member_status="有效",
-            joined_at="2019-11-20",
-            points_balance=2040,
-            gender="女",
-            birth_date="1985-04-19",
-            phone="0955-112-233",
-            email="fitgoer@example.com",
-            address="台中市西屯區市政北二路88號",
-            occupation="企業健身顧問",
-        )
-        self._seed_member_profile(
-            profile_label="home-manager",
-            name="未註冊客戶",
-            member_id=None,
-            mall_member_id="",
-            member_status=None,
-            joined_at=None,
-            points_balance=None,
-            gender=None,
-            birth_date=None,
-            phone=None,
-            email=None,
-            address=None,
-            occupation=None,
-        )
-        self._seed_member_profile(
-            profile_label="wellness-gourmet",
-            name="未註冊客戶",
-            member_id=None,
-            mall_member_id="",
-            member_status=None,
-            joined_at=None,
-            points_balance=None,
-            gender=None,
-            birth_date=None,
-            phone=None,
-            email=None,
-            address=None,
-            occupation=None,
-        )
-
-
-        with self._connect() as conn:
-            conn.executescript("\n".join(insert_statements))
-            face_map = {
-                "MEME0383FE3AA": "faces/dessert_lover.jpg",
-                "MEM692FFD0824": "faces/family_groceries.jpg",
-                "MEMFITNESS2025": "faces/fitness_enthusiast.jpg",
-                "MEMHOMECARE2025": "faces/home_manager.jpg",
-                "MEMHEALTH2025": "faces/wellness_gourmet.jpg",
+            self._profile_purchase_templates = {
+                "dessert-lover": dessert_history,
+                "family-groceries": kids_history,
+                "fitness-enthusiast": fitness_history,
+                "home-manager": homemaker_history,
+                "wellness-gourmet": health_history,
             }
-            for member_id, filename in face_map.items():
-                conn.execute(
-                    "UPDATE member_profiles SET first_image_filename = ? WHERE member_id = ?",
-                    (filename, member_id),
-                )
-            conn.commit()
 
-        for profile_label, member_id in PROFILE_LABEL_TO_SEED_MEMBER.items():
-            template = self._profile_purchase_templates.get(profile_label)
-            if not template:
-                continue
-            self._seed_member_history(member_id, template)
+            self._reset_seed_profiles()
 
+            self._seed_member_profile(
+                profile_label="dessert-lover",
+                name="李函霏",
+                member_id=None,
+                mall_member_id="ME0001",
+                member_status="有效",
+                joined_at="2021-06-12",
+                points_balance=1520,
+                gender="女",
+                birth_date="1988-07-12",
+                phone="0912-345-678",
+                email="dessertlover@example.com",
+                address="台北市信義區松壽路10號",
+                occupation="甜點教室講師",
+            )
+            self._seed_member_profile(
+                profile_label="family-groceries",
+                name="林位青",
+                member_id=None,
+                mall_member_id="ME0002",
+                member_status="有效",
+                joined_at="2020-09-01",
+                points_balance=980,
+                gender="男",
+                birth_date="1990-02-08",
+                phone="0923-556-789",
+                email="familybuyer@example.com",
+                address="新北市板橋區文化路100號",
+                occupation="幼兒園老師",
+            )
+            self._seed_member_profile(
+                profile_label="fitness-enthusiast",
+                name="范文華",
+                member_id=None,
+                mall_member_id="ME0003",
+                member_status="有效",
+                joined_at="2019-11-20",
+                points_balance=2040,
+                gender="女",
+                birth_date="1985-04-19",
+                phone="0955-112-233",
+                email="fitgoer@example.com",
+                address="台中市西屯區市政北二路88號",
+                occupation="企業健身顧問",
+            )
+            self._seed_member_profile(
+                profile_label="home-manager",
+                name="未註冊客戶",
+                member_id=None,
+                mall_member_id="",
+                member_status=None,
+                joined_at=None,
+                points_balance=None,
+                gender=None,
+                birth_date=None,
+                phone=None,
+                email=None,
+                address=None,
+                occupation=None,
+            )
+            self._seed_member_profile(
+                profile_label="wellness-gourmet",
+                name="未註冊客戶",
+                member_id=None,
+                mall_member_id="",
+                member_status=None,
+                joined_at=None,
+                points_balance=None,
+                gender=None,
+                birth_date=None,
+                phone=None,
+                email=None,
+                address=None,
+                occupation=None,
+            )
+
+
+            with self._connect() as conn:
+                conn.executescript("\n".join(insert_statements))
+                face_map = {
+                    "MEME0383FE3AA": "faces/dessert_lover.jpg",
+                    "MEM692FFD0824": "faces/family_groceries.jpg",
+                    "MEMFITNESS2025": "faces/fitness_enthusiast.jpg",
+                    "MEMHOMECARE2025": "faces/home_manager.jpg",
+                    "MEMHEALTH2025": "faces/wellness_gourmet.jpg",
+                }
+                for member_id, filename in face_map.items():
+                    conn.execute(
+                        "UPDATE member_profiles SET first_image_filename = ? WHERE member_id = ?",
+                        (filename, member_id),
+                    )
+                conn.commit()
+
+            for profile_label, member_id in PROFILE_LABEL_TO_SEED_MEMBER.items():
+                template = self._profile_purchase_templates.get(profile_label)
+                if not template:
+                    continue
+                self._seed_member_history(member_id, template)
+
+        self._ingest_september_purchase_script()
+        self._seed_october_preview_records(count=10)
         self._normalize_placeholder_profiles()
 
     def _seed_member_history(
@@ -1476,7 +1540,27 @@ class Database:
             conn.commit()
 
         for purchase in purchases:
-            self.add_purchase(member_id, **purchase)
+            purchase_params = dict(purchase)
+            purchase_params.pop("member_id", None)
+            if "product_category" not in purchase_params and "category" in purchase_params:
+                purchase_params["product_category"] = purchase_params.pop("category")
+
+            if "unit_price" not in purchase_params:
+                price_value = purchase_params.pop("price", None)
+                if price_value is not None:
+                    purchase_params["unit_price"] = float(price_value)
+                else:
+                    purchase_params["unit_price"] = 0.0
+
+            if "quantity" not in purchase_params:
+                purchase_params["quantity"] = float(purchase_params.pop("qty", 1.0))
+
+            if "total_price" not in purchase_params:
+                unit_price_val = float(purchase_params.get("unit_price", 0.0))
+                quantity_val = float(purchase_params.get("quantity", 1.0))
+                purchase_params["total_price"] = unit_price_val * quantity_val
+
+            self.add_purchase(member_id, **purchase_params)
 
         config = _SEPTEMBER_2025_PURCHASE_CONFIG.get(member_id)
         if not config:
@@ -1518,7 +1602,173 @@ class Database:
 
         september_records.sort(key=lambda entry: entry["purchased_at"])
         for record in september_records:
-            self.add_purchase(member_id, **record)
+            record_params = dict(record)
+            record_params.pop("member_id", None)
+            self.add_purchase(member_id, **record_params)
+
+    def _ingest_september_purchase_script(self) -> None:
+        script_path = Path(__file__).resolve().parent / "data" / "sept_purchases.sql"
+        if not script_path.exists():
+            return
+
+        try:
+            script_text = script_path.read_text(encoding="utf-8")
+        except OSError as exc:  # pragma: no cover - defensive guard
+            _LOGGER.warning("Failed reading %s: %s", script_path, exc)
+            return
+
+        temp_conn: sqlite3.Connection | None = None
+        try:
+            temp_conn = sqlite3.connect(":memory:")
+            with temp_conn:
+                temp_conn.executescript(script_text)
+            rows = temp_conn.execute(
+                """
+                SELECT member_label,
+                       mall_member_id,
+                       purchased_at,
+                       product_id,
+                       product_name,
+                       category,
+                       price
+                FROM purchases
+                ORDER BY purchased_at
+                """
+            ).fetchall()
+        except sqlite3.Error as exc:  # pragma: no cover - defensive guard
+            _LOGGER.warning("Failed parsing %s: %s", script_path, exc)
+            return
+        finally:
+            if temp_conn is not None:
+                try:
+                    temp_conn.close()
+                except Exception:  # pragma: no cover - defensive guard
+                    pass
+
+        label_to_member: dict[str, str] = {}
+        for label, profile in _SCRIPT_LABEL_TO_PROFILE.items():
+            member_id = PROFILE_LABEL_TO_SEED_MEMBER.get(profile)
+            if member_id:
+                label_to_member[label] = member_id
+
+        member_ids = tuple({mid for mid in label_to_member.values()})
+        existing_keys: set[tuple[str, str, str]] = set()
+        if member_ids:
+            placeholders = ",".join("?" for _ in member_ids)
+            query = (
+                """
+                SELECT member_id, internal_item_code, purchased_at
+                FROM purchases
+                WHERE member_id IN ({placeholders})
+                  AND purchased_at BETWEEN '2025-09-01' AND '2025-09-30 23:59:59'
+                """
+            ).format(placeholders=placeholders)
+            with self._connect() as conn:
+                rows_existing = conn.execute(query, member_ids).fetchall()
+                existing_keys = {
+                    (str(row["member_id"]), str(row["internal_item_code"]), str(row["purchased_at"]))
+                    for row in rows_existing
+                }
+
+        for row in rows:
+            label = str(row[0] or "").strip()
+            member_id = label_to_member.get(label)
+            if not member_id:
+                continue
+
+            purchased_at = str(row[2] or "").strip()
+            if not purchased_at:
+                continue
+            try:
+                parsed_at = datetime.fromisoformat(purchased_at)
+            except ValueError:
+                try:
+                    parsed_at = datetime.strptime(purchased_at, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    _LOGGER.debug("Skipping malformed timestamp %s in %s", purchased_at, script_path)
+                    continue
+            purchased_at_str = parsed_at.strftime("%Y-%m-%d %H:%M:%S")
+
+            product_id = str(row[3] or "").strip()
+            product_name = str(row[4] or "").strip()
+            category = str(row[5] or "").strip()
+            try:
+                price = float(row[6])
+            except (TypeError, ValueError):
+                continue
+
+            key = (member_id, product_id, purchased_at_str)
+            if key in existing_keys:
+                continue
+
+            self.add_purchase(
+                member_id,
+                product_category=category,
+                internal_item_code=product_id,
+                item=product_name,
+                purchased_at=purchased_at_str,
+                unit_price=price,
+                quantity=1.0,
+                total_price=price,
+            )
+            existing_keys.add(key)
+
+    def _seed_october_preview_records(self, *, count: int = 10) -> None:
+        member_id = PROFILE_LABEL_TO_SEED_MEMBER.get("dessert-lover")
+        if not member_id:
+            return
+
+        config = _SEPTEMBER_2025_PURCHASE_CONFIG.get(member_id)
+        if not config:
+            return
+
+        rng = random.Random(f"{member_id}-2025-10-preview")
+        member_code = self.get_member_code(member_id)
+        minute_choices = (0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55)
+
+        prefix = config["prefix"]
+        cleanup_pattern = f"{prefix}-O25%"
+        with self._connect() as conn:
+            conn.execute(
+                """
+                DELETE FROM purchases
+                WHERE member_id = ?
+                  AND internal_item_code LIKE ?
+                  AND purchased_at BETWEEN '2025-10-01' AND '2025-10-31 23:59:59'
+                """,
+                (member_id, cleanup_pattern),
+            )
+            conn.commit()
+
+        for index in range(max(0, int(count))):
+            choice = rng.choice(config["items"])
+            price_range = choice["price"]
+            low, high = int(price_range[0]), int(price_range[1])
+            if high <= low:
+                unit_price = float(low)
+            else:
+                step = 5 if high - low >= 5 else 1
+                unit_price = float(rng.randrange(low, high + 1, step))
+
+            purchase_time = datetime(2025, 10, 1) + timedelta(
+                days=rng.randint(0, 9),
+                hours=rng.randint(8, 21),
+                minutes=rng.choice(minute_choices),
+            )
+
+            internal_code = f"{config['prefix']}-O25{index + 1:03d}"
+
+            self.add_purchase(
+                member_id,
+                member_code=member_code,
+                product_category=choice["category"],
+                internal_item_code=internal_code,
+                item=choice["item"],
+                purchased_at=purchase_time.strftime("%Y-%m-%d %H:%M"),
+                unit_price=unit_price,
+                quantity=1.0,
+                total_price=float(round(unit_price, 2)),
+            )
 
     def _seed_member_profile(
         self,
