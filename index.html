@@ -178,13 +178,61 @@
                                 <li class="btn"><a href="" title="開啟個人化廣告頁">開啟個人化廣告頁</a></li>
                             </ul>
                         </div>
-                        <ul class="page">
-                            <li class="active"><a href="" title="第1頁">1</a></li>
-                            <li><a href="" title="第2頁">2</a></li>
-                            <li><a href="" title="第3頁">3</a></li>
-                        </ul>
                     </div>
-                    <div class="tab-content-2"><p>內容-2<br/>內容-2</p>
+                    <div class="tab-content-2">
+                        <h3 class="hide">歷史消費紀錄</h3>
+                        <ul class="page month-pagination" id="static-history-months">
+                            <li class="active"><a href="#" data-month="2025-10">2025年10月</a></li>
+                            <li><a href="#" data-month="2025-09">2025年09月</a></li>
+                        </ul>
+                        <table class="history-table">
+                            <thead>
+                                <tr>
+                                    <th>消費日期</th>
+                                    <th>商品名稱</th>
+                                    <th>數量</th>
+                                    <th>總金額</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr data-month="2025-10">
+                                    <td>2025-10-07 13:37</td>
+                                    <td>歡迎禮盒</td>
+                                    <td>1</td>
+                                    <td>NT$880</td>
+                                </tr>
+                                <tr data-month="2025-10">
+                                    <td>2025-10-05 18:22</td>
+                                    <td>綜合堅果禮盒</td>
+                                    <td>1</td>
+                                    <td>NT$560</td>
+                                </tr>
+                                <tr data-month="2025-10">
+                                    <td>2025-10-02 11:48</td>
+                                    <td>冷壓鮮果汁</td>
+                                    <td>2</td>
+                                    <td>NT$190</td>
+                                </tr>
+                                <tr data-month="2025-09" class="is-hidden">
+                                    <td>2025-09-29 19:05</td>
+                                    <td>生鮮香蕉 1 串</td>
+                                    <td>1</td>
+                                    <td>NT$49</td>
+                                </tr>
+                                <tr data-month="2025-09" class="is-hidden">
+                                    <td>2025-09-23 15:12</td>
+                                    <td>草莓生乳捲</td>
+                                    <td>1</td>
+                                    <td>NT$280</td>
+                                </tr>
+                                <tr data-month="2025-09" class="is-hidden">
+                                    <td>2025-09-17 09:45</td>
+                                    <td>洗衣精 2kg</td>
+                                    <td>1</td>
+                                    <td>NT$189</td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                     <div class="tab-content-3"><p>內容-3</p>
                     </div>
@@ -198,5 +246,26 @@
     <!-- <footer>
         <p>2025 &copy;  你的專屬折扣
     </footer> -->
+    <script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const monthLinks = document.querySelectorAll('#static-history-months a[data-month]');
+        const rows = document.querySelectorAll('.history-table tbody tr[data-month]');
+        if (!monthLinks.length || !rows.length) {
+            return;
+        }
+        monthLinks.forEach(function (link) {
+            link.addEventListener('click', function (event) {
+                event.preventDefault();
+                const month = link.getAttribute('data-month');
+                rows.forEach(function (row) {
+                    row.classList.toggle('is-hidden', row.getAttribute('data-month') !== month);
+                });
+                monthLinks.forEach(function (other) {
+                    other.parentElement.classList.toggle('active', other === link);
+                });
+            });
+        });
+    });
+    </script>
 </body>
 </html>

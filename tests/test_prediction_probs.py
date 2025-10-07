@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from backend.database import MemberProfile, Purchase
+from backend.database import MemberProfile, NEW_GUEST_MEMBER_ID, Purchase
 from backend.prediction import (
     _blend_with_prior,
     _clip_and_normalize,
@@ -106,4 +106,29 @@ def test_probability_percent_has_single_decimal():
     finally:
         if previous_calib is not None:
             os.environ["PRED_CALIB_PATH"] = previous_calib
+
+
+def test_new_guest_member_has_no_predictions():
+    profile = MemberProfile(
+        profile_id=999,
+        profile_label="brand-new-guest",
+        name="新客",
+        member_id=NEW_GUEST_MEMBER_ID,
+        mall_member_id="",
+        member_status="未入會",
+        joined_at=None,
+        points_balance=0.0,
+        gender=None,
+        birth_date=None,
+        phone=None,
+        email=None,
+        address=None,
+        occupation=None,
+        first_image_filename=None,
+    )
+
+    result = predict_next_purchases([], profile=profile, limit=5)
+
+    assert result.items == []
+    assert result.history == []
 

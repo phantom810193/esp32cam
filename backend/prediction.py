@@ -20,7 +20,7 @@ from .catalogue import (
     infer_category_from_item,
     purchased_product_codes,
 )
-from .database import MemberProfile, Purchase
+from .database import MemberProfile, NEW_GUEST_MEMBER_ID, Purchase
 
 
 @dataclass
@@ -294,6 +294,15 @@ def predict_next_purchases(
     limit: int = 7,
 ) -> PredictionResult:
     purchase_list = list(purchases)
+    if profile and profile.member_id == NEW_GUEST_MEMBER_ID:
+        activities = _build_activity_feed([], insights)
+        return PredictionResult(
+            items=[],
+            history=[],
+            top_products=[],
+            activities=activities,
+            window_label=_format_window_label([]),
+        )
     window = get_previous_month_purchases(purchase_list)
     if not window:
         window = purchase_list

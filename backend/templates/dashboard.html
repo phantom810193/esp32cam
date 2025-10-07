@@ -170,7 +170,6 @@
                                         {% endif %}
                                     </tbody>
                                 </table>
-                                <ul class="page" id="prediction-pagination" aria-label="感興趣商品推估頁面導覽"></ul>
                             </section>
                         <div class="advertising">
                             <ul class="advertising_info">
@@ -191,6 +190,18 @@
                             <li><a href="#" class="search" aria-disabled="true">搜尋</a></li>
                             <li><a href="#" class="filter" aria-disabled="true">篩選</a></li>
                         </ul>
+                        {% if selected_month_label %}
+                            <div class="history-month-label">{{ selected_month_label }}</div>
+                        {% endif %}
+                        {% if history_months %}
+                            <ul class="page month-pagination" aria-label="歷史消費紀錄月份切換">
+                                {% for month in history_months %}
+                                    <li class="{% if month.page == page %}active{% endif %}">
+                                        <a href="{{ url_for('dashboard', member_id=resolved_member_id, page=month.page) }}" title="{{ month.label }}">{{ month.label }}</a>
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% endif %}
                         <table class="purchase-history">
                             <thead>
                                 <tr>
@@ -222,17 +233,6 @@
                                 {% endif %}
                             </tbody>
                         </table>
-                        <div class="history-pagination" aria-label="歷史消費紀錄頁面導覽">
-                            <span class="page-status">第 {{ page }} / {{ page_count }} 頁</span>
-                            <div class="pagination-links">
-                                <a class="prev{% if not has_prev %} disabled{% endif %}"
-                                   href="{{ url_for('dashboard', member_id=resolved_member_id, page=page - 1) }}"
-                                   {% if not has_prev %}aria-disabled="true" tabindex="-1"{% endif %}>上一頁</a>
-                                <a class="next{% if not has_next %} disabled{% endif %}"
-                                   href="{{ url_for('dashboard', member_id=resolved_member_id, page=page + 1) }}"
-                                   {% if not has_next %}aria-disabled="true" tabindex="-1"{% endif %}>下一頁</a>
-                            </div>
-                        </div>
                     </div>
                     <div class="tab-content-3"><p>內容-3</p>
                     </div>
@@ -250,65 +250,13 @@
     </footer> -->
     <script>
     document.addEventListener('DOMContentLoaded', function () {
-        const tableBody = document.querySelector('#prediction-table-body');
-        const pagination = document.querySelector('#prediction-pagination');
-        if (!tableBody || !pagination) {
+        const rows = document.querySelectorAll('#prediction-table-body tr[data-prediction-row="true"]');
+        if (!rows.length) {
             return;
         }
-
-        const dataRows = Array.from(tableBody.querySelectorAll('tr[data-prediction-row="true"]'));
-        if (!dataRows.length) {
-            pagination.style.display = 'none';
-            return;
-        }
-
-        const pageSize = 7;
-        const totalPages = Math.ceil(dataRows.length / pageSize);
-        let currentPage = 1;
-
-        function renderPage(page) {
-            currentPage = page;
-            dataRows.forEach(function (row, index) {
-                const pageIndex = Math.floor(index / pageSize) + 1;
-                row.style.display = pageIndex === page ? '' : 'none';
-            });
-            const items = pagination.querySelectorAll('li');
-            items.forEach(function (item, index) {
-                item.classList.toggle('active', index + 1 === page);
-            });
-        }
-
-        function buildPagination() {
-            pagination.innerHTML = '';
-            if (totalPages <= 1) {
-                pagination.style.display = 'none';
-                return;
-            }
-
-            pagination.style.display = '';
-            for (let page = 1; page <= totalPages; page += 1) {
-                const li = document.createElement('li');
-                if (page === currentPage) {
-                    li.classList.add('active');
-                }
-                const link = document.createElement('a');
-                link.href = '#';
-                link.textContent = String(page);
-                link.title = `第${page}頁`;
-                link.addEventListener('click', function (event) {
-                    event.preventDefault();
-                    if (page === currentPage) {
-                        return;
-                    }
-                    renderPage(page);
-                });
-                li.appendChild(link);
-                pagination.appendChild(li);
-            }
-        }
-
-        buildPagination();
-        renderPage(1);
+        rows.forEach(function (row, index) {
+            row.style.display = index < 7 ? '' : 'none';
+        });
     });
     </script>
 </body>
