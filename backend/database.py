@@ -902,6 +902,7 @@ class Database:
         for purchase in template:
             purchase_params = dict(purchase)
             purchase_params.pop("member_id", None)
+
             if "product_category" not in purchase_params and "category" in purchase_params:
                 purchase_params["product_category"] = purchase_params.pop("category")
 
@@ -1542,6 +1543,7 @@ class Database:
         for purchase in purchases:
             purchase_params = dict(purchase)
             purchase_params.pop("member_id", None)
+
             if "product_category" not in purchase_params and "category" in purchase_params:
                 purchase_params["product_category"] = purchase_params.pop("category")
 
@@ -1711,6 +1713,7 @@ class Database:
                 quantity=1.0,
                 total_price=price,
             )
+
             existing_keys.add(key)
 
     def _seed_october_preview_records(self, *, count: int = 10) -> None:
@@ -1869,5 +1872,3 @@ class Database:
             )
             for row in rows
         ]
-
-
