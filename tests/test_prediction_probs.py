@@ -1,0 +1,109 @@
+"""Tests for probability helpers in backend.prediction."""
+
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from backend.database import MemberProfile, Purchase
+from backend.prediction import (
+    _blend_with_prior,
+    _clip_and_normalize,
+    _softmax,
+    predict_next_purchases,
+)
+
+
+def test_softmax_outputs_valid_distribution():
+    scores = [1.2, 3.4, 0.5]
+    probabilities = _softmax(scores, tau=1.5)
+
+    assert len(probabilities) == len(scores)
+    assert all(0.0 <= p <= 1.0 for p in probabilities)
+    assert abs(sum(probabilities) - 1.0) < 1e-6
+
+
+def test_softmax_temperature_controls_sharpness():
+    scores = [1.0, 2.0, 5.0]
+    cold = _softmax(scores, tau=0.5)
+    hot = _softmax(scores, tau=5.0)
+
+    assert max(cold) > max(hot)
+    assert min(cold) < min(hot)
+
+
+def test_blend_with_prior_respects_sample_size():
+    p_softmax = [0.7, 0.2, 0.1]
+    prior = [0.5, 0.3, 0.2]
+
+    blended_small_n = _blend_with_prior(p_softmax, prior, n=0, k=10)
+    blended_large_n = _blend_with_prior(p_softmax, prior, n=100, k=10)
+
+    assert blended_small_n == _clip_and_normalize(prior)
+    assert abs(blended_large_n[0] - p_softmax[0]) < 0.1
+
+
+def test_softmax_translation_invariance_after_zscore():
+    scores = [0.2, 1.4, -0.5]
+    shifted = [score + 42.0 for score in scores]
+
+    base = _softmax(scores)
+    shifted_base = _softmax(shifted)
+
+    assert abs(sum(base) - 1.0) < 1e-6
+    assert abs(sum(shifted_base) - 1.0) < 1e-6
+    for original, translated in zip(base, shifted_base):
+        assert abs(original - translated) < 1e-9
+
+
+def test_probability_percent_has_single_decimal():
+    previous_calib = os.environ.pop("PRED_CALIB_PATH", None)
+
+    purchase = Purchase(
+        member_id="M001",
+        member_code="M001",
+        product_category="wellness",
+        internal_item_code="SKU401022",
+        item="冷壓綜合果汁 350ml",
+        purchased_at="2024-05-10 10:00",
+        unit_price=95.0,
+        quantity=1.0,
+        total_price=95.0,
+    )
+
+    profile = MemberProfile(
+        profile_id=1,
+        profile_label="test",
+        name="Tester",
+        member_id="M001",
+        mall_member_id=None,
+        member_status=None,
+        joined_at=None,
+        points_balance=None,
+        gender=None,
+        birth_date=None,
+        phone=None,
+        email=None,
+        address=None,
+        occupation=None,
+        first_image_filename=None,
+    )
+
+    try:
+        result = predict_next_purchases([purchase], profile=profile, limit=3)
+
+        assert result.items
+        for item in result.items:
+            scaled = round(item.probability * 100, 1)
+            assert item.probability_percent == scaled
+            assert (
+                abs(item.probability_percent * 10 - round(item.probability_percent * 10))
+                < 1e-9
+            )
+    finally:
+        if previous_calib is not None:
+            os.environ["PRED_CALIB_PATH"] = previous_calib
+
