@@ -1394,122 +1394,121 @@ class Database:
                 (count,) = conn.execute("SELECT COUNT(*) FROM member_profiles").fetchone()
             except sqlite3.OperationalError:
                 count = 0
-            if count:
+
+        if count == 0:
+            sql_path = Path(__file__).resolve().parent / "data" / "mvp.sql"
+            if not sql_path.exists():  # pragma: no cover - defensive guard
+                _LOGGER.warning("Seed file %s not found; skipping demo data load", sql_path)
                 return
 
-        sql_path = Path(__file__).resolve().parent / "data" / "mvp.sql"
-        if not sql_path.exists():  # pragma: no cover - defensive guard
-            _LOGGER.warning("Seed file %s not found; skipping demo data load", sql_path)
-            return
-
-        self._profile_purchase_templates = {
-            "dessert-lover": dessert_history,
-            "family-groceries": kids_history,
-            "fitness-enthusiast": fitness_history,
-            "home-manager": homemaker_history,
-            "wellness-gourmet": health_history,
-        }
-
-        self._reset_seed_profiles()
-
-        self._seed_member_profile(
-            profile_label="dessert-lover",
-            name="李函霏",
-            member_id=None,
-            mall_member_id="ME0001",
-            member_status="有效",
-            joined_at="2021-06-12",
-            points_balance=1520,
-            gender="女",
-            birth_date="1988-07-12",
-            phone="0912-345-678",
-            email="dessertlover@example.com",
-            address="台北市信義區松壽路10號",
-            occupation="甜點教室講師",
-        )
-        self._seed_member_profile(
-            profile_label="family-groceries",
-            name="林位青",
-            member_id=None,
-            mall_member_id="ME0002",
-            member_status="有效",
-            joined_at="2020-09-01",
-            points_balance=980,
-            gender="男",
-            birth_date="1990-02-08",
-            phone="0923-556-789",
-            email="familybuyer@example.com",
-            address="新北市板橋區文化路100號",
-            occupation="幼兒園老師",
-        )
-        self._seed_member_profile(
-            profile_label="fitness-enthusiast",
-            name="范文華",
-            member_id=None,
-            mall_member_id="ME0003",
-            member_status="有效",
-            joined_at="2019-11-20",
-            points_balance=2040,
-            gender="女",
-            birth_date="1985-04-19",
-            phone="0955-112-233",
-            email="fitgoer@example.com",
-            address="台中市西屯區市政北二路88號",
-            occupation="企業健身顧問",
-        )
-        self._seed_member_profile(
-            profile_label="home-manager",
-            name="未註冊客戶",
-            member_id=None,
-            mall_member_id="",
-            member_status=None,
-            joined_at=None,
-            points_balance=None,
-            gender=None,
-            birth_date=None,
-            phone=None,
-            email=None,
-            address=None,
-            occupation=None,
-        )
-        self._seed_member_profile(
-            profile_label="wellness-gourmet",
-            name="未註冊客戶",
-            member_id=None,
-            mall_member_id="",
-            member_status=None,
-            joined_at=None,
-            points_balance=None,
-            gender=None,
-            birth_date=None,
-            phone=None,
-            email=None,
-            address=None,
-            occupation=None,
-        )
-
-
-        with self._connect() as conn:
-            conn.executescript("\n".join(insert_statements))
-            face_map = {
-                "MEME0383FE3AA": "faces/dessert_lover.jpg",
-                "MEM692FFD0824": "faces/family_groceries.jpg",
-                "MEMFITNESS2025": "faces/fitness_enthusiast.jpg",
-                "MEMHOMECARE2025": "faces/home_manager.jpg",
-                "MEMHEALTH2025": "faces/wellness_gourmet.jpg",
+            self._profile_purchase_templates = {
+                "dessert-lover": dessert_history,
+                "family-groceries": kids_history,
+                "fitness-enthusiast": fitness_history,
+                "home-manager": homemaker_history,
+                "wellness-gourmet": health_history,
             }
-            for member_id, filename in face_map.items():
-                conn.execute(
-                    "UPDATE member_profiles SET first_image_filename = ? WHERE member_id = ?",
-                    (filename, member_id),
-                )
-            conn.commit()
 
-        for profile_label, member_id in PROFILE_LABEL_TO_SEED_MEMBER.items():
-            template = self._profile_purchase_templates.get(profile_label)
-            if not template:
-                continue
-            self._seed_member_history(member_id, template)
+            self._reset_seed_profiles()
+
+            self._seed_member_profile(
+                profile_label="dessert-lover",
+                name="李函霏",
+                member_id=None,
+                mall_member_id="ME0001",
+                member_status="有效",
+                joined_at="2021-06-12",
+                points_balance=1520,
+                gender="女",
+                birth_date="1988-07-12",
+                phone="0912-345-678",
+                email="dessertlover@example.com",
+                address="台北市信義區松壽路10號",
+                occupation="甜點教室講師",
+            )
+            self._seed_member_profile(
+                profile_label="family-groceries",
+                name="林位青",
+                member_id=None,
+                mall_member_id="ME0002",
+                member_status="有效",
+                joined_at="2020-09-01",
+                points_balance=980,
+                gender="男",
+                birth_date="1990-02-08",
+                phone="0923-556-789",
+                email="familybuyer@example.com",
+                address="新北市板橋區文化路100號",
+                occupation="幼兒園老師",
+            )
+            self._seed_member_profile(
+                profile_label="fitness-enthusiast",
+                name="范文華",
+                member_id=None,
+                mall_member_id="ME0003",
+                member_status="有效",
+                joined_at="2019-11-20",
+                points_balance=2040,
+                gender="女",
+                birth_date="1985-04-19",
+                phone="0955-112-233",
+                email="fitgoer@example.com",
+                address="台中市西屯區市政北二路88號",
+                occupation="企業健身顧問",
+            )
+            self._seed_member_profile(
+                profile_label="home-manager",
+                name="未註冊客戶",
+                member_id=None,
+                mall_member_id="",
+                member_status=None,
+                joined_at=None,
+                points_balance=None,
+                gender=None,
+                birth_date=None,
+                phone=None,
+                email=None,
+                address=None,
+                occupation=None,
+            )
+            self._seed_member_profile(
+                profile_label="wellness-gourmet",
+                name="未註冊客戶",
+                member_id=None,
+                mall_member_id="",
+                member_status=None,
+                joined_at=None,
+                points_balance=None,
+                gender=None,
+                birth_date=None,
+                phone=None,
+                email=None,
+                address=None,
+                occupation=None,
+            )
+
+
+            with self._connect() as conn:
+                conn.executescript("\n".join(insert_statements))
+                face_map = {
+                    "MEME0383FE3AA": "faces/dessert_lover.jpg",
+                    "MEM692FFD0824": "faces/family_groceries.jpg",
+                    "MEMFITNESS2025": "faces/fitness_enthusiast.jpg",
+                    "MEMHOMECARE2025": "faces/home_manager.jpg",
+                    "MEMHEALTH2025": "faces/wellness_gourmet.jpg",
+                }
+                for member_id, filename in face_map.items():
+                    conn.execute(
+                        "UPDATE member_profiles SET first_image_filename = ? WHERE member_id = ?",
+                        (filename, member_id),
+                    )
+                conn.commit()
+
+            for profile_label, member_id in PROFILE_LABEL_TO_SEED_MEMBER.items():
+                template = self._profile_purchase_templates.get(profile_label)
+                if not template:
+                    continue
+                self._seed_member_history(member_id, template)
 
         self._ingest_september_purchase_script()
         self._seed_october_preview_records(count=10)
@@ -1544,6 +1543,25 @@ class Database:
         for purchase in purchases:
             purchase_params = dict(purchase)
             purchase_params.pop("member_id", None)
+
+            if "product_category" not in purchase_params and "category" in purchase_params:
+                purchase_params["product_category"] = purchase_params.pop("category")
+
+            if "unit_price" not in purchase_params:
+                price_value = purchase_params.pop("price", None)
+                if price_value is not None:
+                    purchase_params["unit_price"] = float(price_value)
+                else:
+                    purchase_params["unit_price"] = 0.0
+
+            if "quantity" not in purchase_params:
+                purchase_params["quantity"] = float(purchase_params.pop("qty", 1.0))
+
+            if "total_price" not in purchase_params:
+                unit_price_val = float(purchase_params.get("unit_price", 0.0))
+                quantity_val = float(purchase_params.get("quantity", 1.0))
+                purchase_params["total_price"] = unit_price_val * quantity_val
+
             self.add_purchase(member_id, **purchase_params)
 
         config = _SEPTEMBER_2025_PURCHASE_CONFIG.get(member_id)
@@ -1635,6 +1653,25 @@ class Database:
             if member_id:
                 label_to_member[label] = member_id
 
+        member_ids = tuple({mid for mid in label_to_member.values()})
+        existing_keys: set[tuple[str, str, str]] = set()
+        if member_ids:
+            placeholders = ",".join("?" for _ in member_ids)
+            query = (
+                """
+                SELECT member_id, internal_item_code, purchased_at
+                FROM purchases
+                WHERE member_id IN ({placeholders})
+                  AND purchased_at BETWEEN '2025-09-01' AND '2025-09-30 23:59:59'
+                """
+            ).format(placeholders=placeholders)
+            with self._connect() as conn:
+                rows_existing = conn.execute(query, member_ids).fetchall()
+                existing_keys = {
+                    (str(row["member_id"]), str(row["internal_item_code"]), str(row["purchased_at"]))
+                    for row in rows_existing
+                }
+
         for row in rows:
             label = str(row[0] or "").strip()
             member_id = label_to_member.get(label)
@@ -1662,6 +1699,10 @@ class Database:
             except (TypeError, ValueError):
                 continue
 
+            key = (member_id, product_id, purchased_at_str)
+            if key in existing_keys:
+                continue
+
             self.add_purchase(
                 member_id,
                 product_category=category,
@@ -1672,6 +1713,8 @@ class Database:
                 quantity=1.0,
                 total_price=price,
             )
+
+            existing_keys.add(key)
 
     def _seed_october_preview_records(self, *, count: int = 10) -> None:
         member_id = PROFILE_LABEL_TO_SEED_MEMBER.get("dessert-lover")
@@ -1685,6 +1728,20 @@ class Database:
         rng = random.Random(f"{member_id}-2025-10-preview")
         member_code = self.get_member_code(member_id)
         minute_choices = (0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55)
+
+        prefix = config["prefix"]
+        cleanup_pattern = f"{prefix}-O25%"
+        with self._connect() as conn:
+            conn.execute(
+                """
+                DELETE FROM purchases
+                WHERE member_id = ?
+                  AND internal_item_code LIKE ?
+                  AND purchased_at BETWEEN '2025-10-01' AND '2025-10-31 23:59:59'
+                """,
+                (member_id, cleanup_pattern),
+            )
+            conn.commit()
 
         for index in range(max(0, int(count))):
             choice = rng.choice(config["items"])
@@ -1715,7 +1772,6 @@ class Database:
                 quantity=1.0,
                 total_price=float(round(unit_price, 2)),
             )
-
 
     def _seed_member_profile(
         self,
@@ -1816,5 +1872,3 @@ class Database:
             )
             for row in rows
         ]
-
-
