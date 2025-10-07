@@ -902,6 +902,7 @@ class Database:
         for purchase in template:
             purchase_params = dict(purchase)
             purchase_params.pop("member_id", None)
+
             if "product_category" not in purchase_params and "category" in purchase_params:
                 purchase_params["product_category"] = purchase_params.pop("category")
 
@@ -1714,6 +1715,7 @@ class Database:
                 quantity=1.0,
                 total_price=float(round(unit_price, 2)),
             )
+
 
     def _seed_member_profile(
         self,
