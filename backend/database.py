@@ -255,13 +255,11 @@ _SCRIPT_LABEL_TO_PROFILE: dict[str, str] = {
     "健康食品愛好者": "wellness-gourmet",
 }
 
-
 def _default_seed_encoding_payload(member_id: str) -> str:
     return json.dumps(
         {"vector": [0.0] * 128, "signature": member_id, "source": "seed"},
         ensure_ascii=False,
     )
-
 
 @dataclass
 class Purchase:
@@ -1106,6 +1104,7 @@ class Database:
         for purchase in template:
             purchase_params = dict(purchase)
             purchase_params.pop("member_id", None)
+
             if "product_category" not in purchase_params and "category" in purchase_params:
                 purchase_params["product_category"] = purchase_params.pop("category")
 
@@ -1708,13 +1707,13 @@ class Database:
                 conn.commit()
 
             for profile_label, member_id in SEED_PROFILE_TO_MEMBER_ID.items():
+
                 template = self._profile_purchase_templates.get(profile_label)
                 if not template:
                     continue
                 self._seed_member_history(member_id, template)
 
         self._ensure_seed_member_profiles()
-
         self._ingest_september_purchase_script()
         self._seed_october_preview_records(count=10)
         self._normalize_placeholder_profiles()
@@ -1748,6 +1747,7 @@ class Database:
         for purchase in purchases:
             purchase_params = dict(purchase)
             purchase_params.pop("member_id", None)
+
             if "product_category" not in purchase_params and "category" in purchase_params:
                 purchase_params["product_category"] = purchase_params.pop("category")
 
@@ -1853,7 +1853,9 @@ class Database:
 
         label_to_member: dict[str, str] = {}
         for label, profile in _SCRIPT_LABEL_TO_PROFILE.items():
+
             member_id = SEED_PROFILE_TO_MEMBER_ID.get(profile)
+
             if member_id:
                 label_to_member[label] = member_id
 
@@ -1917,10 +1919,12 @@ class Database:
                 quantity=1.0,
                 total_price=price,
             )
+
             existing_keys.add(key)
 
     def _seed_october_preview_records(self, *, count: int = 10) -> None:
         member_id = SEED_PROFILE_TO_MEMBER_ID.get("dessert-lover")
+
         if not member_id:
             return
 
@@ -2075,5 +2079,3 @@ class Database:
             )
             for row in rows
         ]
-
-
