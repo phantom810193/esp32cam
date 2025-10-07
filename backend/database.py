@@ -164,6 +164,15 @@ _SEPTEMBER_2025_PURCHASE_CONFIG: dict[str, _PersonaPurchaseConfig] = {
 }
 
 
+_SCRIPT_LABEL_TO_PROFILE: dict[str, str] = {
+    "甜點收藏家": "dessert-lover",
+    "幼兒園家長": "family-groceries",
+    "健身族": "fitness-enthusiast",
+    "家庭主婦": "home-manager",
+    "健康食品愛好者": "wellness-gourmet",
+}
+
+
 @dataclass
 class Purchase:
     member_id: str
@@ -893,6 +902,25 @@ class Database:
         for purchase in template:
             purchase_params = dict(purchase)
             purchase_params.pop("member_id", None)
+
+            if "product_category" not in purchase_params and "category" in purchase_params:
+                purchase_params["product_category"] = purchase_params.pop("category")
+
+            if "unit_price" not in purchase_params:
+                price_value = purchase_params.pop("price", None)
+                if price_value is not None:
+                    purchase_params["unit_price"] = float(price_value)
+                else:
+                    purchase_params["unit_price"] = 0.0
+
+            if "quantity" not in purchase_params:
+                purchase_params["quantity"] = float(purchase_params.pop("qty", 1.0))
+
+            if "total_price" not in purchase_params:
+                unit_price_val = float(purchase_params.get("unit_price", 0.0))
+                quantity_val = float(purchase_params.get("quantity", 1.0))
+                purchase_params["total_price"] = unit_price_val * quantity_val
+
             self.add_purchase(member_id, **purchase_params)
 
         self._profile_history_seeded.add(profile_label)
@@ -1483,6 +1511,8 @@ class Database:
                 continue
             self._seed_member_history(member_id, template)
 
+        self._ingest_september_purchase_script()
+        self._seed_october_preview_records(count=10)
         self._normalize_placeholder_profiles()
 
     def _seed_member_history(
@@ -1559,6 +1589,133 @@ class Database:
             record_params = dict(record)
             record_params.pop("member_id", None)
             self.add_purchase(member_id, **record_params)
+
+    def _ingest_september_purchase_script(self) -> None:
+        script_path = Path(__file__).resolve().parent / "data" / "sept_purchases.sql"
+        if not script_path.exists():
+            return
+
+        try:
+            script_text = script_path.read_text(encoding="utf-8")
+        except OSError as exc:  # pragma: no cover - defensive guard
+            _LOGGER.warning("Failed reading %s: %s", script_path, exc)
+            return
+
+        temp_conn: sqlite3.Connection | None = None
+        try:
+            temp_conn = sqlite3.connect(":memory:")
+            with temp_conn:
+                temp_conn.executescript(script_text)
+            rows = temp_conn.execute(
+                """
+                SELECT member_label,
+                       mall_member_id,
+                       purchased_at,
+                       product_id,
+                       product_name,
+                       category,
+                       price
+                FROM purchases
+                ORDER BY purchased_at
+                """
+            ).fetchall()
+        except sqlite3.Error as exc:  # pragma: no cover - defensive guard
+            _LOGGER.warning("Failed parsing %s: %s", script_path, exc)
+            return
+        finally:
+            if temp_conn is not None:
+                try:
+                    temp_conn.close()
+                except Exception:  # pragma: no cover - defensive guard
+                    pass
+
+        label_to_member: dict[str, str] = {}
+        for label, profile in _SCRIPT_LABEL_TO_PROFILE.items():
+            member_id = PROFILE_LABEL_TO_SEED_MEMBER.get(profile)
+            if member_id:
+                label_to_member[label] = member_id
+
+        for row in rows:
+            label = str(row[0] or "").strip()
+            member_id = label_to_member.get(label)
+            if not member_id:
+                continue
+
+            purchased_at = str(row[2] or "").strip()
+            if not purchased_at:
+                continue
+            try:
+                parsed_at = datetime.fromisoformat(purchased_at)
+            except ValueError:
+                try:
+                    parsed_at = datetime.strptime(purchased_at, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    _LOGGER.debug("Skipping malformed timestamp %s in %s", purchased_at, script_path)
+                    continue
+            purchased_at_str = parsed_at.strftime("%Y-%m-%d %H:%M:%S")
+
+            product_id = str(row[3] or "").strip()
+            product_name = str(row[4] or "").strip()
+            category = str(row[5] or "").strip()
+            try:
+                price = float(row[6])
+            except (TypeError, ValueError):
+                continue
+
+            self.add_purchase(
+                member_id,
+                product_category=category,
+                internal_item_code=product_id,
+                item=product_name,
+                purchased_at=purchased_at_str,
+                unit_price=price,
+                quantity=1.0,
+                total_price=price,
+            )
+
+    def _seed_october_preview_records(self, *, count: int = 10) -> None:
+        member_id = PROFILE_LABEL_TO_SEED_MEMBER.get("dessert-lover")
+        if not member_id:
+            return
+
+        config = _SEPTEMBER_2025_PURCHASE_CONFIG.get(member_id)
+        if not config:
+            return
+
+        rng = random.Random(f"{member_id}-2025-10-preview")
+        member_code = self.get_member_code(member_id)
+        minute_choices = (0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55)
+
+        for index in range(max(0, int(count))):
+            choice = rng.choice(config["items"])
+            price_range = choice["price"]
+            low, high = int(price_range[0]), int(price_range[1])
+            if high <= low:
+                unit_price = float(low)
+            else:
+                step = 5 if high - low >= 5 else 1
+                unit_price = float(rng.randrange(low, high + 1, step))
+
+            purchase_time = datetime(2025, 10, 1) + timedelta(
+                days=rng.randint(0, 9),
+                hours=rng.randint(8, 21),
+                minutes=rng.choice(minute_choices),
+            )
+
+            internal_code = f"{config['prefix']}-O25{index + 1:03d}"
+
+            self.add_purchase(
+                member_id,
+                member_code=member_code,
+                product_category=choice["category"],
+                internal_item_code=internal_code,
+                item=choice["item"],
+                purchased_at=purchase_time.strftime("%Y-%m-%d %H:%M"),
+                unit_price=unit_price,
+                quantity=1.0,
+                total_price=float(round(unit_price, 2)),
+            )
+
 
     def _seed_member_profile(
         self,
