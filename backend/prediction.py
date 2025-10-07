@@ -1,10 +1,12 @@
 """Prediction helpers for estimating next-best offers."""
 from __future__ import annotations
 
+import math
+import os
+import pickle
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from math import exp
 from typing import Iterable, Sequence
 
 from .advertising import PurchaseInsights
@@ -83,15 +85,201 @@ def get_previous_month_purchases(
     return buckets[latest_bucket]
 
 
-def _softmax(scores: Sequence[float]) -> list[float]:
+def _get_env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _get_env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _softmax(scores: Sequence[float], tau: float | None = None, eps: float = 1e-6) -> list[float]:
     if not scores:
         return []
+    tau_value = _get_env_float("PRED_TAU", tau if tau is not None else 1.5)
+    if not math.isfinite(tau_value) or tau_value <= 0:
+        tau_value = 1.0
     shift = max(scores)
-    exponentials = [exp(score - shift) for score in scores]
+    exponentials = [math.exp((score - shift) / tau_value) for score in scores]
     total = sum(exponentials)
-    if total == 0:
-        return [0.0 for _ in scores]
-    return [value / total for value in exponentials]
+    if total <= 0:
+        return [1.0 / len(exponentials) for _ in exponentials]
+    probs = [(value + eps) / (total + eps * len(exponentials)) for value in exponentials]
+    normaliser = sum(probs)
+    if normaliser <= 0:
+        return [1.0 / len(probs) for _ in probs]
+    return [value / normaliser for value in probs]
+
+
+def _zscore(values: Sequence[float]) -> list[float]:
+    data = list(values)
+    if not data:
+        return []
+    mean = sum(data) / len(data)
+    variance = sum((value - mean) ** 2 for value in data) / len(data)
+    if variance <= 1e-12:
+        return data
+    std_dev = math.sqrt(variance)
+    return [(value - mean) / std_dev for value in data]
+
+
+def _normalise(probabilities: Sequence[float]) -> list[float]:
+    values = [max(0.0, float(value)) for value in probabilities]
+    total = sum(values)
+    if total <= 0:
+        if not values:
+            return []
+        uniform = 1.0 / len(values)
+        return [uniform for _ in values]
+    normalised = [value / total for value in values]
+    total_norm = sum(normalised)
+    if total_norm <= 0:
+        uniform = 1.0 / len(normalised)
+        return [uniform for _ in normalised]
+    return [value / total_norm for value in normalised]
+
+
+def _load_calibrator(path: str | None):
+    if not path:
+        return None
+    try:
+        if os.path.exists(path):
+            with open(path, "rb") as handle:
+                return pickle.load(handle)
+    except Exception:
+        return None
+    return None
+
+
+def _apply_calibration(calibrator, probabilities: Sequence[float]) -> list[float]:
+    if calibrator is None:
+        return list(probabilities)
+    try:
+        import numpy as np
+    except Exception:
+        return list(probabilities)
+
+    values = np.array(list(probabilities), dtype=float).reshape(-1, 1)
+    try:
+        if hasattr(calibrator, "predict_proba"):
+            calibrated = calibrator.predict_proba(values)
+            if calibrated.ndim == 2 and calibrated.shape[1] >= 2:
+                output = calibrated[:, -1]
+            else:
+                output = calibrated.ravel()
+        elif hasattr(calibrator, "predict"):
+            output = calibrator.predict(values)
+        elif callable(calibrator):
+            output = calibrator(values)
+        else:
+            return list(probabilities)
+    except Exception:
+        return list(probabilities)
+
+    flat = [float(v) for v in np.ravel(output)]
+    if len(flat) != len(probabilities):
+        return list(probabilities)
+    clipped = [max(0.001, min(0.999, value)) for value in flat]
+    return _normalise(clipped)
+
+
+def _build_fallback_weights(candidates: Sequence[tuple[float, Product]]):
+    weights: list[float] = []
+    for _, product in candidates:
+        weight = getattr(product, "view_rate", 0.0) or 0.0
+        weights.append(max(weight, 0.05))
+    return weights
+
+
+def _build_prior_vector(
+    candidates: Sequence[tuple[float, Product]],
+    category_counter: Counter[str],
+) -> list[float]:
+    if not candidates:
+        return []
+
+    fallback_weights = _build_fallback_weights(candidates)
+    totals_by_category: dict[str, float] = {}
+    total_category_count = sum(category_counter.values())
+    if total_category_count > 0:
+        for category, count in category_counter.items():
+            if count > 0:
+                totals_by_category[category] = count / total_category_count
+
+    category_indices: defaultdict[str, list[int]] = defaultdict(list)
+    for index, (_, product) in enumerate(candidates):
+        category_indices[product.category].append(index)
+
+    prior = [0.0 for _ in candidates]
+    remaining_mass = 1.0
+
+    for category, indices in category_indices.items():
+        category_weight = totals_by_category.get(category, 0.0)
+        if category_weight <= 0:
+            continue
+        share_weights = [fallback_weights[i] for i in indices]
+        share_total = sum(share_weights)
+        if share_total <= 0:
+            uniform_share = category_weight / len(indices)
+            for idx in indices:
+                prior[idx] = uniform_share
+        else:
+            for idx, weight in zip(indices, share_weights):
+                prior[idx] = category_weight * (weight / share_total)
+        remaining_mass -= category_weight
+
+    leftover_indices = [idx for idx, value in enumerate(prior) if value <= 0]
+    if leftover_indices:
+        fallback_mass = max(remaining_mass, 0.0)
+        if fallback_mass <= 0:
+            fallback_mass = 1.0
+        leftover_weights = [fallback_weights[i] for i in leftover_indices]
+        weight_total = sum(leftover_weights)
+        if weight_total <= 0:
+            uniform = fallback_mass / len(leftover_indices)
+            for idx in leftover_indices:
+                prior[idx] = uniform
+        else:
+            for idx, weight in zip(leftover_indices, leftover_weights):
+                prior[idx] = fallback_mass * (weight / weight_total)
+
+    return _normalise(prior)
+
+
+def _blend_with_prior(
+    posterior: Sequence[float],
+    prior: Sequence[float],
+    *,
+    n: int | None,
+    k: int,
+) -> list[float]:
+    posterior_list = list(posterior)
+    if not posterior_list:
+        return []
+    prior_list = list(prior)
+    if len(prior_list) != len(posterior_list):
+        prior_list = [1.0 / len(posterior_list) for _ in posterior_list]
+    n_value = n if n is not None and n >= 0 else None
+    if n_value is None:
+        n_value = len(posterior_list)
+    lambda_value = k / float(n_value + k) if k > 0 else 0.0
+    blended = [
+        (1 - lambda_value) * p_soft + lambda_value * p_prior
+        for p_soft, p_prior in zip(posterior_list, prior_list)
+    ]
+    return _normalise(blended)
 
 
 def predict_next_purchases(
@@ -159,7 +347,22 @@ def predict_next_purchases(
 
     scored.sort(key=lambda entry: entry[0], reverse=True)
     top_scored = scored[: limit * 2]
-    probabilities = _softmax([score for score, _ in top_scored])
+
+    raw_scores = [score for score, _ in top_scored]
+    z_scores = _zscore(raw_scores)
+    p_softmax = _softmax(z_scores)
+
+    prior = _build_prior_vector(top_scored, category_counter)
+    recent_order_count = len(window) if window else len(purchase_list)
+    blend_k = _get_env_int("PRED_K", 10)
+    p_blend = _blend_with_prior(p_softmax, prior, n=recent_order_count, k=blend_k)
+
+    calibrator_path = os.getenv("PRED_CALIB_PATH", "backend/data/calibration.pkl")
+    calibrator = _load_calibrator(calibrator_path)
+    probabilities = _apply_calibration(calibrator, p_blend)
+
+    probabilities = [max(0.001, min(0.999, prob)) for prob in probabilities]
+    probabilities = _normalise(probabilities)
 
     results: list[PredictedItem] = []
     for index, ((score, product), probability) in enumerate(zip(top_scored, probabilities)):
