@@ -1351,7 +1351,7 @@ class Database:
         self._seed_member_profile(
             profile_label="dessert-lover",
             name="李函霏",
-            member_id=None,
+            member_id=PROFILE_LABEL_TO_SEED_MEMBER["dessert-lover"],
             mall_member_id="ME0001",
             member_status="有效",
             joined_at="2021-06-12",
@@ -1366,7 +1366,7 @@ class Database:
         self._seed_member_profile(
             profile_label="family-groceries",
             name="林位青",
-            member_id=None,
+            member_id=PROFILE_LABEL_TO_SEED_MEMBER["family-groceries"],
             mall_member_id="ME0002",
             member_status="有效",
             joined_at="2020-09-01",
@@ -1381,7 +1381,7 @@ class Database:
         self._seed_member_profile(
             profile_label="fitness-enthusiast",
             name="范文華",
-            member_id=None,
+            member_id=PROFILE_LABEL_TO_SEED_MEMBER["fitness-enthusiast"],
             mall_member_id="ME0003",
             member_status="有效",
             joined_at="2019-11-20",
@@ -1396,7 +1396,7 @@ class Database:
         self._seed_member_profile(
             profile_label="home-manager",
             name="未註冊客戶",
-            member_id=None,
+            member_id=PROFILE_LABEL_TO_SEED_MEMBER["home-manager"],
             mall_member_id="",
             member_status=None,
             joined_at=None,
@@ -1411,7 +1411,7 @@ class Database:
         self._seed_member_profile(
             profile_label="wellness-gourmet",
             name="未註冊客戶",
-            member_id=None,
+            member_id=PROFILE_LABEL_TO_SEED_MEMBER["wellness-gourmet"],
             mall_member_id="",
             member_status=None,
             joined_at=None,

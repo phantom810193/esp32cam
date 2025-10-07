@@ -1,164 +1,104 @@
--- SQLite script: September 2025 randomized purchases (30 rows per persona, 5 personas).
+-- SQLite script: September 2025 purchases with supplemental October entries.
 PRAGMA foreign_keys = OFF;
 BEGIN;
 CREATE TABLE IF NOT EXISTS purchases (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  member_label  TEXT NOT NULL,                -- 人物標籤（例：甜點收藏家）
-  mall_member_id TEXT,                         -- 商場會員代號，可為 NULL
-  purchased_at  TEXT NOT NULL,                -- 'YYYY-MM-DD HH:MM:SS' (local time)
-  product_id    TEXT NOT NULL,                -- 內部商品編號
-  product_name  TEXT NOT NULL,                -- 商品名稱
-  category      TEXT NOT NULL,                -- 商品類別
-  price         INTEGER NOT NULL              -- 商品價格（整數新台幣）
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  member_label   TEXT NOT NULL,
+  mall_member_id TEXT,
+  purchased_at   TEXT NOT NULL,
+  product_id     TEXT NOT NULL,
+  product_name   TEXT NOT NULL,
+  category       TEXT NOT NULL,
+  price          INTEGER NOT NULL
 );
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-24 13:15:14','DAIL-101','柔感抽取衛生紙','日常生活用品',129);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-22 20:57:34','DESS-001','草莓生乳捲','甜點',280);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-02 09:05:13','DESS-004','馬卡龍 6 入','甜點',220);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-01 17:12:45','DESS-005','巴斯克起司蛋糕','甜點',360);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-14 12:28:37','DAIL-105','洗衣精 2kg','日常生活用品',189);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-25 21:10:44','DESS-001','草莓生乳捲','甜點',280);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-05 12:48:21','DESS-003','提拉米蘇切片','甜點',120);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-04 14:54:22','DESS-004','馬卡龍 6 入','甜點',220);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-24 16:34:07','DAIL-101','柔感抽取衛生紙','日常生活用品',129);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-03 17:18:53','FOOD-204','生鮮香蕉 1 串','食物',49);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-19 12:45:04','DAIL-103','濕紙巾 80 抽','日常生活用品',65);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-25 13:05:54','DESS-002','芒果奶酪','甜點',95);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-13 13:29:40','DESS-001','草莓生乳捲','甜點',280);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-12 14:13:42','FOOD-202','全麥吐司','食物',55);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-20 19:10:34','DESS-001','草莓生乳捲','甜點',280);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-15 15:17:59','DAIL-102','洗碗精補充包','日常生活用品',79);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-08 19:20:53','DAIL-105','洗衣精 2kg','日常生活用品',189);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-08 09:51:20','FOOD-201','牛奶 936ml','食物',95);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-07 18:56:45','DESS-001','草莓生乳捲','甜點',280);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-13 19:29:09','DESS-004','馬卡龍 6 入','甜點',220);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-24 17:34:16','DESS-002','芒果奶酪','甜點',95);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-29 18:25:23','DAIL-104','廚房紙巾 6 捲','日常生活用品',119);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-17 16:05:48','DESS-002','芒果奶酪','甜點',95);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-05 19:10:50','DESS-001','草莓生乳捲','甜點',280);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-03 15:24:38','DAIL-105','洗衣精 2kg','日常生活用品',189);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-09 17:55:00','FOOD-205','鮮蛋 10 入','食物',85);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-22 17:48:17','DAIL-101','柔感抽取衛生紙','日常生活用品',129);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-04 13:27:10','FOOD-203','雞胸肉真空包','食物',75);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-17 21:11:32','DESS-003','提拉米蘇切片','甜點',120);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('甜點收藏家','ME0001','2025-09-27 19:32:38','FOOD-203','雞胸肉真空包','食物',75);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-25 11:34:49','KID-303','嬰兒濕紙巾 90 抽','幼兒用品',75);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-20 14:31:01','FOOD-201','牛奶 936ml','食物',95);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-29 21:19:15','KID-303','嬰兒濕紙巾 90 抽','幼兒用品',75);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-03 10:46:31','KID-305','防漏學習杯','幼兒用品',259);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-25 11:08:42','FOOD-205','鮮蛋 10 入','食物',85);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-06 13:33:55','KID-305','防漏學習杯','幼兒用品',259);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-30 17:48:46','DAIL-102','洗碗精補充包','日常生活用品',79);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-13 19:41:23','DAIL-103','濕紙巾 80 抽','日常生活用品',65);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-15 10:15:14','KID-305','防漏學習杯','幼兒用品',259);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-19 17:14:37','KID-301','學習褲 L 28 片','幼兒用品',349);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-23 19:03:14','KID-301','學習褲 L 28 片','幼兒用品',349);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-28 14:04:32','KID-301','學習褲 L 28 片','幼兒用品',349);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-07 17:08:46','KID-304','抗菌安撫奶嘴','幼兒用品',199);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-19 16:15:50','FOOD-205','鮮蛋 10 入','食物',85);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-07 10:06:42','KID-304','抗菌安撫奶嘴','幼兒用品',199);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-14 16:55:46','KID-304','抗菌安撫奶嘴','幼兒用品',199);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-02 15:46:21','KID-301','學習褲 L 28 片','幼兒用品',349);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-08 12:12:34','FOOD-201','牛奶 936ml','食物',95);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-06 13:29:15','KID-304','抗菌安撫奶嘴','幼兒用品',199);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-15 21:55:54','FOOD-201','牛奶 936ml','食物',95);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-21 17:53:00','DAIL-101','柔感抽取衛生紙','日常生活用品',129);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-06 15:31:30','FOOD-202','全麥吐司','食物',55);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-29 09:10:24','KID-304','抗菌安撫奶嘴','幼兒用品',199);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-09 21:50:29','KID-304','抗菌安撫奶嘴','幼兒用品',199);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-22 20:31:09','KID-305','防漏學習杯','幼兒用品',259);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-02 18:47:34','KID-302','奶瓶清潔劑','幼兒用品',159);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-02 09:37:30','KID-303','嬰兒濕紙巾 90 抽','幼兒用品',75);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-06 09:32:05','KID-305','防漏學習杯','幼兒用品',259);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-20 10:43:55','FOOD-201','牛奶 936ml','食物',95);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('幼兒園家長','ME0002','2025-09-29 18:15:37','KID-301','學習褲 L 28 片','幼兒用品',349);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-03 15:42:37','HEALTH-505','益生菌 30 包','健康食品',950);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-30 13:13:42','HEALTH-503','魚油 1000mg 90 粒','健康食品',780);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-09 15:08:42','HEALTH-502','綜合維他命 60 粒','健康食品',520);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-11 21:59:04','HEALTH-504','BCAA 胺基酸粉 300g','健康食品',890);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-19 10:04:34','FIT-405','跳繩培林款','健身用品',329);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-05 14:56:04','FIT-403','瑜珈墊 6mm','健身用品',599);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-10 11:28:53','FOOD-203','雞胸肉真空包','食物',75);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-20 21:41:33','HEALTH-503','魚油 1000mg 90 粒','健康食品',780);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-10 19:06:56','FIT-405','跳繩培林款','健身用品',329);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-29 10:47:35','FIT-401','彈力帶組','健身用品',399);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-20 12:45:21','FIT-403','瑜珈墊 6mm','健身用品',599);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-17 16:16:57','FIT-403','瑜珈墊 6mm','健身用品',599);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-03 19:27:53','DAIL-101','柔感抽取衛生紙','日常生活用品',129);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-11 21:08:40','FIT-401','彈力帶組','健身用品',399);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-24 16:35:45','DAIL-102','洗碗精補充包','日常生活用品',79);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-04 10:56:44','FIT-401','彈力帶組','健身用品',399);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-02 14:37:35','DAIL-105','洗衣精 2kg','日常生活用品',189);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-02 13:23:57','FIT-402','握力器 2 入','健身用品',299);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-29 14:13:43','DAIL-101','柔感抽取衛生紙','日常生活用品',129);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-12 21:35:56','FIT-401','彈力帶組','健身用品',399);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-24 11:59:59','FOOD-205','鮮蛋 10 入','食物',85);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-26 21:11:56','FIT-402','握力器 2 入','健身用品',299);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-24 14:50:59','FIT-402','握力器 2 入','健身用品',299);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-09 11:50:44','FIT-402','握力器 2 入','健身用品',299);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-28 16:14:12','FIT-401','彈力帶組','健身用品',399);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-12 13:52:50','FOOD-204','生鮮香蕉 1 串','食物',49);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-01 19:12:25','FOOD-202','全麥吐司','食物',55);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-25 13:22:41','FIT-401','彈力帶組','健身用品',399);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-11 09:07:56','HEALTH-505','益生菌 30 包','健康食品',950);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健身族','ME0003','2025-09-19 13:02:06','DAIL-102','洗碗精補充包','日常生活用品',79);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-24 21:20:27','FOOD-203','雞胸肉真空包','食物',75);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-04 15:57:36','FOOD-205','鮮蛋 10 入','食物',85);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-23 15:00:33','DAIL-101','柔感抽取衛生紙','日常生活用品',129);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-22 20:47:47','FOOD-205','鮮蛋 10 入','食物',85);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-14 10:42:58','FOOD-203','雞胸肉真空包','食物',75);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-22 10:46:57','DAIL-103','濕紙巾 80 抽','日常生活用品',65);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-22 15:20:25','DAIL-103','濕紙巾 80 抽','日常生活用品',65);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-05 12:26:42','FOOD-205','鮮蛋 10 入','食物',85);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-20 18:19:25','FOOD-202','全麥吐司','食物',55);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-10 13:13:27','FOOD-201','牛奶 936ml','食物',95);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-21 14:29:28','FOOD-205','鮮蛋 10 入','食物',85);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-17 16:50:57','DAIL-102','洗碗精補充包','日常生活用品',79);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-22 10:18:32','FOOD-202','全麥吐司','食物',55);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-11 10:52:48','FOOD-205','鮮蛋 10 入','食物',85);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-08 21:12:09','DAIL-103','濕紙巾 80 抽','日常生活用品',65);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-16 18:54:49','DAIL-102','洗碗精補充包','日常生活用品',79);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-29 19:36:12','DAIL-104','廚房紙巾 6 捲','日常生活用品',119);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-16 15:15:09','FOOD-204','生鮮香蕉 1 串','食物',49);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-29 21:55:49','FOOD-201','牛奶 936ml','食物',95);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-08 11:51:44','FOOD-204','生鮮香蕉 1 串','食物',49);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-18 12:58:54','FOOD-201','牛奶 936ml','食物',95);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-26 16:42:33','DAIL-102','洗碗精補充包','日常生活用品',79);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-11 21:57:28','FOOD-205','鮮蛋 10 入','食物',85);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-14 17:28:57','FOOD-205','鮮蛋 10 入','食物',85);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-15 13:48:15','DAIL-104','廚房紙巾 6 捲','日常生活用品',119);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-25 21:33:31','FOOD-203','雞胸肉真空包','食物',75);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-15 10:45:18','FOOD-203','雞胸肉真空包','食物',75);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-11 17:05:08','DAIL-103','濕紙巾 80 抽','日常生活用品',65);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-23 11:45:13','DAIL-104','廚房紙巾 6 捲','日常生活用品',119);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('家庭主婦',NULL,'2025-09-11 17:29:26','DAIL-104','廚房紙巾 6 捲','日常生活用品',119);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-13 21:37:44','HEALTH-504','BCAA 胺基酸粉 300g','健康食品',890);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-13 16:00:22','HEALTH-505','益生菌 30 包','健康食品',950);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-28 15:34:47','HEALTH-504','BCAA 胺基酸粉 300g','健康食品',890);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-29 12:31:14','FIT-405','跳繩培林款','健身用品',329);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-01 15:21:42','HEALTH-504','BCAA 胺基酸粉 300g','健康食品',890);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-24 11:53:29','FIT-404','蛋白搖搖杯 700ml','健身用品',249);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-18 09:58:25','DAIL-105','洗衣精 2kg','日常生活用品',189);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-03 19:27:08','FIT-401','彈力帶組','健身用品',399);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-02 13:24:20','FOOD-202','全麥吐司','食物',55);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-11 21:56:24','HEALTH-503','魚油 1000mg 90 粒','健康食品',780);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-09 10:30:01','HEALTH-504','BCAA 胺基酸粉 300g','健康食品',890);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-12 12:41:04','FIT-401','彈力帶組','健身用品',399);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-25 09:15:12','FOOD-201','牛奶 936ml','食物',95);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-05 12:08:30','FOOD-205','鮮蛋 10 入','食物',85);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-07 16:44:16','FIT-405','跳繩培林款','健身用品',329);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-20 18:47:45','FOOD-202','全麥吐司','食物',55);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-10 10:37:01','HEALTH-502','綜合維他命 60 粒','健康食品',520);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-22 15:25:45','DAIL-105','洗衣精 2kg','日常生活用品',189);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-23 19:15:06','HEALTH-505','益生菌 30 包','健康食品',950);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-28 19:38:51','FIT-403','瑜珈墊 6mm','健身用品',599);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-26 09:22:34','HEALTH-505','益生菌 30 包','健康食品',950);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-03 17:41:21','HEALTH-503','魚油 1000mg 90 粒','健康食品',780);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-27 16:06:27','HEALTH-504','BCAA 胺基酸粉 300g','健康食品',890);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-23 11:27:11','DAIL-104','廚房紙巾 6 捲','日常生活用品',119);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-20 21:58:34','FIT-403','瑜珈墊 6mm','健身用品',599);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-14 20:37:17','FOOD-204','生鮮香蕉 1 串','食物',49);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-27 10:17:56','HEALTH-502','綜合維他命 60 粒','健康食品',520);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-19 18:42:24','HEALTH-504','BCAA 胺基酸粉 300g','健康食品',890);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-28 14:11:31','HEALTH-504','BCAA 胺基酸粉 300g','健康食品',890);
-INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES ('健康食品愛好者',NULL,'2025-09-11 13:56:38','HEALTH-503','魚油 1000mg 90 粒','健康食品',780);
+DELETE FROM purchases;
+
+-- Dessert lover (ME0001)
+INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES
+('甜點收藏家','ME0001','2025-09-01 10:15:12','DESS-001','草莓生乳捲','甜點',280),
+('甜點收藏家','ME0001','2025-09-03 16:48:35','DESS-004','馬卡龍 6 入','甜點',220),
+('甜點收藏家','ME0001','2025-09-05 12:05:43','DAIL-101','柔感抽取衛生紙','日常生活用品',129),
+('甜點收藏家','ME0001','2025-09-07 18:26:54','DESS-003','提拉米蘇切片','甜點',120),
+('甜點收藏家','ME0001','2025-09-09 08:55:02','FOOD-201','牛奶 936ml','食物',95),
+('甜點收藏家','ME0001','2025-09-12 14:33:18','DESS-005','巴斯克起司蛋糕','甜點',360),
+('甜點收藏家','ME0001','2025-09-15 19:21:44','DAIL-102','洗碗精補充包','日常生活用品',79),
+('甜點收藏家','ME0001','2025-09-18 17:42:09','DESS-002','芒果奶酪','甜點',95),
+('甜點收藏家','ME0001','2025-09-21 11:08:37','FOOD-205','鮮蛋 10 入','食物',85),
+('甜點收藏家','ME0001','2025-09-24 13:19:58','DESS-001','草莓生乳捲','甜點',280),
+('甜點收藏家','ME0001','2025-09-26 20:41:05','BEV-201','焦糖瑪奇朵','飲料',140),
+('甜點收藏家','ME0001','2025-09-29 09:32:11','DESS-004','馬卡龍 6 入','甜點',220);
+
+-- Family groceries (ME0002)
+INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES
+('幼兒園家長','ME0002','2025-09-02 09:45:33','KID-301','學習褲 L 28 片','幼兒用品',349),
+('幼兒園家長','ME0002','2025-09-04 18:17:12','FOOD-201','牛奶 936ml','食物',95),
+('幼兒園家長','ME0002','2025-09-06 11:58:44','KID-304','抗菌安撫奶嘴','幼兒用品',199),
+('幼兒園家長','ME0002','2025-09-08 15:30:27','FOOD-202','全麥吐司','食物',55),
+('幼兒園家長','ME0002','2025-09-11 19:05:52','DAIL-103','濕紙巾 80 抽','日常生活用品',65),
+('幼兒園家長','ME0002','2025-09-14 13:16:18','KID-305','防漏學習杯','幼兒用品',259),
+('幼兒園家長','ME0002','2025-09-17 20:44:39','FOOD-205','鮮蛋 10 入','食物',85),
+('幼兒園家長','ME0002','2025-09-20 10:28:06','FOOD-207','家庭號優格','食物',150),
+('幼兒園家長','ME0002','2025-09-23 16:12:54','KID-301','學習褲 L 28 片','幼兒用品',349),
+('幼兒園家長','ME0002','2025-09-25 09:22:10','DAIL-102','洗碗精補充包','日常生活用品',79),
+('幼兒園家長','ME0002','2025-09-27 18:49:37','FOOD-201','牛奶 936ml','食物',95),
+('幼兒園家長','ME0002','2025-09-30 21:04:51','KID-304','抗菌安撫奶嘴','幼兒用品',199);
+
+-- Fitness enthusiast (ME0003)
+INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES
+('健身族','ME0003','2025-09-01 07:12:09','FIT-401','彈力帶組','健身用品',399),
+('健身族','ME0003','2025-09-03 18:26:45','HEALTH-503','魚油 1000mg 90 粒','健康食品',780),
+('健身族','ME0003','2025-09-06 12:39:58','FIT-403','瑜珈墊 6mm','健身用品',599),
+('健身族','ME0003','2025-09-08 20:14:22','FIT-405','跳繩培林款','健身用品',329),
+('健身族','ME0003','2025-09-11 09:51:03','HEALTH-504','BCAA 胺基酸粉 300g','健康食品',890),
+('健身族','ME0003','2025-09-14 17:37:29','FIT-404','蛋白搖搖杯 700ml','健身用品',249),
+('健身族','ME0003','2025-09-17 19:08:14','FIT-402','壓力護膝','健身用品',520),
+('健身族','ME0003','2025-09-20 08:25:42','HEALTH-502','綜合維他命 60 粒','健康食品',520),
+('健身族','ME0003','2025-09-23 18:55:36','FIT-405','跳繩培林款','健身用品',329),
+('健身族','ME0003','2025-09-26 07:43:11','FIT-401','彈力帶組','健身用品',399),
+('健身族','ME0003','2025-09-28 13:27:05','HEALTH-505','益生菌 30 包','健康食品',950),
+('健身族','ME0003','2025-09-30 18:10:59','FIT-406','握力訓練器','健身用品',450);
+
+-- Home manager (unregistered)
+INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES
+('家庭主婦',NULL,'2025-09-01 09:25:44','HOM-201','玻璃保鮮盒組','居家用品',360),
+('家庭主婦',NULL,'2025-09-03 14:18:09','DAIL-104','廚房紙巾 6 捲','日常生活用品',119),
+('家庭主婦',NULL,'2025-09-05 11:42:20','FOOD-204','生鮮香蕉 1 串','食物',49),
+('家庭主婦',NULL,'2025-09-07 16:39:11','DAIL-102','洗碗精補充包','日常生活用品',79),
+('家庭主婦',NULL,'2025-09-10 13:13:27','FOOD-201','牛奶 936ml','食物',95),
+('家庭主婦',NULL,'2025-09-12 18:55:08','HOM-202','衣物柔軟精','居家用品',220),
+('家庭主婦',NULL,'2025-09-15 20:02:43','DAIL-103','濕紙巾 80 抽','日常生活用品',65),
+('家庭主婦',NULL,'2025-09-18 11:44:59','FOOD-205','鮮蛋 10 入','食物',85),
+('家庭主婦',NULL,'2025-09-21 17:26:18','HOM-203','香氛擴香補充瓶','居家用品',320),
+('家庭主婦',NULL,'2025-09-24 19:33:31','DAIL-101','柔感抽取衛生紙','日常生活用品',129),
+('家庭主婦',NULL,'2025-09-27 08:41:06','FOOD-202','全麥吐司','食物',55),
+('家庭主婦',NULL,'2025-09-29 22:18:54','DAIL-106','多效洗衣球 30 顆','日常生活用品',259);
+
+-- Wellness gourmet (unregistered)
+INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES
+('健康食品愛好者',NULL,'2025-09-02 10:08:21','HEALTH-507','植萃膠原蛋白粉','健康食品',980),
+('健康食品愛好者',NULL,'2025-09-04 18:22:47','HEALTH-503','魚油 1000mg 90 粒','健康食品',780),
+('健康食品愛好者',NULL,'2025-09-06 12:34:10','FOOD-208','有機藍莓','有機蔬果',320),
+('健康食品愛好者',NULL,'2025-09-08 09:55:39','HEALTH-504','BCAA 胺基酸粉 300g','健康食品',890),
+('健康食品愛好者',NULL,'2025-09-11 14:48:02','HEALTH-502','綜合維他命 60 粒','健康食品',520),
+('健康食品愛好者',NULL,'2025-09-14 17:09:55','FOOD-209','無糖優格禮盒','健康食品',420),
+('健康食品愛好者',NULL,'2025-09-17 19:37:21','HEALTH-508','植物性蛋白飲','健康食品',160),
+('健康食品愛好者',NULL,'2025-09-20 08:25:44','FOOD-210','發芽糙米','健康食品',240),
+('健康食品愛好者',NULL,'2025-09-23 18:51:02','HEALTH-505','益生菌 30 包','健康食品',950),
+('健康食品愛好者',NULL,'2025-09-26 11:22:19','HEALTH-504','BCAA 胺基酸粉 300g','健康食品',890),
+('健康食品愛好者',NULL,'2025-09-28 20:31:47','FOOD-211','冷壓橄欖油','健康食品',520),
+('健康食品愛好者',NULL,'2025-09-30 09:42:33','HEALTH-509','舒眠草本茶','健康食品',320);
+
+-- October 2025 supplemental transactions (through 10/10)
+INSERT INTO purchases (member_label, mall_member_id, purchased_at, product_id, product_name, category, price) VALUES
+('甜點收藏家','ME0001','2025-10-03 14:21:55','DESS-006','栗子蒙布朗塔','甜點',320),
+('甜點收藏家','ME0001','2025-10-07 18:05:12','BEV-202','伯爵奶茶拿鐵','飲料',120),
+('幼兒園家長','ME0002','2025-10-02 09:45:33','KID-306','幼兒成長維他命','幼兒用品',420),
+('幼兒園家長','ME0002','2025-10-09 20:18:47','FOOD-207','家庭號優格','食物',150),
+('健身族','ME0003','2025-10-05 11:25:08','FIT-406','握力訓練器','健身用品',450),
+('健身族','ME0003','2025-10-10 07:42:19','HEALTH-506','能量補給果凍','健康食品',120),
+('家庭主婦',NULL,'2025-10-04 16:32:58','DAIL-106','多效洗衣球 30 顆','日常生活用品',259),
+('家庭主婦',NULL,'2025-10-08 13:11:03','FOOD-206','調味杏仁豆','食物',135),
+('健康食品愛好者',NULL,'2025-10-01 10:08:21','HEALTH-510','植萃酵素飲','健康食品',760),
+('健康食品愛好者',NULL,'2025-10-06 18:45:39','HEALTH-508','植物性蛋白飲','健康食品',160);
+
 COMMIT;
