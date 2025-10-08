@@ -4,6 +4,9 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Iterable
 
+import random
+from secrets import token_hex
+
 from flask import Blueprint, jsonify, request, url_for
 
 from ..ai import GeminiService, GeminiUnavailableError
@@ -89,26 +92,86 @@ def _build_background_url(template_id: str) -> str:
     return url_for("static", filename=f"images/ads/{filename}", _external=True)
 
 
+def _random_line(options: Iterable[str], fallback: str) -> str:
+    pool = [option for option in options if option]
+    if not pool:
+        pool = [fallback]
+    return random.choice(pool)
+
+
+def _unique_highlight(options: Iterable[str], fallback: str) -> str:
+    base = _random_line(options, fallback)
+    code = token_hex(2).upper()
+    if "{code}" in base:
+        return base.format(code=code)
+    return f"{base}｜限時代碼 {code}"
+
+
 def _fallback_copy(audience: str) -> Dict[str, str]:
     audience_key = (audience or "guest").strip().lower()
     if audience_key == "member":
         return {
-            "headline": "會員尊享限定禮遇",
-            "subheading": "立即憑會員編號兌換專屬好禮",
-            "highlight": "感謝長期支持，館內人氣品牌同步加碼折扣，錯過不再。",
+            "headline": _random_line(
+                ["會員尊享限定禮遇", "會員專屬加碼回饋"],
+                "會員尊享限定禮遇",
+            ),
+            "subheading": _random_line(
+                [
+                    "立即憑會員編號兌換專屬好禮",
+                    "點數同步加碼，尊享多重優惠",
+                ],
+                "立即憑會員編號兌換專屬好禮",
+            ),
+            "highlight": _unique_highlight(
+                [
+                    "感謝長期支持，館內人氣品牌同步加碼折扣，錯過不再",
+                    "憑會員卡消費即享加碼禮，人氣品牌同步回饋",
+                ],
+                "感謝長期支持，館內人氣品牌同步加碼折扣，錯過不再。",
+            ),
             "cta": "立即領取會員獎勵",
         }
     if audience_key == "new":
         return {
-            "headline": "歡迎加入星悅商場",
-            "subheading": "首次來店享入會好禮與免費體驗",
-            "highlight": "填寫基本資料即可獲得甜點招待券，還有多項入會驚喜等你探索。",
+            "headline": _random_line(
+                ["歡迎加入星悅商場", "首次來店，專屬禮遇立即開啟"],
+                "歡迎加入星悅商場",
+            ),
+            "subheading": _random_line(
+                [
+                    "首次來店享入會好禮與免費體驗",
+                    "現場專人協助入會，立即解鎖多重驚喜",
+                ],
+                "首次來店享入會好禮與免費體驗",
+            ),
+            "highlight": _unique_highlight(
+                [
+                    "填寫基本資料即可獲得甜點招待券，還有多項入會驚喜等你探索",
+                    "入會即送咖啡兌換券與體驗課程，一次擁有多重禮遇",
+                ],
+                "填寫基本資料即可獲得甜點招待券，還有多項入會驚喜等你探索。",
+            ),
             "cta": "立即啟動迎賓禮",
         }
     return {
-        "headline": "加入會員 解鎖專屬優惠",
-        "subheading": "立即完成註冊，暢享館內好康",
-        "highlight": "新朋友限定！加入即可領取甜點兌換券與全館 95 折購物禮遇。",
+        "headline": _random_line(
+            ["加入會員 解鎖專屬優惠", "加入會員即享限定回饋"],
+            "加入會員 解鎖專屬優惠",
+        ),
+        "subheading": _random_line(
+            [
+                "立即完成註冊，暢享館內好康",
+                "綁定會員即可獲得生日禮與專屬點數",
+            ],
+            "立即完成註冊，暢享館內好康",
+        ),
+        "highlight": _unique_highlight(
+            [
+                "新朋友限定！加入即可領取甜點兌換券與全館 95 折購物禮遇",
+                "入會送迎賓點數與專屬折扣券，立即行動",
+            ],
+            "新朋友限定！加入即可領取甜點兌換券與全館 95 折購物禮遇。",
+        ),
         "cta": "立即加入會員",
     }
 
