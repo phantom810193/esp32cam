@@ -19,12 +19,15 @@ _LOGGER = logging.getLogger(__name__)
 
 MEMBER_CODE_OVERRIDES: dict[str, str] = {}
 
+NEW_GUEST_MEMBER_ID = "MEM8CCB842A77"
+
 SEED_MEMBER_IDS: tuple[str, ...] = (
     "MEME0383FE3AA",
     "MEM692FFD0824",
     "MEMFITNESS2025",
     "MEMHOMECARE2025",
     "MEMHEALTH2025",
+    NEW_GUEST_MEMBER_ID,
 )
 
 SEED_PROFILE_LABELS: tuple[str, ...] = (
@@ -33,6 +36,7 @@ SEED_PROFILE_LABELS: tuple[str, ...] = (
     "fitness-enthusiast",
     "home-manager",
     "wellness-gourmet",
+    "brand-new-guest",
 )
 
 
@@ -162,6 +166,54 @@ _SEPTEMBER_2025_PURCHASE_CONFIG: dict[str, _PersonaPurchaseConfig] = {
         ],
     },
 }
+
+
+def _generate_monthly_records(
+    *,
+    member_code: str,
+    config: _PersonaPurchaseConfig,
+    seed_key: str,
+    code_suffix: str,
+    year: int,
+    month: int,
+    day_upper: int,
+    count: int,
+) -> list[dict[str, float | str]]:
+    rng = random.Random(seed_key)
+    minute_choices = (0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55)
+
+    records: list[dict[str, float | str]] = []
+    for index in range(count):
+        choice = rng.choice(config["items"])
+        price_range = choice["price"]
+        low, high = int(price_range[0]), int(price_range[1])
+        if high <= low:
+            unit_price = float(low)
+        else:
+            step = 5 if high - low >= 5 else 1
+            unit_price = float(rng.randrange(low, high + 1, step))
+
+        purchase_time = datetime(year, month, 1) + timedelta(
+            days=rng.randint(0, max(0, day_upper - 1)),
+            hours=rng.randint(8, 21),
+            minutes=rng.choice(minute_choices),
+        )
+
+        records.append(
+            {
+                "member_code": member_code,
+                "product_category": choice["category"],
+                "internal_item_code": f"{config['prefix']}-{code_suffix}{index + 1:03d}",
+                "item": choice["item"],
+                "purchased_at": purchase_time.strftime("%Y-%m-%d %H:%M"),
+                "unit_price": unit_price,
+                "quantity": 1.0,
+                "total_price": float(round(unit_price, 2)),
+            }
+        )
+
+    records.sort(key=lambda entry: entry["purchased_at"])
+    return records
 
 
 @dataclass
@@ -1331,6 +1383,7 @@ class Database:
             except sqlite3.OperationalError:
                 count = 0
             if count:
+                self._ensure_recent_history()
                 return
 
         sql_path = Path(__file__).resolve().parent / "data" / "mvp.sql"
@@ -1424,6 +1477,22 @@ class Database:
             occupation=None,
         )
 
+        self._seed_member_profile(
+            profile_label="brand-new-guest",
+            name="新客專屬體驗",
+            member_id=None,
+            mall_member_id="",
+            member_status="未入會",
+            joined_at=None,
+            points_balance=0,
+            gender=None,
+            birth_date=None,
+            phone=None,
+            email=None,
+            address=None,
+            occupation=None,
+        )
+
 
         with self._connect() as conn:
             conn.executescript("\n".join(insert_statements))
@@ -1433,6 +1502,7 @@ class Database:
                 "MEMFITNESS2025": "faces/fitness_enthusiast.jpg",
                 "MEMHOMECARE2025": "faces/home_manager.jpg",
                 "MEMHEALTH2025": "faces/wellness_gourmet.jpg",
+                NEW_GUEST_MEMBER_ID: "faces/新顧客.png",
             }
             for member_id, filename in face_map.items():
                 conn.execute(
@@ -1446,6 +1516,8 @@ class Database:
             if not template:
                 continue
             self._seed_member_history(member_id, template)
+
+        self._ensure_new_guest_member()
 
         self._normalize_placeholder_profiles()
 
@@ -1482,43 +1554,127 @@ class Database:
         if not config:
             return
 
-        rng = random.Random(f"{member_id}-2025-09")
         member_code = self.get_member_code(member_id)
-        minute_choices = (0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55)
-        september_records: list[dict[str, float | str]] = []
-
-        for index in range(50):
-            choice = rng.choice(config["items"])
-            price_range = choice["price"]
-            low, high = int(price_range[0]), int(price_range[1])
-            if high <= low:
-                unit_price = float(low)
-            else:
-                step = 5 if high - low >= 5 else 1
-                unit_price = float(rng.randrange(low, high + 1, step))
-
-            purchase_time = datetime(2025, 9, 1) + timedelta(
-                days=rng.randint(0, 29),
-                hours=rng.randint(8, 21),
-                minutes=rng.choice(minute_choices),
-            )
-
-            september_records.append(
-                {
-                    "member_code": member_code,
-                    "product_category": choice["category"],
-                    "internal_item_code": f"{config['prefix']}-S25{index + 1:03d}",
-                    "item": choice["item"],
-                    "purchased_at": purchase_time.strftime("%Y-%m-%d %H:%M"),
-                    "unit_price": unit_price,
-                    "quantity": 1.0,
-                    "total_price": float(round(unit_price, 2)),
-                }
-            )
-
-        september_records.sort(key=lambda entry: entry["purchased_at"])
+        september_records = _generate_monthly_records(
+            member_code=member_code,
+            config=config,
+            seed_key=f"{member_id}-2025-09",
+            code_suffix="S25",
+            year=2025,
+            month=9,
+            day_upper=30,
+            count=50,
+        )
         for record in september_records:
             self.add_purchase(member_id, **record)
+
+        self._ensure_month_history(
+            member_id,
+            config=config,
+            year=2025,
+            month=10,
+            day_upper=10,
+            count=10,
+            code_suffix="O25",
+        )
+
+    def _ensure_month_history(
+        self,
+        member_id: str,
+        *,
+        config: _PersonaPurchaseConfig,
+        year: int,
+        month: int,
+        day_upper: int,
+        count: int,
+        code_suffix: str,
+    ) -> None:
+        if count <= 0:
+            return
+
+        month_key = f"{year}-{month:02d}"
+        like_pattern = f"{month_key}%"
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS total FROM purchases WHERE member_id = ? AND purchased_at LIKE ?",
+                (member_id, like_pattern),
+            ).fetchone()
+            existing_total = int(row["total"]) if row is not None and "total" in row.keys() else int(row[0]) if row else 0
+
+            existing_codes = {
+                str(row["internal_item_code"])
+                for row in conn.execute(
+                    "SELECT internal_item_code FROM purchases WHERE member_id = ? AND purchased_at LIKE ?",
+                    (member_id, like_pattern),
+                ).fetchall()
+            }
+
+        missing = count - existing_total
+        if missing <= 0:
+            return
+
+        member_code = self.get_member_code(member_id) or member_id
+        seed_key = f"{member_id}-{month_key}"
+        candidate_records = _generate_monthly_records(
+            member_code=member_code,
+            config=config,
+            seed_key=seed_key,
+            code_suffix=code_suffix,
+            year=year,
+            month=month,
+            day_upper=day_upper,
+            count=count,
+        )
+
+        for record in candidate_records:
+            internal_code = str(record.get("internal_item_code", ""))
+            if internal_code in existing_codes:
+                continue
+            self.add_purchase(member_id, **record)
+            existing_codes.add(internal_code)
+            missing -= 1
+            if missing <= 0:
+                break
+
+    def _ensure_recent_history(self) -> None:
+        for member_id, config in _SEPTEMBER_2025_PURCHASE_CONFIG.items():
+            if member_id == NEW_GUEST_MEMBER_ID:
+                continue
+            self._ensure_month_history(
+                member_id,
+                config=config,
+                year=2025,
+                month=10,
+                day_upper=10,
+                count=10,
+                code_suffix="O25",
+            )
+
+    def _ensure_new_guest_member(self) -> None:
+        import numpy as np
+
+        encoding = FaceEncoding(
+            np.zeros(128, dtype=np.float32),
+            signature=NEW_GUEST_MEMBER_ID,
+            source="seed",
+        )
+        payload = json.dumps(encoding.to_jsonable(), ensure_ascii=False)
+
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO members (member_id, encoding_json) VALUES (?, ?)",
+                (NEW_GUEST_MEMBER_ID, payload),
+            )
+            conn.execute(
+                """
+                UPDATE member_profiles
+                SET member_id = ?,
+                    first_image_filename = COALESCE(first_image_filename, 'faces/新顧客.png')
+                WHERE profile_label = 'brand-new-guest'
+                """,
+                (NEW_GUEST_MEMBER_ID,),
+            )
+            conn.commit()
 
     def _seed_member_profile(
         self,
