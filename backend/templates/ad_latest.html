@@ -149,36 +149,19 @@
                     </div>
                     <div class="tab-content-2">
                         <h3 class="hide">歷史消費紀錄</h3>
-                        {% if purchase_months %}
-                            <ul class="page month-pagination" id="history-month-switcher" aria-label="歷史消費紀錄月份切換">
-                                {% for month in purchase_months %}
-                                    <li class="{% if loop.first %}active{% endif %}">
-                                        <a href="#" data-month-index="{{ loop.index0 }}" title="{{ month.label }}">{{ month.label }}</a>
-                                    </li>
-                                {% endfor %}
-                            </ul>
-                        {% endif %}
-                        <table class="history-table">
-                            <thead>
-                                <tr>
-                                    <th>消費日期</th>
-                                    <th>商品名稱</th>
-                                    <th>數量</th>
-                                    <th>總金額</th>
-                                </tr>
-                            </thead>
-                            <tbody id="history-rows">
-                                {% if purchase_months %}
-                                    {% for month in purchase_months %}
-                                        {% for purchase in month.purchases %}
-                                            <tr data-month-index="{{ loop.parent.index0 }}"{% if not loop.parent.first %} class="is-hidden"{% endif %}>
-                                                <td>{{ purchase.purchased_at or '--' }}</td>
-                                                <td>{{ purchase.item or '--' }}</td>
-                                                <td>{{ purchase.quantity or 0 }}</td>
-                                                <td>{% if purchase.total_price is not none %}NT${{ '%.0f' % purchase.total_price }}{% else %}--{% endif %}</td>
-                                            </tr>
-                                        {% endfor %}
-                                    {% endfor %}
+                                  {% if purchase_months %}
+                                      {% set month_index = -1 %}
+                                      {% for month in purchase_months %}
+                                          {% set month_index = month_index + 1 %}
+                                          {% for purchase in (month.purchases or []) %}
+                                              <tr data-month-index="{{ month_index }}"{% if month_index > 0 %} class="is-hidden"{% endif %}>
+                                                  <td>{{ purchase.purchased_at or '--' }}</td>
+                                                  <td>{{ purchase.item or '--' }}</td>
+                                                  <td>{{ purchase.quantity or 0 }}</td>
+                                                  <td>{% if purchase.total_price is not none %}NT${{ '%.0f' % purchase.total_price }}{% else %}--{% endif %}</td>
+                                              </tr>
+                                          {% endfor %}
+                                      {% endfor %}
                                 {% elif purchases %}
                                     {% for purchase in purchases[:10] %}
                                     <tr>
