@@ -7,7 +7,10 @@ import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Iterable, Mapping, Optional
 
-import google.generativeai as genai
+try:  # pragma: no cover - allow running without the Gemini SDK installed
+    import google.generativeai as genai  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - provide graceful fallback
+    genai = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type hints only
     from .advertising import PurchaseInsights
@@ -49,13 +52,17 @@ class GeminiService:
         self._api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         self._timeout = timeout
 
-        self._model: Optional[genai.GenerativeModel] = None
+        self._model: Optional[Any] = None
         self._init_error: Optional[str] = None
 
     # ------------------------------------------------------------------
-    def _ensure_model(self) -> genai.GenerativeModel:
+    def _ensure_model(self) -> Any:
         if self._model is not None:
             return self._model
+
+        if genai is None:
+            self._init_error = "google.generativeai package is not installed"
+            raise GeminiUnavailableError(self._init_error)
 
         if not self._api_key:
             self._init_error = "GEMINI_API_KEY is not configured"
@@ -83,6 +90,8 @@ class GeminiService:
         if self._model is not None:
             return True
         if self._init_error:
+            return False
+        if genai is None:
             return False
         return bool(self._api_key)
 
@@ -129,14 +138,12 @@ class GeminiService:
         if predicted:
             product_name = str(predicted.get("product_name", "即將主推商品"))
             category_label = str(predicted.get("category_label", "人氣品類"))
-            probability = predicted.get("probability_percent")
             price = predicted.get("price")
-            probability_text = f"預估購買機率約 {probability}% " if probability is not None else ""
             if isinstance(price, (int, float)):
                 price_text = f"建議售價 NT${int(round(price))}"
             else:
                 price_text = ""
-            prediction_line = f"目標推播商品：{product_name}（類別：{category_label}）。 {probability_text}{price_text}".strip()
+            prediction_line = f"目標推播商品：{product_name}（類別：{category_label}）。 {price_text}".strip()
 
         prompt = f"""
 你是一位零售商場的廣告文案專家，目標是為{audience_label}生成 3 段式的繁體中文廣告內容。{objective_line}

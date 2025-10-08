@@ -606,6 +606,10 @@ span~#tab>div:first-of-type,
     display: none;
 }
 
+.is-hidden {
+    display: none !important;
+}
+
 .hight{
     padding: 4px 16px;
     border-radius: 8px;

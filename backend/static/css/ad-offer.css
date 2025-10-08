@@ -19,7 +19,7 @@ body {
   justify-content: center;
   background: linear-gradient(135deg, #0f172a 0%, #312e81 60%, #f59e0b 100%);
   color: #f8fafc;
-  padding: 3rem 1.5rem;
+  padding: 0;
 }
 
 .offer {
