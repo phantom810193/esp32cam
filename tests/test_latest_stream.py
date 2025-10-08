@@ -1,4 +1,6 @@
 import json
+import os
+import sqlite3
 import sys
 import types
 from pathlib import Path
@@ -7,8 +9,19 @@ from uuid import uuid4
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+TEST_DB_PATH = ROOT / "backend" / "data" / "test_latest.sqlite3"
+os.environ.setdefault("DB_PATH", str(TEST_DB_PATH))
+try:
+    TEST_DB_PATH.unlink()
+except FileNotFoundError:
+    pass
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+# Imports that rely on the project root being on sys.path
+from backend.advertising import CTA_JOIN_MEMBER, TEMPLATE_IMAGE_BY_ID, build_ad_context
+from backend.ai import AdCreative
+from backend.database import NEW_GUEST_MEMBER_ID, MemberProfile, Purchase
 
 # ---------------------------------------------------------------------------
 # Stub the Google Gemini SDK to avoid network calls during tests.
@@ -37,16 +50,22 @@ google_stub.generativeai = generativeai_stub
 sys.modules.setdefault("google", google_stub)
 sys.modules.setdefault("google.generativeai", generativeai_stub)
 
-from backend.app import app, database
+from backend.app import _prepare_member_ad_context, _synthetic_guest_creative, app, database
 
 
 @pytest.fixture()
 def client():
     app.config["TESTING"] = True
-    database.cleanup_upload_events(keep_latest=0)
+    try:
+        database.cleanup_upload_events(keep_latest=0)
+    except sqlite3.OperationalError:
+        pass
     with app.test_client() as test_client:
         yield test_client
-    database.cleanup_upload_events(keep_latest=0)
+    try:
+        database.cleanup_upload_events(keep_latest=0)
+    except sqlite3.OperationalError:
+        pass
 
 
 def _parse_sse_payload(body: str) -> dict:
@@ -54,6 +73,144 @@ def _parse_sse_payload(body: str) -> dict:
         if line.startswith("data: "):
             return json.loads(line[len("data: ") :])
     raise AssertionError("SSE payload did not contain data line")
+
+
+def test_guest_cta_links_to_ad_page():
+    profile = MemberProfile(
+        profile_id=1,
+        profile_label="wellness-gourmet",
+        name="未註冊客戶",
+        member_id="MEMHEALTH2025",
+        mall_member_id=None,
+        member_status=None,
+        joined_at=None,
+        points_balance=None,
+        gender=None,
+        birth_date=None,
+        phone=None,
+        email=None,
+        address=None,
+        occupation=None,
+        first_image_filename=None,
+    )
+    purchase = Purchase(
+        member_id="MEMHEALTH2025",
+        member_code="",
+        product_category="健康食品",
+        internal_item_code="SKU-0001",
+        item="高纖燕麥片",
+        purchased_at="2025-09-01 10:00",
+        unit_price=360.0,
+        quantity=1.0,
+        total_price=360.0,
+    )
+
+    context = build_ad_context(
+        "MEMHEALTH2025",
+        [purchase],
+        profile=profile,
+        prediction_items=[],
+        audience="guest",
+    )
+
+    assert context.cta_href == "/ad/MEMHEALTH2025/offer"
+    assert context.cta_href.startswith("/ad/")
+    assert context.cta_text in {CTA_JOIN_MEMBER, "立即加入會員"}
+
+
+def test_returning_guest_ad_uses_prediction_window(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _StubGemini:
+        @property
+        def can_generate_ads(self) -> bool:  # pragma: no cover - accessor mirrors production attribute
+            return True
+
+        def generate_ad_copy(self, member_id, purchases, *, insights, predicted, audience):  # noqa: D401, ANN001
+            captured["member_id"] = member_id
+            captured["purchases"] = list(purchases)
+            captured["predicted"] = dict(predicted)
+            captured["audience"] = audience
+            return AdCreative(
+                headline="客製化健康補給推薦",
+                subheading="鎖定你的高機率回購品項",
+                highlight="會員加入再享限定優惠，健康補給好禮帶回家",
+                cta="立即加入會員",
+            )
+
+    monkeypatch.setattr("backend.app.gemini", _StubGemini())
+
+    with app.app_context():
+        app.config.setdefault("SERVER_NAME", "testserver.local")
+        with app.test_request_context():
+            context, _ = _prepare_member_ad_context("MEMHEALTH2025")
+
+    assert captured["member_id"] == "MEMHEALTH2025"
+    assert captured["audience"] == "guest"
+    assert context["predicted_candidates"], "預期應帶入推薦候選清單"
+    assert context.get("predicted"), "預期應包含最高機率商品資訊"
+    assert context["predicted"]["product_name"] == captured["predicted"].get("product_name")
+
+    purchase_months = {entry.get("purchased_at", "")[:7] for entry in captured["purchases"]}
+    assert purchase_months, "應提供上一個月的消費資料"
+    assert len(purchase_months) == 1, "Gemini 輸入應鎖定單月的消費紀錄"
+
+
+def test_new_guest_cta_uses_registration_image():
+    profile = MemberProfile(
+        profile_id=2,
+        profile_label="brand-new-guest",
+        name="新客",
+        member_id=NEW_GUEST_MEMBER_ID,
+        mall_member_id="",
+        member_status="未入會",
+        joined_at=None,
+        points_balance=0.0,
+        gender=None,
+        birth_date=None,
+        phone=None,
+        email=None,
+        address=None,
+        occupation=None,
+        first_image_filename=None,
+    )
+
+    context = build_ad_context(
+        NEW_GUEST_MEMBER_ID,
+        [],
+        profile=profile,
+        prediction_items=[],
+        audience="guest",
+    )
+
+    expected_filename = TEMPLATE_IMAGE_BY_ID.get("ME0000", "ME0000.jpg")
+    assert context.cta_href == f"/static/images/ads/{expected_filename}"
+    assert context.cta_text in {CTA_JOIN_MEMBER, "立即加入會員"}
+
+
+def test_new_guest_ad_context_is_blank():
+    with app.app_context():
+        app.config.setdefault("SERVER_NAME", "testserver.local")
+        with app.test_request_context():
+            context, profile = _prepare_member_ad_context(NEW_GUEST_MEMBER_ID)
+
+    assert context["audience"] == "new"
+    assert context["purchases"] == []
+    assert context.get("predicted_candidates") == []
+    assert "predicted" not in context
+    assert profile is None or profile.member_id == NEW_GUEST_MEMBER_ID
+
+
+def test_dashboard_new_guest_has_blank_sections(client):
+    response = client.get(f"/dashboard?member_id={NEW_GUEST_MEMBER_ID}")
+
+    assert response.status_code == 200
+
+    html = response.get_data(as_text=True)
+    assert "<tr data-prediction-row" not in html
+    assert "目前無可用的推薦商品" not in html
+    assert "<tr data-month=" not in html
+    assert "尚未有消費紀錄" not in html
 
 
 def test_latest_stream_emits_latest_event(client):
@@ -87,3 +244,19 @@ def test_latest_stream_rejects_invalid_interval(client):
     assert response.status_code == 400
     payload = response.get_json()
     assert payload == {"error": "Invalid interval"}
+
+
+def test_synthetic_guest_creative_populates_copy():
+    predicted = {
+        "product_name": "健康綠拿鐵",
+        "category_label": "健康飲品",
+        "price": 320,
+        "probability_percent": 74.2,
+    }
+
+    creative = _synthetic_guest_creative(predicted)
+
+    assert creative.headline
+    assert creative.subheading
+    assert creative.highlight
+    assert "加入會員" in (creative.cta or "")
