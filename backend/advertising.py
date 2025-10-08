@@ -1,12 +1,15 @@
 """Business logic to transform database rows into advertisement board payloads."""
 from __future__ import annotations
 
+import random
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime
+from secrets import token_hex
 from typing import Any, Iterable, Literal, Mapping, Optional, Sequence
 
 from .ai import AdCreative
-from .database import MemberProfile, Purchase
+from .database import MemberProfile, NEW_GUEST_MEMBER_ID, Purchase
 
 PROFILE_SEGMENT_BY_LABEL: dict[str, str] = {
     "dessert-lover": "dessert",
@@ -33,6 +36,57 @@ DEFAULT_TEMPLATE_ID = "ME0003"
 CTA_JOIN_MEMBER = "立即加入會員解鎖專屬禮遇"
 CTA_MEMBER_OFFER = "會員限定優惠立即領取"
 CTA_DISCOVER = "立即了解活動"
+
+
+def _random_line(options: Sequence[str], fallback: str) -> str:
+    pool = [option for option in options if option]
+    if not pool:
+        pool = [fallback]
+    return random.choice(pool)
+
+
+def _unique_highlight(options: Sequence[str], fallback: str) -> str:
+    base = _random_line(options, fallback)
+    code = token_hex(2).upper()
+    if "{code}" in base:
+        return base.format(code=code)
+    return f"{base}｜限時代碼 {code}"
+
+
+def _parse_purchase_timestamp(value: str) -> datetime:
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return datetime.now()
+
+
+def _build_purchase_months(purchases: Sequence[Purchase]) -> list[dict[str, Any]]:
+    if not purchases:
+        return []
+
+    buckets: defaultdict[tuple[int, int], list[tuple[datetime, Purchase]]] = defaultdict(list)
+    for purchase in purchases:
+        timestamp = _parse_purchase_timestamp(purchase.purchased_at)
+        buckets[(timestamp.year, timestamp.month)].append((timestamp, purchase))
+
+    ordered = sorted(buckets.items(), key=lambda entry: entry[0], reverse=True)
+    months: list[dict[str, Any]] = []
+    for (year, month), entries in ordered[:2]:
+        entries.sort(key=lambda pair: pair[0], reverse=True)
+        months.append(
+            {
+                "label": f"{year}年{month:02d}月",
+                "year": year,
+                "month": month,
+                "purchases": [purchase for _, purchase in entries],
+            }
+        )
+    return months
 
 
 
@@ -75,6 +129,7 @@ class AdContext:
     profile: Mapping[str, Any] | None = None
     timings: Mapping[str, Any] | None = None
     detected_at: str | None = None
+    purchase_months: list[dict[str, Any]] = field(default_factory=list)
 
 
 def analyse_purchase_intent(
@@ -211,8 +266,16 @@ def build_ad_context(
     if cta_override:
         cta_text = cta_override
 
-    if audience in {"guest", "new"}:
-        cta_href = "#register"
+    if audience == "new":
+        register_image = TEMPLATE_IMAGE_BY_ID.get("ME0000", "ME0000.jpg")
+        cta_href = f"/static/images/ads/{register_image}"
+        if cta_text is None:
+            cta_text = CTA_JOIN_MEMBER
+    elif audience == "guest":
+        image_key = template_id if template_id in TEMPLATE_IMAGE_BY_ID else None
+        if not image_key:
+            image_key = "ME0003"
+        cta_href = f"/static/images/ads/{TEMPLATE_IMAGE_BY_ID.get(image_key, TEMPLATE_IMAGE_BY_ID['ME0003'])}"
         if cta_text is None:
             cta_text = CTA_JOIN_MEMBER
     else:
@@ -224,6 +287,13 @@ def build_ad_context(
             cta_text = CTA_MEMBER_OFFER
 
     profile_dict = profile_snapshot or _profile_to_dict(profile)
+
+    if member_id == NEW_GUEST_MEMBER_ID:
+        cta_href = f"/static/images/ads/{TEMPLATE_IMAGE_BY_ID.get('ME0000', 'ME0000.jpg')}"
+        if cta_text is None:
+            cta_text = CTA_JOIN_MEMBER
+
+    purchase_months = _build_purchase_months(purchase_list)
 
     return AdContext(
         member_id=member_id,
@@ -243,6 +313,7 @@ def build_ad_context(
         profile=profile_dict,
         timings=timings,
         detected_at=detected_at,
+        purchase_months=purchase_months,
     )
 
 
@@ -354,12 +425,25 @@ def _fallback_copy(
     predicted: Mapping[str, Any] | None,
 ) -> tuple[str, str, str, Optional[str]]:
     if audience == "new":
-        return (
+        headline = _random_line(
+            ["歡迎光臨星悅商場", "第一次來店，立即享受尊榮體驗"],
             "歡迎光臨！",
-            "第一次來到本店，服務人員將協助你加入會員並介紹今日亮點。",
-            "掃描右下角 QR Code 完成入會，即享迎賓咖啡與 120 點開卡禮。",
-            CTA_JOIN_MEMBER,
         )
+        subheading = _random_line(
+            [
+                "第一次到訪，服務人員將協助完成入會並介紹今日亮點",
+                "帶您快速了解熱門櫃點與入會流程，現場即可啟用禮遇",
+            ],
+            "第一次來到本店，服務人員將協助你加入會員並介紹今日亮點。",
+        )
+        highlight = _unique_highlight(
+            [
+                "掃描右下角 QR Code 完成入會，即享迎賓咖啡與 120 點開卡禮",
+                "入會即可領取甜點兌換券與專屬諮詢席次",
+            ],
+            "掃描右下角 QR Code 完成入會，即享迎賓咖啡與 120 點開卡禮。",
+        )
+        return (headline, subheading, highlight, CTA_JOIN_MEMBER)
 
     product_name = str(predicted.get("product_name")) if predicted and predicted.get("product_name") else None
     price = predicted.get("price") if predicted else None
@@ -371,39 +455,86 @@ def _fallback_copy(
 
     if audience == "guest":
         if product_name:
-            return (
+            headline = _random_line(
+                [
+                    f"{product_name} 限時預留",
+                    f"{product_name} 今日僅此一檔",
+                ],
                 f"{product_name} 限時預留",
-                (
-                    "依照你的上月消費偏好，我們已為你預留熱門商品"
-                    + (f"，{price_text}" if price_text else "")
-                ),
-                f"加入會員即享 {product_name} 首購 85 折，再送迎賓點數！",
-                CTA_JOIN_MEMBER,
             )
-        return (
+            subheading = _random_line(
+                [
+                    "依照你的上月消費偏好，我們已為你預留熱門商品",
+                    "為你保留最愛的熱銷品項，現場即可體驗",
+                ],
+                "依照你的上月消費偏好，我們已為你預留熱門商品",
+            )
+            if price_text:
+                subheading = f"{subheading}，{price_text}"
+            highlight = _unique_highlight(
+                [
+                    f"加入會員即享 {product_name} 首購 85 折，再送迎賓點數",
+                    f"完成入會，{product_name} 立享專屬優惠",
+                ],
+                f"加入會員即享 {product_name} 首購 85 折，再送迎賓點數！",
+            )
+            return (headline, subheading, highlight, CTA_JOIN_MEMBER)
+        headline = _random_line(
+            ["加入會員，開啟專屬禮遇", "立即加入會員解鎖專屬優惠"],
             "加入會員，開啟專屬禮遇",
-            "立即解鎖生日禮、消費回饋與專屬活動席次。",
-            "現在入會送健康輕飲兌換券，掃描螢幕 QR Code 立刻加入！",
-            CTA_JOIN_MEMBER,
         )
+        subheading = _random_line(
+            [
+                "立即解鎖生日禮、消費回饋與專屬活動席次",
+                "入會即可綁定點數回饋，活動席次優先通知",
+            ],
+            "立即解鎖生日禮、消費回饋與專屬活動席次。",
+        )
+        highlight = _unique_highlight(
+            [
+                "現在入會送健康輕飲兌換券，掃描螢幕 QR Code 立刻加入",
+                "入會加碼送甜點飲品券，現場立即兌換",
+            ],
+            "現在入會送健康輕飲兌換券，掃描螢幕 QR Code 立刻加入！",
+        )
+        return (headline, subheading, highlight, CTA_JOIN_MEMBER)
 
     # audience == "member"
     if product_name:
         detail = f"{category_label} 主題推薦"
         if price_text:
             detail = f"{detail}｜{price_text}"
-        return (
+        headline = _random_line(
+            [f"會員專屬 {product_name}", f"{product_name} 會員限定回饋"],
             f"會員專屬 {product_name}",
-            detail,
-            f"今日刷會員卡享 {product_name} 88 折，點數雙倍奉上！",
-            CTA_MEMBER_OFFER,
         )
-    return (
+        highlight = _unique_highlight(
+            [
+                f"今日刷會員卡享 {product_name} 88 折，點數雙倍奉上",
+                f"刷卡加碼點數，{product_name} 現場限量供應",
+            ],
+            f"今日刷會員卡享 {product_name} 88 折，點數雙倍奉上！",
+        )
+        return (headline, detail, highlight, CTA_MEMBER_OFFER)
+    headline = _random_line(
+        ["會員限定驚喜回饋", "會員尊享限定禮遇"],
         "會員限定驚喜回饋",
-        "點數可綁定熱門活動與體驗課程，快來補貨！",
-        "本週消費滿額即送品牌旅行組，櫃點限時加碼中。",
-        CTA_MEMBER_OFFER,
     )
+    subheading = _random_line(
+        [
+            "點數可綁定熱門活動與體驗課程，快來補貨",
+            "消費即可參加品牌限定活動，敬請把握",
+        ],
+        "點數可綁定熱門活動與體驗課程，快來補貨！",
+    )
+    highlight = _unique_highlight(
+        [
+            "本週消費滿額即送品牌旅行組，櫃點限時加碼中",
+            "於專櫃消費滿額享豪華禮遇，再享點數加倍",
+        ],
+        "本週消費滿額即送品牌旅行組，櫃點限時加碼中。",
+    )
+    return (headline, subheading, highlight, CTA_MEMBER_OFFER)
 
 
 def _member_salutation(member_code: str) -> str:

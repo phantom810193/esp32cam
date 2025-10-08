@@ -13,6 +13,7 @@
     {% set timings = payload.get('timings', {}) %}
     {% set predicted = payload.get('predicted', {}) %}
     {% set purchases = payload.get('purchases', []) %}
+    {% set purchase_months = payload.get('purchase_months', []) %}
     {% set first_purchase = purchases[0] if purchases else None %}
     {% set template_images = {
         'ME0000': url_for('static', filename='images/ads/ME0000.jpg'),
@@ -145,14 +146,18 @@
                                 <li class="btn"><a href="{{ initial_cta_href or '#' }}" id="cta-link"{% if initial_cta_href %} target="_blank" rel="noopener"{% else %} aria-disabled="true" class="is-disabled"{% endif %} title="開啟個人化廣告頁">{{ payload.get('cta_text', '檢視生成廣告') }}</a></li>
                             </ul>
                         </div>
-                        <ul class="page">
-                            <li class="active"><a href="#" title="第1頁">1</a></li>
-                            <li><a href="#" title="第2頁">2</a></li>
-                            <li><a href="#" title="第3頁">3</a></li>
-                        </ul>
                     </div>
                     <div class="tab-content-2">
                         <h3 class="hide">歷史消費紀錄</h3>
+                        {% if purchase_months %}
+                            <ul class="page month-pagination" id="history-month-switcher" aria-label="歷史消費紀錄月份切換">
+                                {% for month in purchase_months %}
+                                    <li class="{% if loop.first %}active{% endif %}">
+                                        <a href="#" data-month-index="{{ loop.index0 }}" title="{{ month.label }}">{{ month.label }}</a>
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% endif %}
                         <table class="history-table">
                             <thead>
                                 <tr>
@@ -163,7 +168,18 @@
                                 </tr>
                             </thead>
                             <tbody id="history-rows">
-                                {% if purchases %}
+                                {% if purchase_months %}
+                                    {% for month in purchase_months %}
+                                        {% for purchase in month.purchases %}
+                                            <tr data-month-index="{{ loop.parent.index0 }}"{% if not loop.parent.first %} class="is-hidden"{% endif %}>
+                                                <td>{{ purchase.purchased_at or '--' }}</td>
+                                                <td>{{ purchase.item or '--' }}</td>
+                                                <td>{{ purchase.quantity or 0 }}</td>
+                                                <td>{% if purchase.total_price is not none %}NT${{ '%.0f' % purchase.total_price }}{% else %}--{% endif %}</td>
+                                            </tr>
+                                        {% endfor %}
+                                    {% endfor %}
+                                {% elif purchases %}
                                     {% for purchase in purchases[:10] %}
                                     <tr>
                                         <td>{{ purchase.purchased_at or '--' }}</td>
@@ -234,11 +250,20 @@
         }).join('');
       }
 
-      function buildHistoryRows(purchases) {
-        if (!purchases || !purchases.length) {
-          return '<tr><td colspan="4">尚無歷史消費紀錄。</td></tr>';
+      function renderFallbackHistory(purchases) {
+        const tableBody = document.getElementById('history-rows');
+        const monthSwitcher = document.getElementById('history-month-switcher');
+        if (monthSwitcher) {
+          monthSwitcher.innerHTML = '';
         }
-        return purchases.slice(0, 10).map((purchase) => {
+        if (!tableBody) {
+          return;
+        }
+        if (!purchases || !purchases.length) {
+          tableBody.innerHTML = '<tr><td colspan="4">尚無歷史消費紀錄。</td></tr>';
+          return;
+        }
+        tableBody.innerHTML = purchases.slice(0, 10).map((purchase) => {
           const date = escapeHtml(purchase.purchased_at || '--');
           const item = escapeHtml(purchase.item || '--');
           const quantity = purchase.quantity != null ? escapeHtml(purchase.quantity) : '0';
@@ -250,6 +275,61 @@
             <td>${total}</td>
           </tr>`;
         }).join('');
+      }
+
+      function renderHistoryMonths(months) {
+        const tableBody = document.getElementById('history-rows');
+        const monthSwitcher = document.getElementById('history-month-switcher');
+        if (!tableBody) {
+          return;
+        }
+        if (!months || !months.length) {
+          tableBody.innerHTML = '<tr><td colspan="4">尚無歷史消費紀錄。</td></tr>';
+          if (monthSwitcher) {
+            monthSwitcher.innerHTML = '';
+          }
+          return;
+        }
+
+        tableBody.innerHTML = months.map((month, monthIndex) => {
+          return month.purchases.map((purchase) => {
+            const date = escapeHtml(purchase.purchased_at || '--');
+            const item = escapeHtml(purchase.item || '--');
+            const quantity = purchase.quantity != null ? escapeHtml(purchase.quantity) : '0';
+            const total = purchase.total_price != null ? `NT$${Math.round(purchase.total_price)}` : '--';
+            const hidden = monthIndex === 0 ? '' : ' class="is-hidden"';
+            return `<tr data-month-index="${monthIndex}"${hidden}>
+              <td>${date}</td>
+              <td>${item}</td>
+              <td>${quantity}</td>
+              <td>${total}</td>
+            </tr>`;
+          }).join('');
+        }).join('');
+
+        if (!monthSwitcher) {
+          return;
+        }
+
+        monthSwitcher.innerHTML = months.map((month, index) => `
+          <li class="${index === 0 ? 'active' : ''}">
+            <a href="#" data-month-index="${index}" title="${escapeHtml(month.label)}">${escapeHtml(month.label)}</a>
+          </li>
+        `).join('');
+
+        monthSwitcher.querySelectorAll('a[data-month-index]').forEach((link) => {
+          link.addEventListener('click', (event) => {
+            event.preventDefault();
+            const selected = Number(link.getAttribute('data-month-index'));
+            tableBody.querySelectorAll('tr[data-month-index]').forEach((row) => {
+              const rowIndex = Number(row.getAttribute('data-month-index'));
+              row.classList.toggle('is-hidden', rowIndex !== selected);
+            });
+            monthSwitcher.querySelectorAll('li').forEach((item) => {
+              item.classList.toggle('active', item.contains(link));
+            });
+          });
+        });
       }
 
       function applyPayload(payload) {
@@ -287,7 +367,12 @@
 
         const tableBody = document.getElementById('prediction-rows');
         tableBody.innerHTML = buildRows(payload.predicted_candidates || []);
-        document.getElementById('history-rows').innerHTML = buildHistoryRows(purchases);
+        const months = payload.purchase_months || [];
+        if (months.length) {
+          renderHistoryMonths(months);
+        } else {
+          renderFallbackHistory(purchases);
+        }
 
         const timings = payload.timings || {};
         const getTiming = (key) => (timings[key] === undefined || timings[key] === null ? '--' : timings[key]);

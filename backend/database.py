@@ -19,12 +19,15 @@ _LOGGER = logging.getLogger(__name__)
 
 MEMBER_CODE_OVERRIDES: dict[str, str] = {}
 
+NEW_GUEST_MEMBER_ID = "MEM8CCB842A77"
+
 SEED_MEMBER_IDS: tuple[str, ...] = (
     "MEME0383FE3AA",
     "MEM692FFD0824",
     "MEMFITNESS2025",
     "MEMHOMECARE2025",
     "MEMHEALTH2025",
+    NEW_GUEST_MEMBER_ID,
 )
 
 SEED_PROFILE_LABELS: tuple[str, ...] = (
@@ -33,6 +36,7 @@ SEED_PROFILE_LABELS: tuple[str, ...] = (
     "fitness-enthusiast",
     "home-manager",
     "wellness-gourmet",
+    "brand-new-guest",
 )
 
 
@@ -162,6 +166,54 @@ _SEPTEMBER_2025_PURCHASE_CONFIG: dict[str, _PersonaPurchaseConfig] = {
         ],
     },
 }
+
+
+def _generate_monthly_records(
+    *,
+    member_code: str,
+    config: _PersonaPurchaseConfig,
+    seed_key: str,
+    code_suffix: str,
+    year: int,
+    month: int,
+    day_upper: int,
+    count: int,
+) -> list[dict[str, float | str]]:
+    rng = random.Random(seed_key)
+    minute_choices = (0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55)
+
+    records: list[dict[str, float | str]] = []
+    for index in range(count):
+        choice = rng.choice(config["items"])
+        price_range = choice["price"]
+        low, high = int(price_range[0]), int(price_range[1])
+        if high <= low:
+            unit_price = float(low)
+        else:
+            step = 5 if high - low >= 5 else 1
+            unit_price = float(rng.randrange(low, high + 1, step))
+
+        purchase_time = datetime(year, month, 1) + timedelta(
+            days=rng.randint(0, max(0, day_upper - 1)),
+            hours=rng.randint(8, 21),
+            minutes=rng.choice(minute_choices),
+        )
+
+        records.append(
+            {
+                "member_code": member_code,
+                "product_category": choice["category"],
+                "internal_item_code": f"{config['prefix']}-{code_suffix}{index + 1:03d}",
+                "item": choice["item"],
+                "purchased_at": purchase_time.strftime("%Y-%m-%d %H:%M"),
+                "unit_price": unit_price,
+                "quantity": 1.0,
+                "total_price": float(round(unit_price, 2)),
+            }
+        )
+
+    records.sort(key=lambda entry: entry["purchased_at"])
+    return records
 
 
 @dataclass
@@ -1331,20 +1383,14 @@ class Database:
             except sqlite3.OperationalError:
                 count = 0
             if count:
+                self._ensure_recent_history()
+                self._ensure_new_guest_member()
                 return
 
         sql_path = Path(__file__).resolve().parent / "data" / "mvp.sql"
         if not sql_path.exists():  # pragma: no cover - defensive guard
             _LOGGER.warning("Seed file %s not found; skipping demo data load", sql_path)
             return
-
-        self._profile_purchase_templates = {
-            "dessert-lover": dessert_history,
-            "family-groceries": kids_history,
-            "fitness-enthusiast": fitness_history,
-            "home-manager": homemaker_history,
-            "wellness-gourmet": health_history,
-        }
 
         self._reset_seed_profiles()
 
@@ -1424,15 +1470,47 @@ class Database:
             occupation=None,
         )
 
+        self._seed_member_profile(
+            profile_label="brand-new-guest",
+            name="新客專屬體驗",
+            member_id=None,
+            mall_member_id="",
+            member_status="未入會",
+            joined_at=None,
+            points_balance=0,
+            gender=None,
+            birth_date=None,
+            phone=None,
+            email=None,
+            address=None,
+            occupation=None,
+        )
+
+        insert_statements: list[str] = []
+        with sql_path.open("r", encoding="utf-8") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                if line.startswith("--"):
+                    continue
+                if not line.lower().startswith("insert into"):
+                    continue
+                if not line.endswith(";"):
+                    line = f"{line};"
+                insert_statements.append(line)
+
+        script = "\n".join(insert_statements)
 
         with self._connect() as conn:
-            conn.executescript("\n".join(insert_statements))
+            conn.executescript(script)
             face_map = {
                 "MEME0383FE3AA": "faces/dessert_lover.jpg",
                 "MEM692FFD0824": "faces/family_groceries.jpg",
                 "MEMFITNESS2025": "faces/fitness_enthusiast.jpg",
                 "MEMHOMECARE2025": "faces/home_manager.jpg",
                 "MEMHEALTH2025": "faces/wellness_gourmet.jpg",
+                NEW_GUEST_MEMBER_ID: "faces/新顧客.png",
             }
             for member_id, filename in face_map.items():
                 conn.execute(
@@ -1446,6 +1524,8 @@ class Database:
             if not template:
                 continue
             self._seed_member_history(member_id, template)
+
+        self._ensure_new_guest_member()
 
         self._normalize_placeholder_profiles()
 
@@ -1482,43 +1562,227 @@ class Database:
         if not config:
             return
 
-        rng = random.Random(f"{member_id}-2025-09")
         member_code = self.get_member_code(member_id)
-        minute_choices = (0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55)
-        september_records: list[dict[str, float | str]] = []
-
-        for index in range(50):
-            choice = rng.choice(config["items"])
-            price_range = choice["price"]
-            low, high = int(price_range[0]), int(price_range[1])
-            if high <= low:
-                unit_price = float(low)
-            else:
-                step = 5 if high - low >= 5 else 1
-                unit_price = float(rng.randrange(low, high + 1, step))
-
-            purchase_time = datetime(2025, 9, 1) + timedelta(
-                days=rng.randint(0, 29),
-                hours=rng.randint(8, 21),
-                minutes=rng.choice(minute_choices),
-            )
-
-            september_records.append(
-                {
-                    "member_code": member_code,
-                    "product_category": choice["category"],
-                    "internal_item_code": f"{config['prefix']}-S25{index + 1:03d}",
-                    "item": choice["item"],
-                    "purchased_at": purchase_time.strftime("%Y-%m-%d %H:%M"),
-                    "unit_price": unit_price,
-                    "quantity": 1.0,
-                    "total_price": float(round(unit_price, 2)),
-                }
-            )
-
-        september_records.sort(key=lambda entry: entry["purchased_at"])
+        september_records = _generate_monthly_records(
+            member_code=member_code,
+            config=config,
+            seed_key=f"{member_id}-2025-09",
+            code_suffix="S25",
+            year=2025,
+            month=9,
+            day_upper=30,
+            count=50,
+        )
         for record in september_records:
             self.add_purchase(member_id, **record)
+
+        self._ensure_month_history(
+            member_id,
+            config=config,
+            year=2025,
+            month=10,
+            day_upper=10,
+            count=10,
+            code_suffix="O25",
+        )
+
+    def _ensure_month_history(
+        self,
+        member_id: str,
+        *,
+        config: _PersonaPurchaseConfig,
+        year: int,
+        month: int,
+        day_upper: int,
+        count: int,
+        code_suffix: str,
+    ) -> None:
+        if count <= 0:
+            return
+
+        month_key = f"{year}-{month:02d}"
+        like_pattern = f"{month_key}%"
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS total FROM purchases WHERE member_id = ? AND purchased_at LIKE ?",
+                (member_id, like_pattern),
+            ).fetchone()
+            existing_total = int(row["total"]) if row is not None and "total" in row.keys() else int(row[0]) if row else 0
+
+            existing_codes = {
+                str(row["internal_item_code"])
+                for row in conn.execute(
+                    "SELECT internal_item_code FROM purchases WHERE member_id = ? AND purchased_at LIKE ?",
+                    (member_id, like_pattern),
+                ).fetchall()
+            }
+
+        missing = count - existing_total
+        if missing <= 0:
+            return
+
+        member_code = self.get_member_code(member_id) or member_id
+        seed_key = f"{member_id}-{month_key}"
+        candidate_records = _generate_monthly_records(
+            member_code=member_code,
+            config=config,
+            seed_key=seed_key,
+            code_suffix=code_suffix,
+            year=year,
+            month=month,
+            day_upper=day_upper,
+            count=count,
+        )
+
+        for record in candidate_records:
+            internal_code = str(record.get("internal_item_code", ""))
+            if internal_code in existing_codes:
+                continue
+            self.add_purchase(member_id, **record)
+            existing_codes.add(internal_code)
+            missing -= 1
+            if missing <= 0:
+                break
+
+    def _ensure_recent_history(self) -> None:
+        for member_id, config in _SEPTEMBER_2025_PURCHASE_CONFIG.items():
+            if member_id == NEW_GUEST_MEMBER_ID:
+                continue
+            self._ensure_month_history(
+                member_id,
+                config=config,
+                year=2025,
+                month=10,
+                day_upper=10,
+                count=10,
+                code_suffix="O25",
+            )
+
+    def _ensure_new_guest_member(self) -> None:
+        import numpy as np
+
+        encoding = FaceEncoding(
+            np.zeros(128, dtype=np.float32),
+            signature=NEW_GUEST_MEMBER_ID,
+            source="seed",
+        )
+        payload = json.dumps(encoding.to_jsonable(), ensure_ascii=False)
+
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO members (member_id, encoding_json) VALUES (?, ?)",
+                (NEW_GUEST_MEMBER_ID, payload),
+            )
+            row = conn.execute(
+                "SELECT profile_id, member_id, first_image_filename FROM member_profiles WHERE profile_label = ?",
+                ("brand-new-guest",),
+            ).fetchone()
+
+            if row is None:
+                conn.execute(
+                    """
+                    INSERT INTO member_profiles (
+                        profile_label,
+                        name,
+                        member_id,
+                        mall_member_id,
+                        member_status,
+                        joined_at,
+                        points_balance,
+                        gender,
+                        birth_date,
+                        phone,
+                        email,
+                        address,
+                        occupation,
+                        first_image_filename
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "brand-new-guest",
+                        "新客專屬體驗",
+                        NEW_GUEST_MEMBER_ID,
+                        "",
+                        "未入會",
+                        None,
+                        0.0,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        "faces/新顧客.png",
+                    ),
+                )
+            else:
+                profile_id = int(row["profile_id"])
+                if not row["member_id"]:
+                    conn.execute(
+                        "UPDATE member_profiles SET member_id = ? WHERE profile_id = ?",
+                        (NEW_GUEST_MEMBER_ID, profile_id),
+                    )
+                conn.execute(
+                    """
+                    UPDATE member_profiles
+                    SET name = COALESCE(NULLIF(name, ''), '新客專屬體驗'),
+                        member_status = COALESCE(member_status, '未入會'),
+                        points_balance = COALESCE(points_balance, 0),
+                        first_image_filename = COALESCE(first_image_filename, 'faces/新顧客.png')
+                    WHERE profile_id = ?
+                    """,
+                    (profile_id,),
+                )
+            conn.commit()
+
+    def get_member_profile_by_label(self, profile_label: str) -> MemberProfile | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT profile_id,
+                       profile_label,
+                       name,
+                       member_id,
+                       mall_member_id,
+                       member_status,
+                       joined_at,
+                       points_balance,
+                       gender,
+                       birth_date,
+                       phone,
+                       email,
+                       address,
+                       occupation,
+                       first_image_filename
+                FROM member_profiles
+                WHERE profile_label = ?
+                LIMIT 1
+                """,
+                (profile_label,),
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        return MemberProfile(
+            profile_id=int(row["profile_id"]),
+            profile_label=str(row["profile_label"]),
+            name=str(row["name"]) if row["name"] else None,
+            member_id=str(row["member_id"]) if row["member_id"] else None,
+            mall_member_id=str(row["mall_member_id"]) if row["mall_member_id"] else None,
+            member_status=str(row["member_status"]) if row["member_status"] else None,
+            joined_at=str(row["joined_at"]) if row["joined_at"] else None,
+            points_balance=float(row["points_balance"]) if row["points_balance"] is not None else None,
+            gender=str(row["gender"]) if row["gender"] else None,
+            birth_date=str(row["birth_date"]) if row["birth_date"] else None,
+            phone=str(row["phone"]) if row["phone"] else None,
+            email=str(row["email"]) if row["email"] else None,
+            address=str(row["address"]) if row["address"] else None,
+            occupation=str(row["occupation"]) if row["occupation"] else None,
+            first_image_filename=
+                str(row["first_image_filename"]) if row["first_image_filename"] else None,
+        )
 
     def _seed_member_profile(
         self,
