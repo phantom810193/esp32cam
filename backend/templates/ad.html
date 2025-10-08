@@ -94,7 +94,6 @@
                                     <th>商品名稱</th>
                                     <th>商品類別</th>
                                     <th>商品價格</th>
-                                    <th>商品<br/>查閱率</th>
                                     <th>預估購買機率</th>
                                 </tr>
                             </thead>
@@ -107,13 +106,6 @@
                                             <td>{{ item.category_label or item.category or '--' }}</td>
                                             <td>{% if item.price is not none %}${{ '%.0f' % item.price }}{% else %}--{% endif %}</td>
                                             <td>
-                                                {% if item.view_rate_percent is not none %}
-                                                    {{ '%.1f' % item.view_rate_percent }}%
-                                                {% else %}
-                                                    --
-                                                {% endif %}
-                                            </td>
-                                            <td>
                                                 {% if item.probability_percent is not none %}
                                                     {{ '%.1f' % item.probability_percent }}%
                                                 {% else %}
@@ -123,7 +115,7 @@
                                         </tr>
                                     {% endfor %}
                                 {% else %}
-                                    <tr><td colspan="6">暫無預測資料，歡迎加入會員以獲得更多推薦。</td></tr>
+                                    <tr><td colspan="5">暫無預測資料，歡迎加入會員以獲得更多推薦。</td></tr>
 
 {% set context = context if context is defined else None %}
 {% set purchases = purchases if purchases is defined else (context.purchases if context and context.purchases is defined else []) %}
