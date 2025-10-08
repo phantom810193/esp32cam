@@ -93,8 +93,7 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
      - `KID###`：幼兒教養（Kindergarten）
      - `HOM###`：家居生活（Homemaker）
      - `GEN###`：生活選品（General）
-   - 每個商品皆附帶基礎查閱率（View Rate）與售價資訊，方便預測模組產生 UI 所需欄位。
-   - 商品查閱率會按照 `backend/prediction.py` 的品類權重微調：`view_rate_percent = round(min(1.0, product.view_rate * (0.9 + category_weight)) * 100, 1)`，讓不同品類在 UI 上呈現的查閱率仍落在 0–100% 間。
+   - 每個商品皆附帶基礎查閱率（View Rate）與售價資訊，以利預測模組評估熱門程度；最終前端僅顯示價格與機率欄位。
    - 透過 `infer_category_from_item()` 將歷史訂單名稱對應回目錄品類，確保跨模組一致性。
 
 7. 機率計算公式：
@@ -113,7 +112,7 @@ firmware/esp32cam_mvp/  # ESP32-CAM PlatformIO 專案
      - `recency_bonus`：依據最近 5 筆交易的品類倒序加權（越新的比重越高）。
      - `price_similarity`：商品售價與歷史平均單價的差異，越接近越高。
      - `novelty`：未購買過的新商品加權 1.0，已出現過則降至 0.3，會員身份再額外帶入 0.8 的基礎值。
-   - 將上述分數送入 softmax 取得 `probability`，並四捨五入至 0.1% 輸出 `probability_percent`；查閱率亦以 0.1% 顯示。
+   - 將上述分數送入 softmax 取得 `probability`，並四捨五入至 0.1% 輸出 `probability_percent`。
 
 8. 驗證介面：
 
