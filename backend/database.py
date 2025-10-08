@@ -954,48 +954,45 @@ class Database:
         )
 
     def _reset_seed_profiles(self) -> None:
-        if not SEED_PROFILE_LABELS:
-            return
-
         labels_placeholder = ",".join("?" for _ in SEED_PROFILE_LABELS)
+
         with self._connect() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT member_id
-                FROM member_profiles
-                WHERE profile_label IN ({labels_placeholder})
-                """,
-                SEED_PROFILE_LABELS,
-            ).fetchall()
+            conn.execute("DELETE FROM purchases")
+            conn.execute("DELETE FROM upload_events")
+            conn.execute("DELETE FROM members")
 
-            purge_ids = {str(row["member_id"]) for row in rows if row["member_id"]}
-            purge_ids.update(SEED_MEMBER_IDS)
-
-            if purge_ids:
-                purge_list = sorted(purge_ids)
-                placeholders = ",".join("?" for _ in purge_list)
+            if SEED_PROFILE_LABELS:
                 conn.execute(
-                    f"DELETE FROM purchases WHERE member_id IN ({placeholders})",
-                    purge_list,
-                )
-                conn.execute(
-                    f"DELETE FROM members WHERE member_id IN ({placeholders})",
-                    purge_list,
-                )
-                conn.execute(
-                    f"DELETE FROM upload_events WHERE member_id IN ({placeholders})",
-                    purge_list,
+                    f"""
+                    DELETE FROM member_profiles
+                    WHERE profile_label NOT IN ({labels_placeholder})
+                    """,
+                    SEED_PROFILE_LABELS,
                 )
 
-            conn.execute(
-                f"""
-                UPDATE member_profiles
-                SET member_id = NULL,
-                    first_image_filename = NULL
-                WHERE profile_label IN ({labels_placeholder})
-                """,
-                SEED_PROFILE_LABELS,
-            )
+                conn.execute(
+                    f"""
+                    UPDATE member_profiles
+                    SET name = NULL,
+                        member_id = NULL,
+                        mall_member_id = NULL,
+                        member_status = NULL,
+                        joined_at = NULL,
+                        points_balance = NULL,
+                        gender = NULL,
+                        birth_date = NULL,
+                        phone = NULL,
+                        email = NULL,
+                        address = NULL,
+                        occupation = NULL,
+                        first_image_filename = NULL
+                    WHERE profile_label IN ({labels_placeholder})
+                    """,
+                    SEED_PROFILE_LABELS,
+                )
+            else:
+                conn.execute("DELETE FROM member_profiles")
+
             conn.commit()
 
     def get_member_profile(self, member_id: str) -> MemberProfile | None:
