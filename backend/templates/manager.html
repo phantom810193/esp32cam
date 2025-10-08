@@ -101,7 +101,6 @@
                   <th>商品名稱</th>
                   <th>商品類別</th>
                   <th>商品價格</th>
-                  <th>商品查閱率</th>
                   <th>預估購買機率</th>
                 </tr>
               </thead>
@@ -113,13 +112,12 @@
                       <td>{{ item.product_name }}</td>
                       <td>{{ item.category_label }}</td>
                       <td>NT$ {{ '%.0f'|format(item.price) }}</td>
-                      <td>{{ '%.1f'|format(item.view_rate_percent) }}%</td>
                       <td>{{ '%.1f'|format(item.probability_percent) }}%</td>
                     </tr>
                   {% endfor %}
                 {% else %}
                   <tr>
-                    <td colspan="6" class="empty">尚無可用預測資料</td>
+                    <td colspan="5" class="empty">尚無可用預測資料</td>
                   </tr>
                 {% endif %}
               </tbody>

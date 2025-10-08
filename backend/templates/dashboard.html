@@ -91,6 +91,8 @@
                             <span>最近消費時間</span>
                             {% if last_purchase_display %}
                                 <i>{{ last_purchase_display }}</i>
+                            {% elif is_new_guest %}
+                                <i>—</i>
                             {% else %}
                                 <i>尚未有消費紀錄</i>
                             {% endif %}
@@ -139,7 +141,6 @@
                                             <th>商品名稱</th>
                                             <th>商品類別</th>
                                             <th>商品價格</th>
-                                            <th>查閱率</th>
                                             <th>預估購買機率</th>
                                         </tr>
                                     </thead>
@@ -153,7 +154,6 @@
                                                     <td>{{ item.product_name }}</td>
                                                     <td>{{ item.category_label }}</td>
                                                     <td>{{ '${:,.0f}'.format(item.price) }}</td>
-                                                    <td>{{ '%.1f'|format(item.view_rate_percent) }}%</td>
                                                     <td>
                                                         {% if probability_class %}
                                                             <span class="{{ probability_class }}">{{ probability_text }}%</span>
@@ -163,14 +163,13 @@
                                                     </td>
                                                 </tr>
                                             {% endfor %}
-                                        {% else %}
+                                        {% elif not is_new_guest %}
                                             <tr class="empty-message" data-empty-row="true">
-                                                <td colspan="6">目前無可用的推薦商品。</td>
+                                                <td colspan="5">目前無可用的推薦商品。</td>
                                             </tr>
                                         {% endif %}
                                     </tbody>
                                 </table>
-                                <ul class="page" id="prediction-pagination" aria-label="感興趣商品推估頁面導覽"></ul>
                             </section>
                         <div class="advertising">
                             <ul class="advertising_info">
@@ -191,6 +190,24 @@
                             <li><a href="#" class="search" aria-disabled="true">搜尋</a></li>
                             <li><a href="#" class="filter" aria-disabled="true">篩選</a></li>
                         </ul>
+                        {% set initial_month_key = selected_month_key %}
+                        {% if initial_month_key is none and history_groups %}
+                            {% set initial_month_key = history_groups[0]['key'] %}
+                        {% endif %}
+                        {% if selected_month_label %}
+                            <div class="history-month-label" data-initial-label="{{ selected_month_label }}">{{ selected_month_label }}</div>
+                        {% elif history_months %}
+                            <div class="history-month-label" data-initial-label="{{ history_months[0]['label'] }}">{{ history_months[0]['label'] }}</div>
+                        {% endif %}
+                        {% if history_months %}
+                            <ul class="page month-pagination" aria-label="歷史消費紀錄月份切換">
+                                {% for month in history_months %}
+                                    <li class="{% if month.page == page %}active{% endif %}">
+                                        <a href="{{ url_for('dashboard', member_id=resolved_member_id, page=month.page) }}" title="{{ month.label }}" data-month="{{ month.key }}" data-label="{{ month.label }}">{{ month.label }}</a>
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% endif %}
                         <table class="purchase-history">
                             <thead>
                                 <tr>
@@ -203,36 +220,28 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                {% if purchases %}
-                                    {% for purchase in purchases %}
-                                        <tr>
-                                            <td class="datetime">{{ purchase.purchased_at }}</td>
-                                            <td class="item">{{ purchase.item }}</td>
-                                            <td class="category">{{ purchase.product_category or '—' }}</td>
-                                            <td class="numeric">${{ '%.0f'|format(purchase.unit_price) }}</td>
-                                            {% set qty_text = ('%.2f'|format(purchase.quantity)).rstrip('0').rstrip('.') %}
-                                            <td class="numeric">{{ qty_text }}</td>
-                                            <td class="numeric">${{ '%.0f'|format(purchase.total_price) }}</td>
-                                        </tr>
+                                {% if history_groups %}
+                                    {% for group in history_groups %}
+                                        {% for purchase in group.purchases %}
+                                            {% set row_hidden = initial_month_key is not none and group.key != initial_month_key %}
+                                            <tr data-month="{{ group.key }}"{% if row_hidden %} class="is-hidden"{% endif %}>
+                                                <td class="datetime">{{ purchase.purchased_at }}</td>
+                                                <td class="item">{{ purchase.item }}</td>
+                                                <td class="category">{{ purchase.product_category or '—' }}</td>
+                                                <td class="numeric">${{ '%.0f'|format(purchase.unit_price) }}</td>
+                                                {% set qty_text = ('%.2f'|format(purchase.quantity)).rstrip('0').rstrip('.') %}
+                                                <td class="numeric">{{ qty_text }}</td>
+                                                <td class="numeric">${{ '%.0f'|format(purchase.total_price) }}</td>
+                                            </tr>
+                                        {% endfor %}
                                     {% endfor %}
-                                {% else %}
+                                {% elif not is_new_guest %}
                                     <tr>
                                         <td colspan="6" class="empty-message">尚未有消費紀錄。</td>
                                     </tr>
                                 {% endif %}
                             </tbody>
                         </table>
-                        <div class="history-pagination" aria-label="歷史消費紀錄頁面導覽">
-                            <span class="page-status">第 {{ page }} / {{ page_count }} 頁</span>
-                            <div class="pagination-links">
-                                <a class="prev{% if not has_prev %} disabled{% endif %}"
-                                   href="{{ url_for('dashboard', member_id=resolved_member_id, page=page - 1) }}"
-                                   {% if not has_prev %}aria-disabled="true" tabindex="-1"{% endif %}>上一頁</a>
-                                <a class="next{% if not has_next %} disabled{% endif %}"
-                                   href="{{ url_for('dashboard', member_id=resolved_member_id, page=page + 1) }}"
-                                   {% if not has_next %}aria-disabled="true" tabindex="-1"{% endif %}>下一頁</a>
-                            </div>
-                        </div>
                     </div>
                     <div class="tab-content-3"><p>內容-3</p>
                     </div>
@@ -250,65 +259,45 @@
     </footer> -->
     <script>
     document.addEventListener('DOMContentLoaded', function () {
-        const tableBody = document.querySelector('#prediction-table-body');
-        const pagination = document.querySelector('#prediction-pagination');
-        if (!tableBody || !pagination) {
-            return;
-        }
-
-        const dataRows = Array.from(tableBody.querySelectorAll('tr[data-prediction-row="true"]'));
-        if (!dataRows.length) {
-            pagination.style.display = 'none';
-            return;
-        }
-
-        const pageSize = 7;
-        const totalPages = Math.ceil(dataRows.length / pageSize);
-        let currentPage = 1;
-
-        function renderPage(page) {
-            currentPage = page;
-            dataRows.forEach(function (row, index) {
-                const pageIndex = Math.floor(index / pageSize) + 1;
-                row.style.display = pageIndex === page ? '' : 'none';
-            });
-            const items = pagination.querySelectorAll('li');
-            items.forEach(function (item, index) {
-                item.classList.toggle('active', index + 1 === page);
+        const predictionRows = document.querySelectorAll('#prediction-table-body tr[data-prediction-row="true"]');
+        if (predictionRows.length) {
+            predictionRows.forEach(function (row, index) {
+                row.style.display = index < 7 ? '' : 'none';
             });
         }
 
-        function buildPagination() {
-            pagination.innerHTML = '';
-            if (totalPages <= 1) {
-                pagination.style.display = 'none';
-                return;
-            }
+        const monthLinks = document.querySelectorAll('.month-pagination a[data-month]');
+        const historyRows = document.querySelectorAll('.purchase-history tbody tr[data-month]');
+        const monthLabel = document.querySelector('.history-month-label');
 
-            pagination.style.display = '';
-            for (let page = 1; page <= totalPages; page += 1) {
-                const li = document.createElement('li');
-                if (page === currentPage) {
-                    li.classList.add('active');
+        if (!monthLinks.length || !historyRows.length) {
+            return;
+        }
+
+        monthLinks.forEach(function (link) {
+            link.addEventListener('click', function (event) {
+                event.preventDefault();
+                const month = link.getAttribute('data-month');
+                const label = link.getAttribute('data-label');
+                if (!month) {
+                    return;
                 }
-                const link = document.createElement('a');
-                link.href = '#';
-                link.textContent = String(page);
-                link.title = `第${page}頁`;
-                link.addEventListener('click', function (event) {
-                    event.preventDefault();
-                    if (page === currentPage) {
+                historyRows.forEach(function (row) {
+                    const matches = row.getAttribute('data-month') === month;
+                    row.classList.toggle('is-hidden', !matches);
+                });
+                monthLinks.forEach(function (other) {
+                    const parent = other.parentElement;
+                    if (!parent) {
                         return;
                     }
-                    renderPage(page);
+                    parent.classList.toggle('active', other === link);
                 });
-                li.appendChild(link);
-                pagination.appendChild(li);
-            }
-        }
-
-        buildPagination();
-        renderPage(1);
+                if (monthLabel && label) {
+                    monthLabel.textContent = label;
+                }
+            });
+        });
     });
     </script>
 </body>

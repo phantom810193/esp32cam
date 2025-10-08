@@ -7,7 +7,10 @@ import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Iterable, Mapping, Optional
 
-import google.generativeai as genai
+try:  # pragma: no cover - allow running without the Gemini SDK installed
+    import google.generativeai as genai  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - provide graceful fallback
+    genai = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type hints only
     from .advertising import PurchaseInsights
@@ -49,13 +52,17 @@ class GeminiService:
         self._api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         self._timeout = timeout
 
-        self._model: Optional[genai.GenerativeModel] = None
+        self._model: Optional[Any] = None
         self._init_error: Optional[str] = None
 
     # ------------------------------------------------------------------
-    def _ensure_model(self) -> genai.GenerativeModel:
+    def _ensure_model(self) -> Any:
         if self._model is not None:
             return self._model
+
+        if genai is None:
+            self._init_error = "google.generativeai package is not installed"
+            raise GeminiUnavailableError(self._init_error)
 
         if not self._api_key:
             self._init_error = "GEMINI_API_KEY is not configured"
@@ -83,6 +90,8 @@ class GeminiService:
         if self._model is not None:
             return True
         if self._init_error:
+            return False
+        if genai is None:
             return False
         return bool(self._api_key)
 
