@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import mimetypes
 import os
+from collections import defaultdict
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
@@ -44,9 +44,15 @@ from .advertising import (
 )
 from .ai import GeminiService, GeminiUnavailableError
 from .aws import RekognitionService
-from .database import Database, MemberProfile, Purchase, SEED_MEMBER_IDS
+from .database import (
+    Database,
+    MemberProfile,
+    Purchase,
+    NEW_GUEST_MEMBER_ID,
+    SEED_MEMBER_IDS,
+)
 
-from .prediction import predict_next_purchases
+from .prediction import parse_timestamp, predict_next_purchases
 from .recognizer import FaceRecognizer
 from .routes import adgen_blueprint
 
@@ -79,6 +85,7 @@ PERSONA_LABELS = {
     "fitness-enthusiast": "健身族",
     "home-manager": "家庭主婦",
     "wellness-gourmet": "健康食品愛好者",
+    "brand-new-guest": "新客體驗",
 }
 
 app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
@@ -282,6 +289,27 @@ def _serialize_ad_context(context: AdContext) -> dict[str, object]:
         payload["predicted"] = dict(context.predicted)
     if context.detected_at:
         payload["detected_at"] = context.detected_at
+    if context.purchase_months:
+        payload["purchase_months"] = [
+            {
+                "label": month["label"],
+                "year": month["year"],
+                "month": month["month"],
+                "purchases": [
+                    {
+                        "item": purchase.item,
+                        "purchased_at": purchase.purchased_at,
+                        "product_category": purchase.product_category,
+                        "internal_item_code": purchase.internal_item_code,
+                        "unit_price": purchase.unit_price,
+                        "quantity": purchase.quantity,
+                        "total_price": purchase.total_price,
+                    }
+                    for purchase in month["purchases"]
+                ],
+            }
+            for month in context.purchase_months
+        ]
 
     payload["hero_image_url"] = _resolve_template_image(context.template_id)
     payload["status"] = "ok"
@@ -337,6 +365,8 @@ def dashboard() -> str:
 
     full_history: list[Purchase] = []
     purchases: list[Purchase] = []
+    history_months: list[dict[str, object]] = []
+    history_groups: list[dict[str, object]] = []
     page = 1
     page_count = 1
     has_prev = False
@@ -344,26 +374,70 @@ def dashboard() -> str:
     total_purchases = 0
     predicted_items = []
     prediction_window_label: str | None = None
+    selected_month_label: str | None = None
+    selected_month_key: str | None = None
+    is_new_guest = bool(profile and profile.member_id == NEW_GUEST_MEMBER_ID)
+
     if profile and member_id:
         full_history = database.get_purchase_history(member_id)
         prediction_result = predict_next_purchases(full_history, profile=profile)
         predicted_items = prediction_result.items
         prediction_window_label = prediction_result.window_label
 
-        limit = 7
         total_purchases = len(full_history)
-        if total_purchases:
-            page_count = max(1, math.ceil(total_purchases / limit))
-            page = min(max(1, requested_page), page_count)
-            offset = (page - 1) * limit
-            purchases = full_history[offset : offset + limit]
+        if full_history:
+            month_buckets: defaultdict[tuple[int, int], list[tuple[datetime, Purchase]]] = defaultdict(list)
+            for purchase in full_history:
+                try:
+                    timestamp = parse_timestamp(purchase.purchased_at)
+                except ValueError:
+                    continue
+                month_buckets[(timestamp.year, timestamp.month)].append((timestamp, purchase))
+
+            ordered_months = sorted(month_buckets.items(), key=lambda entry: entry[0], reverse=True)
+            limited_months = ordered_months[:2]
+            if limited_months:
+                page_count = len(limited_months)
+                page = min(max(1, requested_page), page_count)
+                for index, ((year, month), entries) in enumerate(limited_months, start=1):
+                    entries.sort(key=lambda item: item[0], reverse=True)
+                    month_purchases = [value for _, value in entries]
+                    label = f"{year}年{month:02d}月"
+                    month_key = f"{year}-{month:02d}"
+                    history_months.append(
+                        {
+                            "page": index,
+                            "label": label,
+                            "year": year,
+                            "month": month,
+                            "count": len(month_purchases),
+                            "key": month_key,
+                        }
+                    )
+                    history_groups.append(
+                        {
+                            "key": month_key,
+                            "label": label,
+                            "purchases": month_purchases,
+                        }
+                    )
+                    if index == page:
+                        purchases = month_purchases
+                        selected_month_label = label
+                        selected_month_key = month_key
+                has_prev = page > 1
+                has_next = page < page_count
+            else:
+                page = 1
+                page_count = 1
+                purchases = []
         else:
             page = 1
             page_count = 1
             purchases = []
-        has_prev = page > 1
-        has_next = page < page_count
     else:
+        history_months = []
+        history_groups = []
         page = 1
         page_count = 1
         has_prev = False
@@ -452,9 +526,15 @@ def dashboard() -> str:
         page_count=page_count,
         has_prev=has_prev,
         has_next=has_next,
+        history_months=history_months,
+        history_groups=history_groups,
+        selected_month_label=selected_month_label,
+        selected_month_key=selected_month_key,
         total_purchases=total_purchases,
         predicted_items=predicted_items,
         prediction_window_label=prediction_window_label,
+        new_guest_member_id=NEW_GUEST_MEMBER_ID,
+        is_new_guest=is_new_guest,
     )
 
 
@@ -739,6 +819,7 @@ def render_ad(member_id: str):
         context=context_dict,
         profile=resolved_profile,
         stream_url=url_for("latest_ad_stream"),
+        new_guest_member_id=NEW_GUEST_MEMBER_ID,
     )
 
 
@@ -748,6 +829,7 @@ def render_ad_offer(member_id: str):
     return render_template(
         "ad_offer.html",
         context=context_dict,
+        new_guest_member_id=NEW_GUEST_MEMBER_ID,
     )
 
 @app.get("/ad/latest")
@@ -757,6 +839,7 @@ def render_latest_ad():
         "ad_offer.html",
         context=context or {},
         stream_url=url_for("latest_ad_stream"),
+        new_guest_member_id=NEW_GUEST_MEMBER_ID,
     )
 
 

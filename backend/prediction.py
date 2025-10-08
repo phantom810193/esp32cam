@@ -1,10 +1,14 @@
 """Prediction helpers for estimating next-best offers."""
 from __future__ import annotations
 
+import os
+import pickle
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from math import exp
+from pathlib import Path
+from statistics import mean, pstdev
 from typing import Iterable, Sequence
 
 from .advertising import PurchaseInsights
@@ -16,7 +20,7 @@ from .catalogue import (
     infer_category_from_item,
     purchased_product_codes,
 )
-from .database import MemberProfile, Purchase
+from .database import MemberProfile, NEW_GUEST_MEMBER_ID, Purchase
 
 
 @dataclass
@@ -83,15 +87,203 @@ def get_previous_month_purchases(
     return buckets[latest_bucket]
 
 
-def _softmax(scores: Sequence[float]) -> list[float]:
+def _zscore(values: Sequence[float], tol: float = 1e-9) -> list[float]:
+    data = list(values)
+    if len(data) < 2:
+        return data
+
+    mu = mean(data)
+    sigma = pstdev(data)
+    if sigma <= tol:
+        return data
+
+    return [(value - mu) / sigma for value in data]
+
+
+def _softmax(scores: Sequence[float], tau: float = 1.5, eps: float = 1e-6) -> list[float]:
     if not scores:
         return []
-    shift = max(scores)
-    exponentials = [exp(score - shift) for score in scores]
+
+    if tau <= 0:
+        tau = 1.0
+
+    normalised = _zscore(scores)
+
+    scaled = [score / tau for score in normalised]
+    shift = max(scaled)
+    exponentials = [exp(score - shift) for score in scaled]
     total = sum(exponentials)
-    if total == 0:
-        return [0.0 for _ in scores]
+    if total <= eps:
+        return [1.0 / len(scores) for _ in scores]
     return [value / total for value in exponentials]
+
+
+def _blend_with_prior(
+    p_softmax: Sequence[float], prior: Sequence[float], n: int, k: int
+) -> list[float]:
+    if not p_softmax:
+        return []
+
+    if len(p_softmax) != len(prior):
+        prior = [1.0 for _ in p_softmax]
+
+    k = max(0, int(k))
+    n = max(0, int(n))
+    if not any(prior):
+        prior = [1.0 / len(p_softmax) for _ in p_softmax]
+    total_prior = sum(prior)
+    if total_prior <= 0:
+        normalised_prior = [1.0 / len(prior) for _ in prior]
+    else:
+        normalised_prior = [value / total_prior for value in prior]
+
+    if k == 0:
+        return list(p_softmax)
+
+    lam = k / (n + k)
+    blended = [
+        (1 - lam) * p + lam * q for p, q in zip(p_softmax, normalised_prior)
+    ]
+    total_blended = sum(blended)
+    if total_blended <= 0:
+        return [1.0 / len(blended) for _ in blended]
+    return [value / total_blended for value in blended]
+
+
+def _clip_and_normalize(probabilities: Sequence[float]) -> list[float]:
+    if not probabilities:
+        return []
+    clipped = [min(0.999, max(0.001, float(p))) for p in probabilities]
+    total = sum(clipped)
+    if total <= 0:
+        return [1.0 / len(clipped) for _ in clipped]
+    return [value / total for value in clipped]
+
+
+def _load_calibrator(path: str | None) -> object | None:
+    if not path:
+        return None
+    calibrator_path = Path(path)
+    if not calibrator_path.exists():
+        return None
+    try:
+        with calibrator_path.open("rb") as fh:
+            return pickle.load(fh)
+    except (OSError, pickle.PickleError):
+        return None
+
+
+def _apply_calibration(probabilities: Sequence[float], calibrator: object | None) -> list[float]:
+    if not probabilities:
+        return []
+    if calibrator is None:
+        return list(probabilities)
+    try:
+        if hasattr(calibrator, "transform"):
+            transformed = calibrator.transform([probabilities])
+            if transformed is not None:
+                return list(transformed[0])
+        if hasattr(calibrator, "predict_proba"):
+            predicted = calibrator.predict_proba([probabilities])
+            if predicted is not None:
+                first = predicted[0]
+                if isinstance(first, Sequence):
+                    return list(first)
+        if callable(calibrator):
+            result = calibrator(probabilities)
+            if isinstance(result, Sequence):
+                return [float(value) for value in result]
+    except Exception:
+        return list(probabilities)
+    return list(probabilities)
+
+
+def _get_env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
+def _get_env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _flag_from_env(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.lower() in {"1", "true", "yes", "on"}
+
+
+def _feature_weights() -> dict[str, float]:
+    weights = {
+        "category": _get_env_float("PRED_WEIGHT_CATEGORY", 0.45),
+        "trend": _get_env_float("PRED_WEIGHT_TREND", 0.25),
+        "price": _get_env_float("PRED_WEIGHT_PRICE", 0.2),
+        "novelty": _get_env_float("PRED_WEIGHT_NOVELTY", 0.1),
+        "view_rate": _get_env_float("PRED_WEIGHT_VIEW_RATE", 0.0),
+    }
+    if not _flag_from_env("PRED_ENABLE_VIEW_RATE", False):
+        weights["view_rate"] = 0.0
+    return weights
+
+
+def _global_category_popularity(catalogue: Sequence[Product]) -> dict[str, float]:
+    popularity: defaultdict[str, float] = defaultdict(float)
+    for product in catalogue:
+        view_rate = getattr(product, "view_rate", 0.0) or 0.0
+        base = view_rate if view_rate > 0 else 1.0
+        popularity[product.category] += float(base)
+    total = sum(popularity.values())
+    if total <= 0:
+        return {}
+    return {category: value / total for category, value in popularity.items()}
+
+
+def _build_prior_vector(
+    candidates: Sequence[tuple[float, Product]],
+    member_category_weights: dict[str, float],
+    global_popularity: dict[str, float],
+) -> list[float]:
+    if not candidates:
+        return []
+
+    prior_values: list[float] = []
+    for _, product in candidates:
+        value: float | None = None
+        if member_category_weights:
+            value = member_category_weights.get(product.category)
+        if value is None or value == 0:
+            value = global_popularity.get(product.category)
+        if value is None or value == 0:
+            value = 1.0
+        prior_values.append(float(value))
+
+    total = sum(prior_values)
+    if total <= 0:
+        return [1.0 / len(prior_values) for _ in prior_values]
+    return [value / total for value in prior_values]
+
+
+def _count_recent_orders(purchases: Sequence[Purchase], window_days: int = 30) -> int:
+    if not purchases:
+        return 0
+    timestamps = [parse_timestamp(purchase.purchased_at) for purchase in purchases]
+    if not timestamps:
+        return 0
+    reference = max(timestamps)
+    cutoff = reference - timedelta(days=window_days)
+    return sum(1 for ts in timestamps if ts >= cutoff)
 
 
 def predict_next_purchases(
@@ -102,6 +294,15 @@ def predict_next_purchases(
     limit: int = 7,
 ) -> PredictionResult:
     purchase_list = list(purchases)
+    if profile and profile.member_id == NEW_GUEST_MEMBER_ID:
+        activities = _build_activity_feed([], insights)
+        return PredictionResult(
+            items=[],
+            history=[],
+            top_products=[],
+            activities=activities,
+            window_label=_format_window_label([]),
+        )
     window = get_previous_month_purchases(purchase_list)
     if not window:
         window = purchase_list
@@ -136,6 +337,7 @@ def predict_next_purchases(
     novelty_boost = 1.0 if profile and profile.mall_member_id else 0.8
 
     catalogue = get_catalogue()
+    weights = _feature_weights()
     scored: list[tuple[float, Product]] = []
     for product in catalogue:
         if product.code in purchased_codes:
@@ -148,24 +350,43 @@ def predict_next_purchases(
             1.0,
         )
         novelty = novelty_boost if product.name not in history_set else 0.3
+        raw_view_rate = getattr(product, "view_rate", 0.0) or 0.0
+        view_rate_feature = float(raw_view_rate)
 
         score = (
-            0.45 * cat_weight
-            + 0.25 * recency_bonus
-            + 0.2 * price_similarity
-            + 0.1 * novelty
+            weights["category"] * cat_weight
+            + weights["trend"] * recency_bonus
+            + weights["price"] * price_similarity
+            + weights["novelty"] * novelty
+            + weights["view_rate"] * view_rate_feature
         )
         scored.append((score, product))
 
     scored.sort(key=lambda entry: entry[0], reverse=True)
     top_scored = scored[: limit * 2]
-    probabilities = _softmax([score for score, _ in top_scored])
+    tau = _get_env_float("PRED_TAU", 1.5)
+    raw_scores = [score for score, _ in top_scored]
+    probabilities = _softmax(raw_scores, tau=tau)
+
+    global_popularity = _global_category_popularity(catalogue)
+    prior_vector = _build_prior_vector(top_scored, category_weight_map, global_popularity)
+
+    k = _get_env_int("PRED_K", 10)
+    n_recent_orders = _count_recent_orders(purchase_list, window_days=30)
+    probabilities = _blend_with_prior(probabilities, prior_vector, n_recent_orders, k)
+
+    calibrator_path = os.getenv("PRED_CALIB_PATH", "backend/data/calibration.pkl")
+    calibrator = _load_calibrator(calibrator_path)
+    probabilities = _apply_calibration(probabilities, calibrator)
+    probabilities = probabilities[:limit]
+    output_probabilities = _clip_and_normalize(probabilities)
 
     results: list[PredictedItem] = []
-    for index, ((score, product), probability) in enumerate(zip(top_scored, probabilities)):
-        if len(results) >= limit:
-            break
-        adjusted_view_rate = product.view_rate * (0.9 + category_weight_map.get(product.category, 0.1))
+    for (score, product), probability in zip(top_scored[:limit], output_probabilities):
+        raw_view_rate = getattr(product, "view_rate", 0.0) or 0.0
+        adjusted_view_rate = raw_view_rate * (
+            0.9 + category_weight_map.get(product.category, 0.1)
+        )
         adjusted_view_rate = min(1.0, adjusted_view_rate)
         probability_percent = round(probability * 100, 1)
         results.append(
