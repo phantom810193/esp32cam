@@ -10,6 +10,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# Imports that rely on the project root being on sys.path
+from backend.advertising import CTA_JOIN_MEMBER, TEMPLATE_IMAGE_BY_ID, build_ad_context
+from backend.database import MemberProfile, Purchase
+
 # ---------------------------------------------------------------------------
 # Stub the Google Gemini SDK to avoid network calls during tests.
 # ---------------------------------------------------------------------------
@@ -54,6 +58,51 @@ def _parse_sse_payload(body: str) -> dict:
         if line.startswith("data: "):
             return json.loads(line[len("data: ") :])
     raise AssertionError("SSE payload did not contain data line")
+
+
+def test_guest_cta_uses_template_image_link():
+    profile = MemberProfile(
+        profile_id=1,
+        profile_label="wellness-gourmet",
+        name="未註冊客戶",
+        member_id="MEMHEALTH2025",
+        mall_member_id=None,
+        member_status=None,
+        joined_at=None,
+        points_balance=None,
+        gender=None,
+        birth_date=None,
+        phone=None,
+        email=None,
+        address=None,
+        occupation=None,
+        first_image_filename=None,
+    )
+    purchase = Purchase(
+        member_id="MEMHEALTH2025",
+        member_code="",
+        product_category="健康食品",
+        internal_item_code="SKU-0001",
+        item="高纖燕麥片",
+        purchased_at="2025-09-01 10:00",
+        unit_price=360.0,
+        quantity=1.0,
+        total_price=360.0,
+    )
+
+    context = build_ad_context(
+        "MEMHEALTH2025",
+        [purchase],
+        profile=profile,
+        prediction_items=[],
+        audience="guest",
+    )
+
+    expected_filename = TEMPLATE_IMAGE_BY_ID.get("ME0000", "ME0000.jpg")
+    assert context.cta_href == f"/static/images/ads/{expected_filename}"
+    assert context.cta_href.startswith("/static/images/ads/")
+    assert not context.cta_href.startswith("#")
+    assert context.cta_text in {CTA_JOIN_MEMBER, "立即加入會員"}
 
 
 def test_latest_stream_emits_latest_event(client):
